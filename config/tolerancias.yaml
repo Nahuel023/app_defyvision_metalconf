@@ -1,0 +1,12 @@
+threshold: 160
+use_channel: gray
+polarity: bright
+min_area: 40.0
+circularity_min: 0.4
+tol_xy_px: 30.0
+aspect_ratio_max: 2.5
+align_match_tol_px: 80.0
+min_match_count: 8
+consecutive_nok_frames: 5
+frame_rate_hz: 5.0
+max_response_sec: 1.0

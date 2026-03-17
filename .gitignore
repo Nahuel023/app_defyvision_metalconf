@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Generated analysis artifacts
+data/frames/
+data/output/
+
+# Large local media and ad-hoc captures
+data/videos/
+data/input/IMG_*.jpg
+data/input/WIN_*.jpg
+
+# Local service backups
+*.bak

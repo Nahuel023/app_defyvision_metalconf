@@ -24,6 +24,7 @@ def detect_holes_from_mask(
     min_area: float = 80.0,
     max_area: float | None = None,
     circularity_min: float = 0.6,
+    aspect_ratio_max: float | None = None,
 ) -> List[Hole]:
     """
     mask: binaria (agujeros=255). Devuelve lista de agujeros detectados.
@@ -45,6 +46,14 @@ def detect_holes_from_mask(
         circ = _circularity(area, per)
         if circ < circularity_min:
             continue
+
+        if aspect_ratio_max is not None:
+            x, y, w, h = cv2.boundingRect(c)
+            if min(w, h) <= 0:
+                continue
+            aspect_ratio = max(w, h) / min(w, h)
+            if aspect_ratio > aspect_ratio_max:
+                continue
 
         (x, y), r = cv2.minEnclosingCircle(c)
         holes.append(Hole(float(x), float(y), float(r), area, circ))

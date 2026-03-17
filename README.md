@@ -1,112 +1,157 @@
-﻿# app_defyvision_metalconf
+# app_defyvision_metalconf
 
-MVP (CLI) para control de calidad por visión en punzonado: detecta agujeros en imágenes y valida si el patrón coincide con el esperado para cada modelo (OK / NOK).
+Sistema de inspeccion visual para chapa punzonada. Detecta agujeros, compara contra un patron por modelo y decide `OK/NOK`.
 
-## Estado del proyecto (Marzo 2026)
+## Estado del proyecto
 
-- Estado general: `MVP funcional en consola`.
-- Flujo implementado:
-  - Carga de imágenes (`src/io/load_images.py`).
-  - Construcción y lectura de patrones por modelo (`src/patterns/*`).
-  - Pipeline de preprocesamiento, detección, comparación y anotación (`src/pipeline/*`).
-  - Guardado de resultados y evidencias (`src/io/save_results.py`).
-- Ejecución principal: `python -m src.main`.
-- Pendiente para próximas etapas:
-  - Captura desde cámara en vivo.
-  - Integración PLC/alarma.
-  - Interfaz gráfica (UI).
+- Backend de inspeccion funcional para imagenes y secuencias de frames.
+- Patron configurable por modelo en `data/patterns/<modelo>/holes.json`.
+- Tolerancias configurables en `config/tolerancias.yaml`.
+- Modo servicio/desarrollo en `tkinter`.
+- Modo operador en `PyQt6`.
+- Decision temporal implementada: declara `NOK` solo si aparece en `N` frames consecutivos.
 
-## Estructura del proyecto
+## Requisitos
 
-```text
-app_defyvision_metalconf/
-├─ config/
-│  ├─ app.yaml
-│  └─ tolerancias.yaml
-├─ data/
-│  ├─ input/                  # imágenes de entrada para pruebas
-│  ├─ output/                 # resultados generados por el sistema
-│  │  ├─ ok/
-│  │  ├─ nok/
-│  │  └─ debug/
-│  └─ patterns/               # patrones por modelo (A/B/C)
-├─ scripts/                   # atajos CLI (wrappers)
-│  ├─ build_pattern.py
-│  ├─ run_folder.py
-│  └─ run_image.py
-├─ src/                       # paquete Python principal (core)
-│  ├─ main.py                 # entrypoint CLI (python -m src.main ...)
-│  ├─ io/
-│  ├─ patterns/
-│  ├─ pipeline/
-│  └─ utils/
-├─ requirements.txt
-├─ .gitignore
-└─ README.md
-```
+- Windows + PowerShell
+- Python 3.14 o compatible
+- Git
+- FFmpeg si vas a trabajar con video
 
-## Inicialización del entorno (Windows / PowerShell)
-
-1. Crear entorno virtual:
-
-```powershell
-python -m venv .venv
-```
-
-2. Habilitar scripts en la sesión y activar el entorno:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-3. Instalar dependencias:
-
-```powershell
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-## Instalación desde GitHub
+## Instalacion en una PC nueva
 
 1. Clonar el repositorio:
 
 ```powershell
 git clone https://github.com/Nahuel023/app_defyvision_metalconf.git
-cd <repositorio>
+cd app_defyvision_metalconf
 ```
 
-2. Crear y activar entorno virtual:
+2. Crear entorno virtual:
 
 ```powershell
 python -m venv .venv
+```
+
+3. Activar el entorno:
+
+```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\.venv\Scripts\Activate.ps1
 ```
 
-3. Instalar dependencias:
+4. Instalar dependencias:
 
 ```powershell
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Ejecución rápida
-
-Procesar una carpeta de imágenes:
+5. Verificar FFmpeg:
 
 ```powershell
-python scripts/run_folder.py --help
+ffmpeg -version
 ```
 
-Procesar una imagen puntual:
+## Primer arranque en otra PC
+
+1. Abrir el proyecto en VS Code:
 
 ```powershell
-python scripts/run_image.py --help
+code .
 ```
 
-Construir patrón de modelo:
+2. Seleccionar el interprete del entorno virtual:
+
+```text
+.\.venv\Scripts\python.exe
+```
+
+3. Revisar `config/tolerancias.yaml` y ajustar si cambia camara, iluminacion o lente.
+
+4. Regenerar patron si la nueva PC va a usar otro setup optico:
 
 ```powershell
-python scripts/build_pattern.py --help
+.\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/modeloA_OK.jpg"
 ```
+
+## Modos de uso
+
+### Operador
+
+Interfaz final para operacion basica:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main operator-ui
+```
+
+Flujo esperado:
+
+1. Elegir modelo.
+2. Elegir carpeta de frames o secuencia preparada.
+3. Ejecutar `Analizar`.
+4. Usar `Play` / `Stop`.
+5. Visualizar estado `OK/NOK` y resultados frame a frame.
+
+### Servicio / Desarrollo
+
+Interfaz de calibracion y pruebas:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main gui
+```
+
+Permite:
+
+1. Ajustar tolerancias.
+2. Generar patron.
+3. Analizar imagen.
+4. Analizar carpeta.
+5. Extraer frames desde video.
+
+### Consola
+
+Generar patron:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/modeloA_OK.jpg"
+```
+
+Analizar una imagen:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main run-image --model modelo_A --img "data/input/modeloA_OK.jpg" --save
+```
+
+Analizar una carpeta con decision temporal:
+
+```powershell
+.\.venv\Scripts\python.exe -m src.main run-folder --model modelo_A --input "data/frames" --fps 5 --save
+```
+
+## Video
+
+Extraer frames desde un video con FFmpeg:
+
+```powershell
+New-Item -ItemType Directory -Force -Path "data/frames" | Out-Null
+ffmpeg -i "data/videos/video.mp4" -vf fps=2 "data/frames/frame_%04d.jpg"
+```
+
+## Portabilidad
+
+Para mover el proyecto a otra PC sin problemas:
+
+- No dependas del `.venv` actual: siempre recrealo.
+- No subas `data/output/`, `data/frames/` ni videos de prueba pesados.
+- Conserva en el repo solo codigo, configuracion y patrones base necesarios.
+- Si cambia la camara o iluminacion, recalibra y regenera el patron.
+
+## Archivos importantes
+
+- `src/main.py`: entrada principal.
+- `src/inspection.py`: backend de inspeccion.
+- `src/gui_app.py`: modo servicio.
+- `src/qt_operator_app.py`: modo operador.
+- `config/tolerancias.yaml`: parametros de deteccion y decision temporal.
+- `data/patterns/`: patrones por modelo.
