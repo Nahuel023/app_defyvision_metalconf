@@ -14,11 +14,60 @@ Sistema de inspeccion visual para chapa punzonada. Detecta agujeros, compara con
 ## Requisitos
 
 - Windows + PowerShell
-- Python 3.14 o compatible
+- Python con launcher `py`
 - Git
-- FFmpeg si vas a trabajar con video
+- FFmpeg para trabajar con video
 
-## Instalacion en una PC nueva
+## Instalacion rapida en Windows
+
+Desde la raiz del proyecto:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_windows.ps1
+```
+
+Ese script hace esto:
+
+1. Crea `.venv` si no existe.
+2. Instala dependencias Python desde `requirements.txt`.
+3. Instala `ffmpeg` con `winget` si no esta disponible.
+4. Refresca el `PATH` de la sesion actual.
+
+Tambien hay wrapper `.bat`:
+
+```powershell
+.\scripts\setup_windows.bat
+```
+
+## Actualizar el proyecto en otra PC
+
+Cuando subas cambios desde esta PC, en la otra PC alcanza con correr:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\update_windows.ps1
+```
+
+Ese script:
+
+1. Hace `git pull --ff-only`.
+2. Reinstala dependencias Python si cambiaron.
+3. Verifica `ffmpeg`.
+
+Tambien hay wrapper `.bat`:
+
+```powershell
+.\scripts\update_windows.bat
+```
+
+## Nota sobre `python was not found`
+
+En algunas instalaciones de Windows, `python` puede fallar por los aliases de Microsoft Store.
+Por eso los scripts usan:
+
+- `py` para crear el entorno virtual
+- `.\.venv\Scripts\python.exe` para ejecutar la aplicacion
+
+## Primer arranque en otra PC
 
 1. Clonar el repositorio:
 
@@ -27,49 +76,27 @@ git clone https://github.com/Nahuel023/app_defyvision_metalconf.git
 cd app_defyvision_metalconf
 ```
 
-2. Crear entorno virtual:
+2. Ejecutar setup:
 
 ```powershell
-python -m venv .venv
+powershell -ExecutionPolicy Bypass -File .\scripts\setup_windows.ps1
 ```
 
-3. Activar el entorno:
-
-```powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-```
-
-4. Instalar dependencias:
-
-```powershell
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-5. Verificar FFmpeg:
-
-```powershell
-ffmpeg -version
-```
-
-## Primer arranque en otra PC
-
-1. Abrir el proyecto en VS Code:
+3. Abrir el proyecto en VS Code:
 
 ```powershell
 code .
 ```
 
-2. Seleccionar el interprete del entorno virtual:
+4. Seleccionar el interprete:
 
 ```text
 .\.venv\Scripts\python.exe
 ```
 
-3. Revisar `config/tolerancias.yaml` y ajustar si cambia camara, iluminacion o lente.
+5. Revisar `config/tolerancias.yaml` si cambia camara, lente o iluminacion.
 
-4. Regenerar patron si la nueva PC va a usar otro setup optico:
+6. Regenerar patron si el setup optico de la nueva PC no coincide con el original:
 
 ```powershell
 .\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/modeloA_OK.jpg"
