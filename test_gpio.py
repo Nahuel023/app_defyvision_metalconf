@@ -1,5 +1,14 @@
 """
-GPIO test script - ITE IT8625 Super I/O diagnostic.
+GPIO test script - ITE IT8625 Super I/O.
+
+Root cause identified: LDN7 (GPIO) is inactive (active=0x00, SIMBA=0x0000).
+Fix: activate LDN7 and set SIMBA=0xA000, then GPIO outputs work via 0xA00-0xA07.
+
+GPIO map (CONFIG.INI - vendor confirmed):
+  Inputs:  GPI1=0xA00.0  GPI2=0xA00.2  GPI3=0xA00.7  GPI4=0xA02.0  GPI5=0xA00.4
+           GPI6=0xA03.4  GPI7=0xA04.3
+  Outputs: GPO1=0xA03.1  GPO2=0xA05.5  GPO3=0xA00.1  GPO4=0xA03.6
+           GPO5=0xA04.5  GPO6=0xA04.4  GPO7=0xA03.0
 
 Prerequisites:
   1. install_inpout_driver.bat AS ADMINISTRATOR (once)
@@ -12,6 +21,33 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INPOUT_DLL  = os.path.join(_SCRIPT_DIR, "InpOutBinaries_1501", "x64", "inpoutx64.dll")
 SIO_INDEX   = 0x2E
 SIO_DATA    = 0x2F
+
+GPIO_MAP = {
+    "GPI1": (0xA00, 0, False),
+    "GPI2": (0xA00, 2, False),
+    "GPI3": (0xA00, 7, False),
+    "GPI4": (0xA02, 0, False),
+    "GPI5": (0xA00, 4, False),
+    "GPI6": (0xA03, 4, False),
+    "GPI7": (0xA04, 3, False),
+    "GPO1": (0xA03, 1, True),
+    "GPO2": (0xA05, 5, True),
+    "GPO3": (0xA00, 1, True),
+    "GPO4": (0xA03, 6, True),
+    "GPO5": (0xA04, 5, True),
+    "GPO6": (0xA04, 4, True),
+    "GPO7": (0xA03, 0, True),
+}
+
+# Direction registers in LDN7 (bit=1 means OUTPUT)
+DIR_REGS = {
+    0xA00: 0xC0,  # GP1x
+    0xA01: 0xC1,  # GP2x
+    0xA02: 0xC2,  # GP3x
+    0xA03: 0xC3,  # GP4x
+    0xA04: 0xC4,  # GP5x
+    0xA05: 0xC5,  # GP6x
+}
 
 
 class InpOutDriver:
@@ -39,64 +75,74 @@ class InpOutDriver:
         self.out(SIO_INDEX, reg); self.out(SIO_DATA, value)
 
 
-# ── Diagnostics ──────────────────────────────────────────────────────────────
-
-def diag_global_regs(drv):
-    """Read global config registers (no LDN selected) - pin mux lives here."""
-    drv.ite_enter()
-    print("\n--- Registros globales (sin LDN) reg 0x20-0x30 ---")
-    for reg in range(0x20, 0x31):
-        val = drv.ite_read(reg)
-        print(f"  0x{reg:02X}: 0x{val:02X}  {val:08b}b")
-    drv.ite_exit()
-
-
-def diag_all_ldn_bases(drv):
-    """Read base addresses of all LDNs (0x00-0x0F)."""
-    print("\n--- Base addresses de todos los LDNs ---")
-    for ldn in range(0x10):
-        drv.ite_enter()
-        drv.ite_select_ldn(ldn)
-        active = drv.ite_read(0x30)   # activate register
-        hi     = drv.ite_read(0x60)
-        lo     = drv.ite_read(0x61)
-        hi2    = drv.ite_read(0x62)
-        lo2    = drv.ite_read(0x63)
-        drv.ite_exit()
-        base1 = (hi  << 8) | lo
-        base2 = (hi2 << 8) | lo2
-        if base1 or base2 or active:
-            print(f"  LDN 0x{ldn:02X}: active=0x{active:02X}  base1=0x{base1:04X}  base2=0x{base2:04X}")
-
-
-def diag_ldn7_regs(drv):
-    """Dump all non-zero LDN7 registers 0x20-0xFF."""
+def activate_ldn7(drv):
+    """
+    Activate LDN7 (GPIO) with SIMBA=0xA000.
+    This is the missing step — without it, GPIO outputs have no effect.
+    """
     drv.ite_enter()
     drv.ite_select_ldn(0x07)
-    print("\n--- LDN7 registros completos (no-cero) ---")
-    for reg in range(0x20, 0x100):
-        val = drv.ite_read(reg)
-        if val not in (0x00, 0xFF):
-            print(f"  0x{reg:02X}: 0x{val:02X}  {val:08b}b")
+
+    # Set SIMBA = 0xA000
+    drv.ite_write(0x60, 0xA0)  # high byte
+    drv.ite_write(0x61, 0x00)  # low byte
+
+    # Activate LDN7
+    drv.ite_write(0x30, 0x01)
+
+    # Read back to verify
+    active = drv.ite_read(0x30)
+    hi     = drv.ite_read(0x60)
+    lo     = drv.ite_read(0x61)
     drv.ite_exit()
 
-
-def diag_writable_ports(drv, start=0xA00, count=16):
-    """Find which ports accept writes."""
-    print(f"\n--- Scan de puertos escribibles 0x{start:03X}-0x{start+count-1:03X} ---")
-    for port in range(start, start + count):
-        orig = drv.inp(port)
-        drv.out(port, orig ^ 0x01)
-        rb   = drv.inp(port)
-        drv.out(port, orig)
-        flag = "ESCRIBIBLE" if rb == (orig ^ 0x01) else "solo-lectura"
-        if flag == "ESCRIBIBLE":
-            print(f"  0x{port:03X}: 0x{orig:02X} -> {flag}")
+    simba = (hi << 8) | lo
+    print(f"  LDN7 activado: active=0x{active:02X}  SIMBA=0x{simba:04X}")
+    return active == 0x01 and simba == 0xA000
 
 
-def blink_loop(drv, port, bit):
-    """Blink indefinitely until Ctrl+C."""
-    print(f"\nBlink continuo puerto=0x{port:03X} bit={bit} - Ctrl+C para parar")
+def set_gpio_output(drv, port, bit):
+    """Set a GPIO pin as output in LDN7 direction register."""
+    dir_reg = DIR_REGS.get(port)
+    if dir_reg is None:
+        print(f"  Sin registro de direccion para puerto 0x{port:03X}")
+        return
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    cur = drv.ite_read(dir_reg)
+    drv.ite_write(dir_reg, cur | (1 << bit))
+    new = drv.ite_read(dir_reg)
+    drv.ite_exit()
+    print(f"  Dir reg 0x{dir_reg:02X}: 0x{cur:02X} -> 0x{new:02X} (bit {bit} = OUTPUT)")
+
+
+def read_all_gpio(drv):
+    print("\n--- Estado GPIO ---")
+    for name, (port, bit, is_out) in GPIO_MAP.items():
+        val = drv.read_bit(port, bit)
+        kind = "OUT" if is_out else "IN "
+        print(f"  {name} [{kind}] 0x{port:03X}.{bit}: {val}")
+
+
+def blink(drv, name, cycles=5, delay=0.5):
+    port, bit, is_out = GPIO_MAP[name]
+    if not is_out:
+        print(f"{name} es entrada.")
+        return
+
+    print(f"\n--- Blink {name} (0x{port:03X} bit {bit}) ---")
+    for i in range(cycles):
+        drv.write_bit(port, bit, 0)
+        print(f"  LOW   port=0x{drv.inp(port):02X}")
+        time.sleep(delay)
+        drv.write_bit(port, bit, 1)
+        print(f"  HIGH  port=0x{drv.inp(port):02X}")
+        time.sleep(delay)
+
+
+def blink_loop(drv, name):
+    port, bit, is_out = GPIO_MAP[name]
+    print(f"Blink continuo {name} (0x{port:03X} bit {bit}) - Ctrl+C para parar")
     try:
         while True:
             drv.write_bit(port, bit, 0)
@@ -107,79 +153,45 @@ def blink_loop(drv, port, bit):
         print("\nDetenido.")
 
 
-def try_mux_and_blink(drv, port=0xA03, bit=6, dir_reg=0xC3):
-    """
-    Try setting pin mux registers to enable GPIO output, then blink.
-    For ITE IT8625, GPIO pin function select is in global config regs 0x25-0x2C.
-    """
-    print(f"\n--- Intento de habilitar mux GPIO y blink ---")
-    print(f"  Puerto=0x{port:03X}  bit={bit}  dir_reg=LDN7/0x{dir_reg:02X}")
-
-    # Step 1: Read global config regs 0x25-0x2C (pin function select)
-    drv.ite_enter()
-    print("  Registros globales de mux (0x25-0x2C) ANTES:")
-    mux_regs = {}
-    for reg in range(0x25, 0x2D):
-        mux_regs[reg] = drv.ite_read(reg)
-        print(f"    0x{reg:02X}: 0x{mux_regs[reg]:02X}  {mux_regs[reg]:08b}b")
-    drv.ite_exit()
-
-    # Step 2: Set direction as output in LDN7
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    orig_dir = drv.ite_read(dir_reg)
-    drv.ite_write(dir_reg, orig_dir | (1 << bit))
-    dir_set  = drv.ite_read(dir_reg)
-    drv.ite_exit()
-    print(f"  Direccion LDN7/0x{dir_reg:02X}: 0x{orig_dir:02X} -> 0x{dir_set:02X}")
-
-    # Step 3: Blink 5 cycles, show data register each time
-    print(f"  Blink 5 ciclos (medi todos los pines del conector con el tester):")
-    for i in range(5):
-        drv.write_bit(port, bit, 0)
-        print(f"    Ciclo {i+1} LOW:  0x{port:03X}=0x{drv.inp(port):02X}")
-        time.sleep(1)
-        drv.write_bit(port, bit, 1)
-        print(f"    Ciclo {i+1} HIGH: 0x{port:03X}=0x{drv.inp(port):02X}")
-        time.sleep(1)
-
-    # Restore direction
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    drv.ite_write(dir_reg, orig_dir)
-    drv.ite_exit()
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
 def main():
-    print("=== Test GPIO - ITE IT8625 Diagnostic ===")
+    print("=== Test GPIO - ITE IT8625 ===")
     print(f"Admin: {'SI' if ctypes.windll.shell32.IsUserAnAdmin() else 'NO - ejecutar como Administrador'}")
 
     try:
         drv = InpOutDriver()
-        print("InpOutx64 cargado OK")
+        print("InpOutx64 OK")
     except Exception as e:
-        print(f"ERROR: {e}")
-        sys.exit(1)
+        print(f"ERROR: {e}"); sys.exit(1)
 
     args = sys.argv[1:]
 
     if "--blink" in args:
-        # --blink <port_hex> <bit>
         idx  = args.index("--blink")
-        port = int(args[idx+1], 16) if len(args) > idx+1 else 0xA03
-        bit  = int(args[idx+2])     if len(args) > idx+2 else 6
-        blink_loop(drv, port, bit)
+        name = args[idx+1] if len(args) > idx+1 else "GPO4"
+        loop = "--loop" in args
 
-    elif "--mux" in args:
-        try_mux_and_blink(drv)
+        print("\n1. Activando LDN7 (GPIO)...")
+        ok = activate_ldn7(drv)
+        if not ok:
+            print("  ADVERTENCIA: verificacion fallo, continuando igual...")
+
+        print("2. Configurando pin como output...")
+        port, bit, _ = GPIO_MAP[name]
+        set_gpio_output(drv, port, bit)
+
+        print("3. Estado actual:")
+        read_all_gpio(drv)
+
+        if loop:
+            blink_loop(drv, name)
+        else:
+            blink(drv, name)
 
     else:
-        diag_global_regs(drv)
-        diag_all_ldn_bases(drv)
-        diag_ldn7_regs(drv)
-        diag_writable_ports(drv)
+        # Default: activate LDN7 and show state
+        print("\n1. Activando LDN7 (GPIO)...")
+        activate_ldn7(drv)
+        read_all_gpio(drv)
 
     print("\nTest finalizado.")
 
