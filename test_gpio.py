@@ -1,166 +1,205 @@
 """
-GPIO test script for industrial mini PC - ITE IT8625 Super I/O.
-
-Hardware confirmed: ITE IT8625, Simple I/O base = 0xA00
-  0xA00 = GP1x data, 0xA01 = GP2x data, 0xA02 = GP3x data (connector GPIO0-GPIO7)
-  0xA03 = GP4x data, 0xA04 = GP5x data, 0xA05 = GP6x data
-
-Direction registers (via LDN7 config mode, index/data at 0x2E/0x2F):
-  LDN7 reg 0xC0 = GP1x output enable (bit=1 -> output)
-  LDN7 reg 0xC1 = GP2x output enable
-  LDN7 reg 0xC2 = GP3x output enable  <-- connector GPIO0-GPIO7
-  LDN7 reg 0xC3 = GP4x output enable
-  LDN7 reg 0xC4 = GP5x output enable
-  LDN7 reg 0xC5 = GP6x output enable
+GPIO test script - ITE IT8625 Super I/O diagnostic.
 
 Prerequisites:
-  1. install_inpout_driver.bat run AS ADMINISTRATOR (once)
-  2. Run this script AS ADMINISTRATOR
+  1. install_inpout_driver.bat AS ADMINISTRATOR (once)
+  2. Run AS ADMINISTRATOR
 """
 
-import ctypes
-import sys
-import os
-import time
+import ctypes, sys, os, time
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-INPOUT_DLL = os.path.join(_SCRIPT_DIR, "InpOutBinaries_1501", "x64", "inpoutx64.dll")
-
-SIO_INDEX = 0x2E
-SIO_DATA  = 0x2F
-
-# Physical connector GPIO0-GPIO7 -> ITE GP30-GP37 -> data at 0xA02, dir at LDN7 reg 0xC2
-GPIO_DATA_PORT = 0xA02
-GPIO_DIR_REG   = 0xC2   # LDN7 register for GP3x output enable (1=output, 0=input)
-
-GPIO_PINS = {f"GPIO{i}": i for i in range(8)}  # GPIO0=bit0 ... GPIO7=bit7
+INPOUT_DLL  = os.path.join(_SCRIPT_DIR, "InpOutBinaries_1501", "x64", "inpoutx64.dll")
+SIO_INDEX   = 0x2E
+SIO_DATA    = 0x2F
 
 
 class InpOutDriver:
-    def __init__(self, dll_path: str = INPOUT_DLL):
+    def __init__(self, dll_path=INPOUT_DLL):
         if not os.path.exists(dll_path):
             raise FileNotFoundError(f"DLL no encontrada: {dll_path}")
         self._dll = ctypes.WinDLL(dll_path)
 
-    def inp(self, port: int) -> int:
+    def inp(self, port):
         return self._dll.Inp32(port) & 0xFF
 
-    def out(self, port: int, value: int):
+    def out(self, port, value):
         self._dll.Out32(port, value & 0xFF)
 
-    def read_bit(self, port: int, bit: int) -> int:
+    def read_bit(self, port, bit):
         return (self.inp(port) >> bit) & 1
 
-    def write_bit(self, port: int, bit: int, value: int):
-        current = self.inp(port)
-        new_val = (current | (1 << bit)) if value else (current & ~(1 << bit))
-        self.out(port, new_val)
+    def write_bit(self, port, bit, value):
+        cur = self.inp(port)
+        self.out(port, (cur | (1 << bit)) if value else (cur & ~(1 << bit)))
 
-    # --- ITE IT8625 config mode via LPC index/data ---
-
-    def ite_enter_config(self):
-        """Enter ITE Super I/O config mode."""
+    # ITE config mode
+    def ite_enter(self):
         for b in [0x87, 0x01, 0x55, 0x55]:
             self.out(SIO_INDEX, b)
 
-    def ite_exit_config(self):
-        """Exit ITE Super I/O config mode."""
+    def ite_exit(self):
         self.out(SIO_INDEX, 0x02)
         self.out(SIO_DATA,  0x02)
 
-    def ite_select_ldn(self, ldn: int):
-        """Select a Logical Device Number."""
+    def ite_select_ldn(self, ldn):
         self.out(SIO_INDEX, 0x07)
         self.out(SIO_DATA,  ldn)
 
-    def ite_read_reg(self, reg: int) -> int:
+    def ite_read(self, reg):
         self.out(SIO_INDEX, reg)
         return self.inp(SIO_DATA)
 
-    def ite_write_reg(self, reg: int, value: int):
+    def ite_write(self, reg, value):
         self.out(SIO_INDEX, reg)
         self.out(SIO_DATA,  value)
 
-    def ite_set_gpio_direction(self, dir_reg: int, bit: int, output: bool):
-        """Set a GPIO bit as output (True) or input (False) in LDN7."""
-        self.ite_enter_config()
-        self.ite_select_ldn(0x07)  # LDN7 = GPIO
-        current = self.ite_read_reg(dir_reg)
-        if output:
-            new_val = current | (1 << bit)
-        else:
-            new_val = current & ~(1 << bit)
-        self.ite_write_reg(dir_reg, new_val)
-        self.ite_exit_config()
-        return current, new_val
 
+# ── Diagnostics ──────────────────────────────────────────────────────────────
 
-def dump_state(drv: InpOutDriver):
-    print("\n--- Raw ports 0xA00-0xA05 ---")
-    for port in range(0xA00, 0xA06):
-        val = drv.inp(port)
-        print(f"  0x{port:03X}: 0x{val:02X}  {val:08b}b")
-
-    print("\n--- Registro de direccion GP3x (LDN7 reg 0xC2) ---")
-    drv.ite_enter_config()
+def diag_simba(drv):
+    """Read the actual Simple I/O Base Address from LDN7."""
+    drv.ite_enter()
     drv.ite_select_ldn(0x07)
-    dir_val = drv.ite_read_reg(GPIO_DIR_REG)
-    drv.ite_exit_config()
-    print(f"  0xC2 = 0x{dir_val:02X}  {dir_val:08b}b")
-    print(f"  (bit=1 -> output, bit=0 -> input)")
-    for i in range(8):
-        direction = "OUTPUT" if (dir_val >> i) & 1 else "input "
-        data_val  = drv.read_bit(GPIO_DATA_PORT, i)
-        print(f"  GPIO{i}: {direction}  valor={data_val}")
+    hi = drv.ite_read(0x60)
+    lo = drv.ite_read(0x61)
+    drv.ite_exit()
+    simba = (hi << 8) | lo
+    print(f"\n--- SIMBA (LDN7 reg 0x60/0x61) ---")
+    print(f"  Base address: 0x{simba:04X}")
+    print(f"  Esperado:     0xA000  {'OK' if simba == 0xA000 else 'DIFERENTE - ajustar mapeo'}")
+    return simba
 
 
-def blink(drv: InpOutDriver, gpio_name: str, cycles: int = 3, delay: float = 0.5):
-    bit = GPIO_PINS[gpio_name]
-    print(f"\n--- Blink {gpio_name} (bit {bit}, puerto 0x{GPIO_DATA_PORT:03X}) ---")
+def diag_direction_regs(drv):
+    """Read and show all GPIO direction registers (LDN7 0xC0-0xC7)."""
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    print("\n--- Registros de direccion LDN7 (0xC0-0xC7) ---")
+    regs = {}
+    for reg in range(0xC0, 0xC8):
+        val = drv.ite_read(reg)
+        regs[reg] = val
+        group = reg - 0xC0 + 1
+        print(f"  0x{reg:02X} (GP{group}x): 0x{val:02X}  {val:08b}b")
+    drv.ite_exit()
+    return regs
 
-    # 1. Configure as output via config mode
-    orig, new = drv.ite_set_gpio_direction(GPIO_DIR_REG, bit, output=True)
-    print(f"  Direccion: 0x{orig:02X} -> 0x{new:02X} (bit {bit} = OUTPUT)")
 
-    # 2. Blink
+def diag_direction_write_verify(drv, reg=0xC2, bit=1):
+    """Write a bit to a direction reg and read it back to confirm it sticks."""
+    print(f"\n--- Verificacion escritura reg 0x{reg:02X} bit {bit} ---")
+
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    original = drv.ite_read(reg)
+    drv.ite_exit()
+    print(f"  Antes:  0x{original:02X}")
+
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    new_val = original | (1 << bit)
+    drv.ite_write(reg, new_val)
+    drv.ite_exit()
+
+    # Read back after exiting config mode
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    readback = drv.ite_read(reg)
+    drv.ite_exit()
+    print(f"  Escrito: 0x{new_val:02X}  Leido de vuelta: 0x{readback:02X}  {'OK persiste' if readback == new_val else 'NO persiste - registro de solo lectura o incorrecto'}")
+
+    # Restore
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    drv.ite_write(reg, original)
+    drv.ite_exit()
+    return readback == new_val
+
+
+def diag_writable_ports(drv, base=0xA00, count=8):
+    """Find which ports actually accept writes by toggling bit 0 and reading back."""
+    print(f"\n--- Scan de puertos escribibles (0x{base:03X} - 0x{base+count-1:03X}) ---")
+    print(f"  (escribe bit 0, lee de vuelta, restaura)")
+    for port in range(base, base + count):
+        original = drv.inp(port)
+        toggled  = original ^ 0x01          # flip bit 0
+        drv.out(port, toggled)
+        readback = drv.inp(port)
+        drv.out(port, original)             # restore
+        writable = readback == toggled
+        flag = "ESCRIBIBLE" if writable else "solo-lectura"
+        print(f"  0x{port:03X}: orig=0x{original:02X}  escrito=0x{toggled:02X}  leido=0x{readback:02X}  -> {flag}")
+
+
+def diag_ldn7_full(drv):
+    """Dump full LDN7 config registers 0x20-0xFF."""
+    print("\n--- LDN7 registros completos (solo no-cero) ---")
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    for reg in range(0x20, 0x100):
+        val = drv.ite_read(reg)
+        if val not in (0x00, 0xFF):
+            print(f"  Reg 0x{reg:02X}: 0x{val:02X}  {val:08b}b")
+    drv.ite_exit()
+
+
+def blink(drv, port, bit, cycles=3, delay=0.5, dir_reg=0xC2):
+    """Blink a GPIO: set direction OUTPUT in config space, then toggle data port."""
+    print(f"\n--- Blink puerto=0x{port:03X} bit={bit} dir_reg=0x{dir_reg:02X} ---")
+
+    # Set direction as output
+    drv.ite_enter()
+    drv.ite_select_ldn(0x07)
+    orig_dir = drv.ite_read(dir_reg)
+    drv.ite_write(dir_reg, orig_dir | (1 << bit))
+    # Verify
+    set_dir = drv.ite_read(dir_reg)
+    drv.ite_exit()
+    print(f"  Direccion: 0x{orig_dir:02X} -> 0x{set_dir:02X}")
+
     for i in range(cycles):
-        drv.write_bit(GPIO_DATA_PORT, bit, 0)
-        print(f"  {gpio_name} -> LOW   (0xA02 = 0x{drv.inp(GPIO_DATA_PORT):02X})")
+        drv.write_bit(port, bit, 0)
+        low_read = drv.inp(port)
         time.sleep(delay)
-        drv.write_bit(GPIO_DATA_PORT, bit, 1)
-        print(f"  {gpio_name} -> HIGH  (0xA02 = 0x{drv.inp(GPIO_DATA_PORT):02X})")
+        drv.write_bit(port, bit, 1)
+        high_read = drv.inp(port)
         time.sleep(delay)
+        print(f"  Ciclo {i+1}: LOW=0x{low_read:02X}  HIGH=0x{high_read:02X}  {'dato cambia OK' if low_read != high_read else 'dato NO cambia'}")
 
-    # 3. Restore original direction
-    drv.ite_enter_config()
+    # Restore direction
+    drv.ite_enter()
     drv.ite_select_ldn(0x07)
-    drv.ite_write_reg(GPIO_DIR_REG, orig)
-    drv.ite_exit_config()
-    print(f"  Direccion restaurada a 0x{orig:02X}")
+    drv.ite_write(dir_reg, orig_dir)
+    drv.ite_exit()
 
+
+# ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    is_admin = ctypes.windll.shell32.IsUserAnAdmin()
-    print("=== Test GPIO - DEFYVISION Metalconf (ITE IT8625) ===")
-    print(f"Admin: {'SI' if is_admin else 'NO - ejecutar como Administrador'}")
+    print("=== Test GPIO - ITE IT8625 Diagnostic ===")
+    print(f"Admin: {'SI' if ctypes.windll.shell32.IsUserAnAdmin() else 'NO - ejecutar como Administrador'}")
 
     try:
         drv = InpOutDriver()
         print("InpOutx64 cargado OK")
-    except FileNotFoundError as e:
-        print(f"\nERROR: {e}")
+    except Exception as e:
+        print(f"ERROR: {e}")
         sys.exit(1)
 
-    dump_state(drv)
-
     if "--blink" in sys.argv:
+        # Usage: --blink <port_hex> <bit> [dir_reg_hex]
         idx = sys.argv.index("--blink")
-        target = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "GPIO1"
-        if target not in GPIO_PINS:
-            print(f"ERROR: {target} no valido. Usar GPIO0-GPIO7.")
-            sys.exit(1)
-        blink(drv, target)
-        print("\nBlink completo.")
+        port    = int(sys.argv[idx+1], 16) if len(sys.argv) > idx+1 else 0xA02
+        bit     = int(sys.argv[idx+2])     if len(sys.argv) > idx+2 else 1
+        dir_reg = int(sys.argv[idx+3], 16) if len(sys.argv) > idx+3 else 0xC2
+        blink(drv, port, bit, dir_reg=dir_reg)
+    else:
+        simba = diag_simba(drv)
+        diag_direction_regs(drv)
+        diag_direction_write_verify(drv)
+        diag_writable_ports(drv)
+        diag_ldn7_full(drv)
 
     print("\nTest finalizado.")
 
