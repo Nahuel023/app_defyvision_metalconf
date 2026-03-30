@@ -20,152 +20,128 @@ class InpOutDriver:
             raise FileNotFoundError(f"DLL no encontrada: {dll_path}")
         self._dll = ctypes.WinDLL(dll_path)
 
-    def inp(self, port):
-        return self._dll.Inp32(port) & 0xFF
-
-    def out(self, port, value):
-        self._dll.Out32(port, value & 0xFF)
-
-    def read_bit(self, port, bit):
-        return (self.inp(port) >> bit) & 1
-
+    def inp(self, port): return self._dll.Inp32(port) & 0xFF
+    def out(self, port, value): self._dll.Out32(port, value & 0xFF)
+    def read_bit(self, port, bit): return (self.inp(port) >> bit) & 1
     def write_bit(self, port, bit, value):
         cur = self.inp(port)
         self.out(port, (cur | (1 << bit)) if value else (cur & ~(1 << bit)))
 
-    # ITE config mode
     def ite_enter(self):
-        for b in [0x87, 0x01, 0x55, 0x55]:
-            self.out(SIO_INDEX, b)
-
+        for b in [0x87, 0x01, 0x55, 0x55]: self.out(SIO_INDEX, b)
     def ite_exit(self):
-        self.out(SIO_INDEX, 0x02)
-        self.out(SIO_DATA,  0x02)
-
+        self.out(SIO_INDEX, 0x02); self.out(SIO_DATA, 0x02)
     def ite_select_ldn(self, ldn):
-        self.out(SIO_INDEX, 0x07)
-        self.out(SIO_DATA,  ldn)
-
+        self.out(SIO_INDEX, 0x07); self.out(SIO_DATA, ldn)
     def ite_read(self, reg):
-        self.out(SIO_INDEX, reg)
-        return self.inp(SIO_DATA)
-
+        self.out(SIO_INDEX, reg); return self.inp(SIO_DATA)
     def ite_write(self, reg, value):
-        self.out(SIO_INDEX, reg)
-        self.out(SIO_DATA,  value)
+        self.out(SIO_INDEX, reg); self.out(SIO_DATA, value)
 
 
 # ── Diagnostics ──────────────────────────────────────────────────────────────
 
-def diag_simba(drv):
-    """Read the actual Simple I/O Base Address from LDN7."""
+def diag_global_regs(drv):
+    """Read global config registers (no LDN selected) - pin mux lives here."""
     drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    hi = drv.ite_read(0x60)
-    lo = drv.ite_read(0x61)
-    drv.ite_exit()
-    simba = (hi << 8) | lo
-    print(f"\n--- SIMBA (LDN7 reg 0x60/0x61) ---")
-    print(f"  Base address: 0x{simba:04X}")
-    print(f"  Esperado:     0xA000  {'OK' if simba == 0xA000 else 'DIFERENTE - ajustar mapeo'}")
-    return simba
-
-
-def diag_direction_regs(drv):
-    """Read and show all GPIO direction registers (LDN7 0xC0-0xC7)."""
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    print("\n--- Registros de direccion LDN7 (0xC0-0xC7) ---")
-    regs = {}
-    for reg in range(0xC0, 0xC8):
+    print("\n--- Registros globales (sin LDN) reg 0x20-0x30 ---")
+    for reg in range(0x20, 0x31):
         val = drv.ite_read(reg)
-        regs[reg] = val
-        group = reg - 0xC0 + 1
-        print(f"  0x{reg:02X} (GP{group}x): 0x{val:02X}  {val:08b}b")
-    drv.ite_exit()
-    return regs
-
-
-def diag_direction_write_verify(drv, reg=0xC2, bit=1):
-    """Write a bit to a direction reg and read it back to confirm it sticks."""
-    print(f"\n--- Verificacion escritura reg 0x{reg:02X} bit {bit} ---")
-
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    original = drv.ite_read(reg)
-    drv.ite_exit()
-    print(f"  Antes:  0x{original:02X}")
-
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    new_val = original | (1 << bit)
-    drv.ite_write(reg, new_val)
+        print(f"  0x{reg:02X}: 0x{val:02X}  {val:08b}b")
     drv.ite_exit()
 
-    # Read back after exiting config mode
+
+def diag_all_ldn_bases(drv):
+    """Read base addresses of all LDNs (0x00-0x0F)."""
+    print("\n--- Base addresses de todos los LDNs ---")
+    for ldn in range(0x10):
+        drv.ite_enter()
+        drv.ite_select_ldn(ldn)
+        active = drv.ite_read(0x30)   # activate register
+        hi     = drv.ite_read(0x60)
+        lo     = drv.ite_read(0x61)
+        hi2    = drv.ite_read(0x62)
+        lo2    = drv.ite_read(0x63)
+        drv.ite_exit()
+        base1 = (hi  << 8) | lo
+        base2 = (hi2 << 8) | lo2
+        if base1 or base2 or active:
+            print(f"  LDN 0x{ldn:02X}: active=0x{active:02X}  base1=0x{base1:04X}  base2=0x{base2:04X}")
+
+
+def diag_ldn7_regs(drv):
+    """Dump all non-zero LDN7 registers 0x20-0xFF."""
     drv.ite_enter()
     drv.ite_select_ldn(0x07)
-    readback = drv.ite_read(reg)
-    drv.ite_exit()
-    print(f"  Escrito: 0x{new_val:02X}  Leido de vuelta: 0x{readback:02X}  {'OK persiste' if readback == new_val else 'NO persiste - registro de solo lectura o incorrecto'}")
-
-    # Restore
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
-    drv.ite_write(reg, original)
-    drv.ite_exit()
-    return readback == new_val
-
-
-def diag_writable_ports(drv, base=0xA00, count=8):
-    """Find which ports actually accept writes by toggling bit 0 and reading back."""
-    print(f"\n--- Scan de puertos escribibles (0x{base:03X} - 0x{base+count-1:03X}) ---")
-    print(f"  (escribe bit 0, lee de vuelta, restaura)")
-    for port in range(base, base + count):
-        original = drv.inp(port)
-        toggled  = original ^ 0x01          # flip bit 0
-        drv.out(port, toggled)
-        readback = drv.inp(port)
-        drv.out(port, original)             # restore
-        writable = readback == toggled
-        flag = "ESCRIBIBLE" if writable else "solo-lectura"
-        print(f"  0x{port:03X}: orig=0x{original:02X}  escrito=0x{toggled:02X}  leido=0x{readback:02X}  -> {flag}")
-
-
-def diag_ldn7_full(drv):
-    """Dump full LDN7 config registers 0x20-0xFF."""
-    print("\n--- LDN7 registros completos (solo no-cero) ---")
-    drv.ite_enter()
-    drv.ite_select_ldn(0x07)
+    print("\n--- LDN7 registros completos (no-cero) ---")
     for reg in range(0x20, 0x100):
         val = drv.ite_read(reg)
         if val not in (0x00, 0xFF):
-            print(f"  Reg 0x{reg:02X}: 0x{val:02X}  {val:08b}b")
+            print(f"  0x{reg:02X}: 0x{val:02X}  {val:08b}b")
     drv.ite_exit()
 
 
-def blink(drv, port, bit, cycles=3, delay=0.5, dir_reg=0xC2):
-    """Blink a GPIO: set direction OUTPUT in config space, then toggle data port."""
-    print(f"\n--- Blink puerto=0x{port:03X} bit={bit} dir_reg=0x{dir_reg:02X} ---")
+def diag_writable_ports(drv, start=0xA00, count=16):
+    """Find which ports accept writes."""
+    print(f"\n--- Scan de puertos escribibles 0x{start:03X}-0x{start+count-1:03X} ---")
+    for port in range(start, start + count):
+        orig = drv.inp(port)
+        drv.out(port, orig ^ 0x01)
+        rb   = drv.inp(port)
+        drv.out(port, orig)
+        flag = "ESCRIBIBLE" if rb == (orig ^ 0x01) else "solo-lectura"
+        if flag == "ESCRIBIBLE":
+            print(f"  0x{port:03X}: 0x{orig:02X} -> {flag}")
 
-    # Set direction as output
+
+def blink_loop(drv, port, bit):
+    """Blink indefinitely until Ctrl+C."""
+    print(f"\nBlink continuo puerto=0x{port:03X} bit={bit} - Ctrl+C para parar")
+    try:
+        while True:
+            drv.write_bit(port, bit, 0)
+            time.sleep(1)
+            drv.write_bit(port, bit, 1)
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nDetenido.")
+
+
+def try_mux_and_blink(drv, port=0xA03, bit=6, dir_reg=0xC3):
+    """
+    Try setting pin mux registers to enable GPIO output, then blink.
+    For ITE IT8625, GPIO pin function select is in global config regs 0x25-0x2C.
+    """
+    print(f"\n--- Intento de habilitar mux GPIO y blink ---")
+    print(f"  Puerto=0x{port:03X}  bit={bit}  dir_reg=LDN7/0x{dir_reg:02X}")
+
+    # Step 1: Read global config regs 0x25-0x2C (pin function select)
+    drv.ite_enter()
+    print("  Registros globales de mux (0x25-0x2C) ANTES:")
+    mux_regs = {}
+    for reg in range(0x25, 0x2D):
+        mux_regs[reg] = drv.ite_read(reg)
+        print(f"    0x{reg:02X}: 0x{mux_regs[reg]:02X}  {mux_regs[reg]:08b}b")
+    drv.ite_exit()
+
+    # Step 2: Set direction as output in LDN7
     drv.ite_enter()
     drv.ite_select_ldn(0x07)
     orig_dir = drv.ite_read(dir_reg)
     drv.ite_write(dir_reg, orig_dir | (1 << bit))
-    # Verify
-    set_dir = drv.ite_read(dir_reg)
+    dir_set  = drv.ite_read(dir_reg)
     drv.ite_exit()
-    print(f"  Direccion: 0x{orig_dir:02X} -> 0x{set_dir:02X}")
+    print(f"  Direccion LDN7/0x{dir_reg:02X}: 0x{orig_dir:02X} -> 0x{dir_set:02X}")
 
-    for i in range(cycles):
+    # Step 3: Blink 5 cycles, show data register each time
+    print(f"  Blink 5 ciclos (medi todos los pines del conector con el tester):")
+    for i in range(5):
         drv.write_bit(port, bit, 0)
-        low_read = drv.inp(port)
-        time.sleep(delay)
+        print(f"    Ciclo {i+1} LOW:  0x{port:03X}=0x{drv.inp(port):02X}")
+        time.sleep(1)
         drv.write_bit(port, bit, 1)
-        high_read = drv.inp(port)
-        time.sleep(delay)
-        print(f"  Ciclo {i+1}: LOW=0x{low_read:02X}  HIGH=0x{high_read:02X}  {'dato cambia OK' if low_read != high_read else 'dato NO cambia'}")
+        print(f"    Ciclo {i+1} HIGH: 0x{port:03X}=0x{drv.inp(port):02X}")
+        time.sleep(1)
 
     # Restore direction
     drv.ite_enter()
@@ -187,19 +163,23 @@ def main():
         print(f"ERROR: {e}")
         sys.exit(1)
 
-    if "--blink" in sys.argv:
-        # Usage: --blink <port_hex> <bit> [dir_reg_hex]
-        idx = sys.argv.index("--blink")
-        port    = int(sys.argv[idx+1], 16) if len(sys.argv) > idx+1 else 0xA02
-        bit     = int(sys.argv[idx+2])     if len(sys.argv) > idx+2 else 1
-        dir_reg = int(sys.argv[idx+3], 16) if len(sys.argv) > idx+3 else 0xC2
-        blink(drv, port, bit, dir_reg=dir_reg)
+    args = sys.argv[1:]
+
+    if "--blink" in args:
+        # --blink <port_hex> <bit>
+        idx  = args.index("--blink")
+        port = int(args[idx+1], 16) if len(args) > idx+1 else 0xA03
+        bit  = int(args[idx+2])     if len(args) > idx+2 else 6
+        blink_loop(drv, port, bit)
+
+    elif "--mux" in args:
+        try_mux_and_blink(drv)
+
     else:
-        simba = diag_simba(drv)
-        diag_direction_regs(drv)
-        diag_direction_write_verify(drv)
+        diag_global_regs(drv)
+        diag_all_ldn_bases(drv)
+        diag_ldn7_regs(drv)
         diag_writable_ports(drv)
-        diag_ldn7_full(drv)
 
     print("\nTest finalizado.")
 
