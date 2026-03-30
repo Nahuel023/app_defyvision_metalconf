@@ -5,7 +5,9 @@ Prerequisites:
   1. Run install_inpout_driver.bat AS ADMINISTRATOR (once per machine)
   2. Run this script AS ADMINISTRATOR
 
-GPIO map from CONFIG.INI (setup_prov_pc/IBC_SMOOTH/CONFIG.INI)
+GPIO map from vendor connector diagram:
+  GPIO0-GPIO7 all on port 0xA02, bits 0-7
+  Direction (IN/OUT) configurable per pin - all treated as bidirectional for testing.
 """
 
 import ctypes
@@ -17,23 +19,20 @@ import time
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INPOUT_DLL = os.path.join(_SCRIPT_DIR, "InpOutBinaries_1501", "x64", "inpoutx64.dll")
 
-# --- GPIO map from CONFIG.INI ---
+# --- GPIO map from vendor connector diagram ---
+# Physical connector: GPIO0-GPIO7 all on port 0xA02
+# is_output=True means the BIOS/config sets it as output; False = input.
+# All are treated as bidirectional for testing purposes.
 GPIO_MAP = {
     # name: (port_addr, bit, is_output)
-    "GPI1": (0xA00, 0, False),
-    "GPI2": (0xA00, 2, False),
-    "GPI3": (0xA00, 7, False),
-    "GPI4": (0xA02, 0, False),
-    "GPI5": (0xA00, 4, False),
-    "GPI6": (0xA03, 4, False),
-    "GPI7": (0xA04, 3, False),
-    "GPO1": (0xA03, 1, True),
-    "GPO2": (0xA05, 5, True),
-    "GPO3": (0xA00, 1, True),
-    "GPO4": (0xA03, 6, True),
-    "GPO5": (0xA04, 5, True),
-    "GPO6": (0xA04, 4, True),
-    "GPO7": (0xA03, 0, True),
+    "GPIO0": (0xA02, 0, True),
+    "GPIO1": (0xA02, 1, True),
+    "GPIO2": (0xA02, 2, True),
+    "GPIO3": (0xA02, 3, True),
+    "GPIO4": (0xA02, 4, True),
+    "GPIO5": (0xA02, 5, True),
+    "GPIO6": (0xA02, 6, True),
+    "GPIO7": (0xA02, 7, True),
 }
 
 
@@ -72,11 +71,10 @@ class GPIOController:
             raise ValueError(f"{name} es entrada, no se puede escribir.")
         self._drv.write_bit(port, bit, value)
 
-    def read_all_inputs(self) -> dict:
+    def read_all(self) -> dict:
         return {
             name: self._drv.read_bit(port, bit)
-            for name, (port, bit, is_output) in GPIO_MAP.items()
-            if not is_output
+            for name, (port, bit, _) in GPIO_MAP.items()
         }
 
     def dump_raw_ports(self):
@@ -109,9 +107,9 @@ def main():
     # 1. Valores raw de todos los puertos GPIO
     gpio.dump_raw_ports()
 
-    # 2. Lectura de todas las entradas
-    print("\n--- Estado de entradas (GPI) ---")
-    for name, val in gpio.read_all_inputs().items():
+    # 2. Lectura de todos los GPIO
+    print("\n--- Estado de GPIO0-GPIO7 (puerto 0xA02) ---")
+    for name, val in gpio.read_all().items():
         print(f"  {name}: {val}")
 
     # 3. Blink en GPO1 si se pasa --blink
