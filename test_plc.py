@@ -1,6 +1,6 @@
 """
-PLC Coolmay L02M32T - Test MC Protocol (pymcprotocol)
-IP: 192.168.10.175  Puerto: 5556
+PLC Coolmay L02M32T - Modbus TCP
+IP: 192.168.10.175  Puerto: 502
 
 Uso:
   python test_plc.py            → scan + menu interactivo
@@ -11,55 +11,85 @@ import argparse
 import sys
 
 try:
-    import pymcprotocol
+    from pymodbus.client import ModbusTcpClient
 except ImportError:
-    print("Instala pymcprotocol: pip install pymcprotocol")
+    print("Instala pymodbus: pip install pymodbus")
     sys.exit(1)
 
 PLC_IP   = "192.168.10.175"
-PLC_PORT = 5556
+PLC_PORT = 502
+UNIT_ID  = 1
 
 X_COUNT = 16
 Y_COUNT = 16
 
+# Ajustar si el PLC mapea X/Y en un offset distinto
+X_BASE = 0
+Y_BASE = 0
+
 
 def connect():
-    plc = pymcprotocol.Type3E()
-    plc.connect(PLC_IP, PLC_PORT)
+    client = ModbusTcpClient(PLC_IP, port=PLC_PORT, timeout=5)
+    if not client.connect():
+        print(f"[ERROR] No se pudo conectar a {PLC_IP}:{PLC_PORT}")
+        sys.exit(1)
     print(f"[OK] Conectado a {PLC_IP}:{PLC_PORT}")
-    return plc
+    return client
 
 
-def print_inputs(plc):
-    try:
-        data = plc.batchread_bitunits(headdevice="X0", readsize=X_COUNT)
-        print("\n--- Entradas X ---")
-        for i, v in enumerate(data):
-            print(f"  X{i}: {'1 (ON)' if v else '0 (off)'}")
-    except Exception as e:
-        print(f"[ERROR] read X: {e}")
+def print_inputs(client):
+    r = client.read_discrete_inputs(X_BASE, X_COUNT)
+    if r.isError():
+        # Algunos PLCs mapean entradas como coils en lugar de discrete inputs
+        r = client.read_coils(X_BASE, X_COUNT)
+    if r.isError():
+        print(f"[ERROR] read X: {r}")
+        return
+    print("\n--- Entradas X ---")
+    for i, v in enumerate(r.bits[:X_COUNT]):
+        print(f"  X{i}: {'1 (ON)' if v else '0 (off)'}")
 
 
-def print_outputs(plc):
-    try:
-        data = plc.batchread_bitunits(headdevice="Y0", readsize=Y_COUNT)
-        print("\n--- Salidas Y ---")
-        for i, v in enumerate(data):
-            print(f"  Y{i}: {'1 (ON)' if v else '0 (off)'}")
-    except Exception as e:
-        print(f"[ERROR] read Y: {e}")
+def print_outputs(client):
+    r = client.read_coils(Y_BASE, Y_COUNT)
+    if r.isError():
+        print(f"[ERROR] read Y: {r}")
+        return
+    print("\n--- Salidas Y ---")
+    for i, v in enumerate(r.bits[:Y_COUNT]):
+        print(f"  Y{i}: {'1 (ON)' if v else '0 (off)'}")
 
 
-def set_output(plc, y_num, value: bool):
-    device = f"Y{y_num}"
-    try:
-        plc.batchwrite_bitunits(headdevice=device, values=[int(value)])
-        print(f"[OK] {device} → {'ON' if value else 'OFF'}")
-    except Exception as e:
-        print(f"[ERROR] write {device}: {e}")
+def set_output(client, y_num, value: bool):
+    r = client.write_coil(Y_BASE + y_num, value)
+    if r.isError():
+        print(f"[ERROR] write Y{y_num}: {r}")
+    else:
+        print(f"[OK] Y{y_num} → {'ON' if value else 'OFF'}")
 
 
-def menu(plc):
+def scan(client):
+    """Escanea distintos rangos para encontrar el mapeo X/Y del PLC."""
+    print("\n--- Scan coils FC01 ---")
+    for base in [0, 0x400, 0x500, 0x800, 0x1000]:
+        r = client.read_coils(base, 16)
+        if not r.isError():
+            vals = [int(b) for b in r.bits[:16]]
+            print(f"  0x{base:04X}: {vals}")
+        else:
+            print(f"  0x{base:04X}: ERROR")
+
+    print("\n--- Scan discrete inputs FC02 ---")
+    for base in [0, 0x400, 0x500, 0x800, 0x1000]:
+        r = client.read_discrete_inputs(base, 16)
+        if not r.isError():
+            vals = [int(b) for b in r.bits[:16]]
+            print(f"  0x{base:04X}: {vals}")
+        else:
+            print(f"  0x{base:04X}: ERROR")
+
+
+def menu(client):
     while True:
         print("\n========= MENU PLC =========")
         print("  1. Leer entradas X")
@@ -71,13 +101,13 @@ def menu(plc):
         op = input("Opcion: ").strip()
 
         if op == "1":
-            print_inputs(plc)
+            print_inputs(client)
         elif op == "2":
-            print_outputs(plc)
+            print_outputs(client)
         elif op in ("3", "4"):
             try:
                 n = int(input("Numero de salida (ej: 0 para Y0): "))
-                set_output(plc, n, op == "3")
+                set_output(client, n, op == "3")
             except ValueError:
                 print("Numero invalido.")
         elif op == "5":
@@ -89,17 +119,19 @@ def menu(plc):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--scan", action="store_true",
-                        help="Solo muestra estado de X e Y")
+                        help="Escanea rangos Modbus para encontrar el mapeo")
     args = parser.parse_args()
 
-    plc = connect()
+    client = connect()
     try:
-        print_inputs(plc)
-        print_outputs(plc)
-        if not args.scan:
-            menu(plc)
+        if args.scan:
+            scan(client)
+        else:
+            print_inputs(client)
+            print_outputs(client)
+            menu(client)
     finally:
-        plc.close()
+        client.close()
         print("[OK] Desconectado.")
 
 
