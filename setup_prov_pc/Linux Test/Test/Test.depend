@@ -1,0 +1,8 @@
+# depslib dependency file v1.0
+1663834460 source:/home/user/Smooth/Test/main.cpp
+	<iostream>
+	"Smooth.h"
+
+1663831563 /home/user/Smooth/Test/Smooth.h
+	<stdbool.h>
+

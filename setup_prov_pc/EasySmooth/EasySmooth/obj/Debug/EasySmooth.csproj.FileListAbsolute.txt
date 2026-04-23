@@ -1,0 +1,9 @@
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.csproj.AssemblyReference.cache
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.Main.resources
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.Properties.Resources.resources
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.csproj.GenerateResource.cache
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.csproj.CoreCompileInputs.cache
+C:\Users\John\Desktop\Example\C#\EasySmooth\bin\Debug\EasySmooth.exe
+C:\Users\John\Desktop\Example\C#\EasySmooth\bin\Debug\EasySmooth.pdb
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.exe
+C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Debug\EasySmooth.pdb

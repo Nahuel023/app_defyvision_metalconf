@@ -19,8 +19,8 @@ import ctypes, sys, os, time
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 INPOUT_DLL  = os.path.join(_SCRIPT_DIR, "InpOutBinaries_1501", "x64", "inpoutx64.dll")
-SIO_INDEX   = 0x4E  # Linux vendor code uses 0x4E/0x4F (try if 0x2E/0x2F fails)
-SIO_DATA    = 0x4F
+SIO_INDEX   = 0x2E
+SIO_DATA    = 0x2F
 
 GPIO_MAP = {
     "GPI1": (0xA00, 0, False),

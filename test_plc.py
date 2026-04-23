@@ -23,9 +23,9 @@ UNIT_ID  = 1
 X_COUNT = 16
 Y_COUNT = 16
 
-# Ajustar si el PLC mapea X/Y en un offset distinto
-X_BASE = 0
-Y_BASE = 0
+# CX3G (Coolmay): Salidas Y → Coils 0x3300, Entradas X → Discrete Inputs 0x3400
+X_BASE = 0x3400
+Y_BASE = 0x3300
 
 
 def connect():
@@ -38,10 +38,9 @@ def connect():
 
 
 def print_inputs(client):
-    r = client.read_discrete_inputs(X_BASE, X_COUNT)
+    r = client.read_discrete_inputs(X_BASE, count=X_COUNT, device_id=UNIT_ID)
     if r.isError():
-        # Algunos PLCs mapean entradas como coils en lugar de discrete inputs
-        r = client.read_coils(X_BASE, X_COUNT)
+        r = client.read_coils(X_BASE, count=X_COUNT, device_id=UNIT_ID)
     if r.isError():
         print(f"[ERROR] read X: {r}")
         return
@@ -51,7 +50,7 @@ def print_inputs(client):
 
 
 def print_outputs(client):
-    r = client.read_coils(Y_BASE, Y_COUNT)
+    r = client.read_coils(Y_BASE, count=Y_COUNT, device_id=UNIT_ID)
     if r.isError():
         print(f"[ERROR] read Y: {r}")
         return
@@ -61,7 +60,7 @@ def print_outputs(client):
 
 
 def set_output(client, y_num, value: bool):
-    r = client.write_coil(Y_BASE + y_num, value)
+    r = client.write_coil(Y_BASE + y_num, value, device_id=UNIT_ID)
     if r.isError():
         print(f"[ERROR] write Y{y_num}: {r}")
     else:
@@ -70,21 +69,23 @@ def set_output(client, y_num, value: bool):
 
 def scan(client):
     """Escanea distintos rangos para encontrar el mapeo X/Y del PLC."""
-    print("\n--- Scan coils FC01 ---")
-    for base in [0, 0x400, 0x500, 0x800, 0x1000]:
-        r = client.read_coils(base, 16)
+    print("\n--- Scan coils FC01 (salidas Y) ---")
+    for base in [0, 0x400, 0x500, 0x800, 0x1000, 0x3300, 0x3400]:
+        r = client.read_coils(base, count=16, device_id=UNIT_ID)
         if not r.isError():
             vals = [int(b) for b in r.bits[:16]]
-            print(f"  0x{base:04X}: {vals}")
+            marker = " ← Y_BASE" if base == Y_BASE else ""
+            print(f"  0x{base:04X}: {vals}{marker}")
         else:
             print(f"  0x{base:04X}: ERROR")
 
-    print("\n--- Scan discrete inputs FC02 ---")
-    for base in [0, 0x400, 0x500, 0x800, 0x1000]:
-        r = client.read_discrete_inputs(base, 16)
+    print("\n--- Scan discrete inputs FC02 (entradas X) ---")
+    for base in [0, 0x400, 0x500, 0x800, 0x1000, 0x3300, 0x3400]:
+        r = client.read_discrete_inputs(base, count=16, device_id=UNIT_ID)
         if not r.isError():
             vals = [int(b) for b in r.bits[:16]]
-            print(f"  0x{base:04X}: {vals}")
+            marker = " ← X_BASE" if base == X_BASE else ""
+            print(f"  0x{base:04X}: {vals}{marker}")
         else:
             print(f"  0x{base:04X}: ERROR")
 

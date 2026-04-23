@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc:*)",
+      "Bash(find 'c:/DEFYMOTION/DEFYVISION - Metalconf/app_defyvision_metalconf/setup_prov_pc' -type f -name README* -o -name *.pdf -o -name *.txt)",
+      "Bash(.venv\\\\Scripts\\\\pip.exe install *)",
+      "Bash(.venv/Scripts/pip.exe install *)",
+      "Bash(.venv/Scripts/python.exe -c \"import pymelsec; print\\(dir\\(pymelsec\\)\\); from pymelsec import Type3E, Type1E; import inspect; print\\(inspect.signature\\(Type3E.__init__\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from pymelsec import Type3E; import inspect; print\\(inspect.signature\\(Type3E.__init__\\)\\); print\\([m for m in dir\\(Type3E\\) if not m.startswith\\('_'\\)]\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from pymelsec import Type3E; import inspect; print\\('batch_read:', inspect.signature\\(Type3E.batch_read\\)\\); print\\('batch_write:', inspect.signature\\(Type3E.batch_write\\)\\); print\\('connect:', inspect.signature\\(Type3E.connect\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from pymelsec import constants; print\\(dir\\(constants\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from pymelsec.constants import DT; print\\({k:v for k,v in vars\\(DT\\).items\\(\\) if not k.startswith\\('_'\\)}\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import pymcprotocol; import inspect; plc = pymcprotocol.Type3E\\(\\); print\\('batchread_bitunits:', inspect.signature\\(plc.batchread_bitunits\\)\\); print\\('batchwrite_bitunits:', inspect.signature\\(plc.batchwrite_bitunits\\)\\); print\\('connect:', inspect.signature\\(plc.connect\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import pymcprotocol, inspect; plc = pymcprotocol.Type3E\\(\\); print\\('attrs:', [a for a in dir\\(plc\\) if not a.startswith\\('_'\\)]\\); print\\('setaccessopt:', inspect.signature\\(plc.setaccessopt\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"from pymodbus.client import ModbusTcpClient; import inspect; c = ModbusTcpClient\\('x'\\); print\\(inspect.signature\\(c.read_coils\\)\\); print\\(inspect.signature\\(c.read_discrete_inputs\\)\\); print\\(inspect.signature\\(c.write_coil\\)\\)\")"
+    ]
+  }
+}
