@@ -1,0 +1,36 @@
+# Mapa de señales PLC — Coolmay CX3G, Modbus TCP
+# Entradas X → Discrete Inputs (base 0x3400), offset = número de X
+# Salidas  Y → Coils           (base 0x3300), offset = número de Y
+# Todos los valores son PLACEHOLDER — ajustar en puesta en marcha.
+
+plc:
+  ip: "192.168.10.175"
+  port: 502
+  unit_id: 1
+  poll_interval_ms: 50      # frecuencia de lectura de entradas
+
+scanner_1:
+  camera_index: 0
+  model: "modelo_A"
+  inspection:
+    consecutive_nok_frames: 5   # fallas consecutivas para declarar FAULT
+  inputs:
+    punch_sensor: 0         # X0 — LOW = punzón actuando, lámina quieta
+    mode_switch: 1          # X1 — 0 = manual, 1 = auto
+  outputs:
+    start_pistol: 0         # Y0 — activa pistón (inicio de punzonado)
+    stop_line: 1            # Y1 — para la línea
+    fault_light: 2          # Y2 — luz de falla
+
+scanner_2:
+  camera_index: 1
+  model: "modelo_B"
+  inspection:
+    consecutive_nok_frames: 5
+  inputs:
+    punch_sensor: 4         # X4
+    mode_switch: 5          # X5
+  outputs:
+    start_pistol: 4         # Y4
+    stop_line: 5            # Y5
+    fault_light: 6          # Y6

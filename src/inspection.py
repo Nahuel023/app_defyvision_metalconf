@@ -67,6 +67,29 @@ def iter_image_files(input_dir: Path) -> Iterable[Path]:
 
 
 def inspect_image(model: str, img_path: Path, save: bool = False) -> InspectionResult:
+    """Inspect an image from disk."""
+    img_full = load_bgr_image(img_path)
+    result = _inspect_bgr(model, img_full, image_path=img_path)
+    if save:
+        _save_result_images(result)
+    return result
+
+
+def inspect_frame(
+    model: str,
+    frame: np.ndarray,
+    frame_id: str = "live",
+    save: bool = False,
+) -> InspectionResult:
+    """Inspect a BGR frame captured from a live camera (no disk read)."""
+    result = _inspect_bgr(model, frame, image_path=Path(frame_id))
+    if save:
+        _save_result_images(result)
+    return result
+
+
+def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> InspectionResult:
+    """Core inspection logic on a pre-loaded BGR frame."""
     tolerances = load_tolerances()
     threshold = int(tolerances["threshold"])
     use_channel = str(tolerances["use_channel"])
@@ -79,62 +102,40 @@ def inspect_image(model: str, img_path: Path, save: bool = False) -> InspectionR
     min_match_count = int(tolerances["min_match_count"])
 
     pattern = load_pattern(pattern_path(model))
-    img_full = load_bgr_image(img_path)
 
     img_aligned, align_res = align_image_by_right_edge(img_full)
 
     roi = load_roi(model)
     img = apply_roi(img_aligned, roi) if roi is not None else img_aligned
 
-    mask0 = preprocess_for_holes(
-        img,
-        threshold=threshold,
-        use_channel=use_channel,
-        polarity=polarity,
-    )
-    holes0 = detect_holes_from_mask(
-        mask0,
-        min_area=min_area,
-        circularity_min=circularity_min,
-        aspect_ratio_max=aspect_ratio_max,
-    )
+    mask0 = preprocess_for_holes(img, threshold=threshold,
+                                  use_channel=use_channel, polarity=polarity)
+    holes0 = detect_holes_from_mask(mask0, min_area=min_area,
+                                     circularity_min=circularity_min,
+                                     aspect_ratio_max=aspect_ratio_max)
 
     shift_xy: tuple[float, float] | None = None
     transform = _estimate_alignment_transform(
-        pattern.points,
-        holes0,
-        match_tol_px=align_match_tol_px,
-        min_match_count=min_match_count,
+        pattern.points, holes0,
+        match_tol_px=align_match_tol_px, min_match_count=min_match_count,
     )
     if transform is not None:
         shift_xy = (float(transform[0, 2]), float(transform[1, 2]))
-        img = cv2.warpAffine(
-            img,
-            transform,
-            (img.shape[1], img.shape[0]),
-            flags=cv2.INTER_LINEAR,
-            borderMode=cv2.BORDER_REPLICATE,
-        )
+        img = cv2.warpAffine(img, transform, (img.shape[1], img.shape[0]),
+                             flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
 
-    mask = preprocess_for_holes(
-        img,
-        threshold=threshold,
-        use_channel=use_channel,
-        polarity=polarity,
-    )
-    holes = detect_holes_from_mask(
-        mask,
-        min_area=min_area,
-        circularity_min=circularity_min,
-        aspect_ratio_max=aspect_ratio_max,
-    )
+    mask = preprocess_for_holes(img, threshold=threshold,
+                                 use_channel=use_channel, polarity=polarity)
+    holes = detect_holes_from_mask(mask, min_area=min_area,
+                                    circularity_min=circularity_min,
+                                    aspect_ratio_max=aspect_ratio_max)
     detected_points = [(h.x, h.y) for h in holes]
     report = compare_missing_only(pattern.points, detected_points, tol_xy_px=tol_xy_px)
     overlay = draw_compare_overlay(img, holes, report.missing_points, report.status)
 
-    result = InspectionResult(
+    return InspectionResult(
         model=model,
-        image_path=img_path,
+        image_path=image_path,
         status=report.status,
         report=report,
         holes=holes,
@@ -144,11 +145,6 @@ def inspect_image(model: str, img_path: Path, save: bool = False) -> InspectionR
         used_lines=int(align_res.used_lines),
         shift_xy=shift_xy,
     )
-
-    if save:
-        _save_result_images(result)
-
-    return result
 
 
 def inspect_folder(

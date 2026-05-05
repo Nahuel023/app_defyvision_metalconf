@@ -96,6 +96,23 @@ def cmd_operator_ui(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_run(_: argparse.Namespace) -> int:
+    """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
+    from src.utils.logger import setup_logging
+    from src.controller.system import InspectionSystem
+    from src.ui.operator import launch_operator_ui as launch_production_ui
+
+    setup_logging()
+
+    system = InspectionSystem()
+    system.connect_plc()        # intenta conectar; si falla, la UI lo mostrará
+    system.start_cameras()      # intenta abrir cámaras; errores van al log de la UI
+
+    launch_production_ui(system)
+    system.shutdown()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="app_defyvision_metalconf",
@@ -125,8 +142,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("gui", help="Abrir interfaz minima en tkinter.")
     sp.set_defaults(func=cmd_gui)
 
-    sp = sub.add_parser("operator-ui", help="Abrir interfaz de operador en PyQt.")
+    sp = sub.add_parser("operator-ui", help="Abrir interfaz de operador en PyQt (batch).")
     sp.set_defaults(func=cmd_operator_ui)
+
+    sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
+    sp.set_defaults(func=cmd_run)
 
     return p
 
