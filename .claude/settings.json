@@ -19,7 +19,11 @@
       "PowerShell(Get-ChildItem -Path \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\" -Recurse -Directory | Where-Object { $_.Name -notmatch '^\\\\.venv$|^__pycache__$|^setup_prov_pc$' } | ForEach-Object { $_.FullName.Replace\\('c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf', '.'\\) } | Sort-Object)",
       "PowerShell(Get-ChildItem -Path \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\" -File | Where-Object { $_.Extension -in '.py', '.txt', '.json', '.yaml', '.yml', '.md', '.sh', '.bat' })",
       "Bash(Remove-Item scripts\\\\build_pattern.py, scripts\\\\run_folder.py, scripts\\\\run_image.py, test_gpio.py, test_smooth_gpio.py, test_plc.py -Force)",
-      "Bash(Move-Item test_io_map.py tests\\\\test_io_map.py)"
+      "Bash(Move-Item test_io_map.py tests\\\\test_io_map.py)",
+      "Bash(Remove-Item \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\\\\src\\\\gui_app.py\" -ErrorAction SilentlyContinue)",
+      "PowerShell(cd \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\"; foreach \\($f in @\\('src/ui/service.py','src/ui/login_dialog.py','src/main.py','src/plc/io_map.py','src/controller/scanner_controller.py'\\)\\) { $result = .\\\\.venv\\\\Scripts\\\\python.exe -c \"import ast; ast.parse\\(open\\('$f', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: $f'\\)\" 2>&1; Write-Output $result })",
+      "PowerShell(cd \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\"; foreach \\($f in @\\('src/ui/service.py','src/plc/client.py'\\)\\) { .\\\\.venv\\\\Scripts\\\\python.exe -c \"import ast; ast.parse\\(open\\('$f', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: $f'\\)\" 2>&1 })",
+      "PowerShell(cd \"c:\\\\DEFYMOTION\\\\DEFYVISION - Metalconf\\\\app_defyvision_metalconf\"; foreach \\($f in @\\('config/io_map.yaml','src/controller/scanner_controller.py'\\)\\) { .\\\\.venv\\\\Scripts\\\\python.exe -c \"import ast; ast.parse\\(open\\('$f', encoding='utf-8'\\).read\\(\\)\\); print\\('OK: $f'\\)\" 2>&1 })"
     ]
   }
 }

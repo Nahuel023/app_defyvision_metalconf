@@ -1,9 +1,0 @@
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.csproj.AssemblyReference.cache
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.Main.resources
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.Properties.Resources.resources
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.csproj.GenerateResource.cache
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.csproj.CoreCompileInputs.cache
-C:\Users\John\Desktop\Example\C#\EasySmooth\bin\Release\EasySmooth.exe
-C:\Users\John\Desktop\Example\C#\EasySmooth\bin\Release\EasySmooth.pdb
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.exe
-C:\Users\John\Desktop\Example\C#\EasySmooth\obj\Release\EasySmooth.pdb
