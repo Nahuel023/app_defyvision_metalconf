@@ -122,6 +122,23 @@ class PLCClient:
                 self._on_error(f"read_coil Y{offset}: {exc}")
                 return None
 
+    def read_coils_batch(self, offset: int, count: int) -> Optional[list[bool]]:
+        """Lee varios bits de salida en una sola transacción Modbus."""
+        with self._lock:
+            if not self._ensure_connected():
+                return None
+            try:
+                r = self._client.read_coils(
+                    _Y_BASE + offset, count=count, device_id=self._unit_id
+                )
+                if r.isError():
+                    self._on_error(f"read_coils_batch Y{offset}+{count}: {r}")
+                    return None
+                return [bool(b) for b in r.bits[:count]]
+            except Exception as exc:
+                self._on_error(f"read_coils_batch: {exc}")
+                return None
+
     # ------------------------------------------------------------------
     # Escritura de salidas Y (Coils)
     # ------------------------------------------------------------------

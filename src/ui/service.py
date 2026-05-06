@@ -201,6 +201,132 @@ class PLCIOTab(QWidget):
 
 
 # ==================================================================
+# Tab: Diagnóstico HW — X0-X15 / Y0-Y15
+# ==================================================================
+
+class PLCDiagTab(QWidget):
+    """Vista de bajo nivel: 16 entradas X (LEDs) y 16 salidas Y (LEDs + toggle)."""
+
+    _COUNT = 16
+
+    def __init__(self, system: InspectionSystem, parent=None) -> None:
+        super().__init__(parent)
+        self._plc = system.plc
+
+        self._x_name: dict[int, str] = {}
+        self._y_name: dict[int, str] = {}
+        for full, (t, off) in system.io.signals().items():
+            short = full.split(".", 1)[1]
+            (self._x_name if t == "input" else self._y_name)[off] = short
+
+        self._x_leds: list[QLabel] = []
+        self._y_leds: list[QLabel] = []
+        self._y_btns: list[QPushButton] = []
+        self._y_vals: list[bool] = [False] * self._COUNT
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(14)
+        lay.addWidget(self._x_group())
+        lay.addWidget(self._y_group())
+
+    def _x_group(self) -> QGroupBox:
+        grp = QGroupBox("Entradas  X  (solo lectura)")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setSpacing(4)
+        lay.setContentsMargins(10, 8, 10, 8)
+        for i in range(self._COUNT):
+            led = self._make_led()
+            self._x_leds.append(led)
+            lay.addLayout(self._sig_row(led, f"X{i}", self._x_name.get(i, "")))
+        lay.addStretch()
+        return grp
+
+    def _y_group(self) -> QGroupBox:
+        grp = QGroupBox("Salidas  Y  (control)")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setSpacing(4)
+        lay.setContentsMargins(10, 8, 10, 8)
+        for i in range(self._COUNT):
+            led = self._make_led()
+            self._y_leds.append(led)
+            btn = QPushButton("OFF")
+            btn.setFixedSize(54, 22)
+            btn.setStyleSheet(
+                "background:#374151;color:white;border-radius:4px;"
+                "font-size:10px;font-weight:700;border:none;"
+            )
+            btn.clicked.connect(lambda _, idx=i: self._toggle(idx))
+            self._y_btns.append(btn)
+            lay.addLayout(self._sig_row(led, f"Y{i}", self._y_name.get(i, ""), btn))
+        lay.addStretch()
+        return grp
+
+    def _sig_row(self, led: QLabel, tag: str, sem: str,
+                 extra: QPushButton | None = None) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        row.addWidget(led)
+        if sem:
+            lbl = QLabel(
+                f"{tag}  <span style='color:{_MUTED};font-size:10px;'>{sem}</span>"
+            )
+            lbl.setTextFormat(Qt.TextFormat.RichText)
+        else:
+            lbl = QLabel(tag)
+        lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;")
+        row.addWidget(lbl, stretch=1)
+        if extra:
+            row.addWidget(extra)
+        return row
+
+    def _make_led(self) -> QLabel:
+        w = QLabel()
+        w.setFixedSize(14, 14)
+        w.setStyleSheet(f"background:{_BORDER};border-radius:7px;")
+        return w
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+    # ------------------------------------------------------------------
+
+    def refresh(self) -> None:
+        x_vals = self._plc.read_inputs_batch(0, self._COUNT)
+        if x_vals:
+            for i, v in enumerate(x_vals):
+                c = "#22c55e" if v else _BORDER
+                self._x_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
+
+        y_vals = self._plc.read_coils_batch(0, self._COUNT)
+        if y_vals:
+            for i, v in enumerate(y_vals):
+                self._y_vals[i] = v
+                c = "#f97316" if v else _BORDER
+                self._y_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
+                self._y_btns[i].setText("ON" if v else "OFF")
+                self._y_btns[i].setStyleSheet(
+                    f"background:{'#c2410c' if v else '#374151'};"
+                    "color:white;border-radius:4px;font-size:10px;font-weight:700;border:none;"
+                )
+
+    def _toggle(self, idx: int) -> None:
+        self._plc.write_coil(idx, not self._y_vals[idx])
+        logger.info(f"[Diagnóstico] Toggle Y{idx} → {'ON' if not self._y_vals[idx] else 'OFF'}")
+
+
+# ==================================================================
 # Tab 2: Sistema
 # ==================================================================
 
@@ -538,15 +664,17 @@ class ServiceWindow(QMainWindow):
             }}
         """)
 
-        self._plc_tab = PLCIOTab(self._system)
-        self._sys_tab = SystemTab(self._system)
-        self._log_tab = LogsTab(self._log_handler)
-        self._cfg_tab = ConfigTab()
+        self._plc_tab  = PLCIOTab(self._system)
+        self._diag_tab = PLCDiagTab(self._system)
+        self._sys_tab  = SystemTab(self._system)
+        self._log_tab  = LogsTab(self._log_handler)
+        self._cfg_tab  = ConfigTab()
 
-        self._tabs.addTab(self._plc_tab, "PLC I/O")
-        self._tabs.addTab(self._sys_tab, "Sistema")
-        self._tabs.addTab(self._log_tab, "Logs")
-        self._tabs.addTab(self._cfg_tab, "Configuración")
+        self._tabs.addTab(self._plc_tab,  "PLC I/O")
+        self._tabs.addTab(self._diag_tab, "Diagnóstico HW")
+        self._tabs.addTab(self._sys_tab,  "Sistema")
+        self._tabs.addTab(self._log_tab,  "Logs")
+        self._tabs.addTab(self._cfg_tab,  "Configuración")
 
         root.addWidget(self._tabs, stretch=1)
 
@@ -600,6 +728,8 @@ class ServiceWindow(QMainWindow):
         if idx == 0:
             self._plc_tab.refresh()
         elif idx == 1:
+            self._diag_tab.refresh()
+        elif idx == 2:
             self._sys_tab.refresh()
         # LogsTab se actualiza por señal; ConfigTab es estático
 
