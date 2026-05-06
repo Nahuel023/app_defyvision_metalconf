@@ -2,14 +2,13 @@
 Interfaz de operador de producción (PyQt6).
 
 Muestra ambos scanners en paralelo con:
-  - Feed de cámara en vivo (~30 fps)
+  - Feed de cámara en vivo (~20 fps)
   - Estado del sistema (IDLE / RUNNING / FAULT / ERROR)
   - Modo de operación (MANUAL / AUTO)
   - Racha de NOK y último resultado
   - Controles: INICIAR / DETENER / RESET
   - Selector de modelo por scanner
-  - Log de eventos independiente por scanner
-  - Área de branding (logos reemplazables)
+  - Log de eventos independiente por scanner (thread-safe via señal)
 """
 
 import sys
@@ -20,7 +19,7 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -55,9 +54,9 @@ _MODE_COLOR = {
     OperationMode.AUTO:   "#1d4ed8",
     OperationMode.MANUAL: "#374151",
 }
-_CAMERA_REFRESH_MS = 33     # ~30 fps
+_CAMERA_REFRESH_MS = 50      # 20 fps — equilibrio render/CPU
 _STATUS_REFRESH_MS = 200
-_OVERLAY_HOLD_MS   = 2500   # ms que se muestra el overlay post-inspección
+_OVERLAY_HOLD_MS   = 2500
 
 
 # ------------------------------------------------------------------
@@ -65,15 +64,19 @@ _OVERLAY_HOLD_MS   = 2500   # ms que se muestra el overlay post-inspección
 # ------------------------------------------------------------------
 
 class ScannerPanel(QWidget):
-    """Panel completo para un scanner (cámara + estado + controles + log propio)."""
+    """Panel completo para un scanner (cámara + estado + controles + log)."""
+
+    # Señales para operaciones Qt desde threads del controller
+    _sig_log     = pyqtSignal(str)
+    _sig_overlay = pyqtSignal(object, int)   # (np.ndarray, until_ms)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
                  parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._id = scanner_id
-        self._system = system
+        self._id      = scanner_id
+        self._system  = system
         self._scanner = system.scanner(scanner_id)
-        self._camera = system.camera(scanner_id)
+        self._camera  = system.camera(scanner_id)
 
         self._last_overlay: Optional[np.ndarray] = None
         self._overlay_until_ms: int = 0
@@ -81,11 +84,16 @@ class ScannerPanel(QWidget):
         self._build_ui()
         self._populate_models()
 
+        # Conectar señales cross-thread al hilo principal
+        self._sig_log.connect(self._log_widget.append)
+        self._sig_overlay.connect(self._set_overlay)
+
+        # Registrar callbacks del controller (llamados desde threads)
         self._scanner.on_state_changed = self._on_state_changed
-        self._scanner.on_result = self._on_result
+        self._scanner.on_result        = self._on_result
 
     # ------------------------------------------------------------------
-    # Construcción de UI
+    # UI
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -157,9 +165,11 @@ class ScannerPanel(QWidget):
         btn_row.addWidget(self.reset_btn)
         root.addLayout(btn_row)
 
-        # Log propio del scanner
+        # Log independiente
         log_header = QLabel(f"Log — {self._id.replace('_', ' ').upper()}")
-        log_header.setStyleSheet("font-size:10px;color:#64748b;font-weight:600;margin-top:4px;")
+        log_header.setStyleSheet(
+            "font-size:10px;color:#64748b;font-weight:600;margin-top:4px;"
+        )
         root.addWidget(log_header)
 
         self._log_widget = QTextEdit()
@@ -194,14 +204,12 @@ class ScannerPanel(QWidget):
         btn.setMinimumHeight(34)
         btn.setStyleSheet(
             f"background:{color};color:white;font-weight:700;"
-            "border-radius:6px;font-size:12px;"
-            f"border:none;"
-            f"padding:0 8px;"
+            "border-radius:6px;font-size:12px;border:none;padding:0 8px;"
         )
         return btn
 
     # ------------------------------------------------------------------
-    # Refresco (llamado por timers del padre)
+    # Refresco (llamado por timers del padre — hilo principal)
     # ------------------------------------------------------------------
 
     def refresh_camera(self) -> None:
@@ -219,13 +227,12 @@ class ScannerPanel(QWidget):
         self.camera_label.setPixmap(_bgr_to_pixmap(frame, w, h))
 
     def refresh_status(self) -> None:
-        s = self._scanner.get_status()
-        state: ScannerState        = s["state"]
-        mode: OperationMode        = s["mode"]
-        streak: int                = s["nok_streak"]
-        result: Optional[InspectionResult] = s["last_result"]
+        s      = self._scanner.get_status()
+        state  = s["state"]
+        mode   = s["mode"]
+        streak = s["nok_streak"]
+        result = s["last_result"]
 
-        # Badge estado
         bg, fg = _COLOR[state]
         self.state_badge.setText(f"● {state.value.upper()}")
         self.state_badge.setStyleSheet(
@@ -233,17 +240,14 @@ class ScannerPanel(QWidget):
             "padding:7px 14px;font-size:13px;font-weight:700;"
         )
 
-        # Modo
         mc = _MODE_COLOR[mode]
         self._mode_val[1].setText(mode.value.upper())
         self._mode_val[1].setStyleSheet(f"font-size:13px;font-weight:700;color:{mc};")
 
-        # Racha NOK
         sc = "#b91c1c" if streak > 0 else "#374151"
         self._streak_val[1].setText(str(streak))
         self._streak_val[1].setStyleSheet(f"font-size:13px;font-weight:700;color:{sc};")
 
-        # Último resultado
         if result:
             rc = "#166534" if result.status == "OK" else "#b91c1c"
             self._result_val[1].setText(f"{result.status} ({result.report.missing} falt.)")
@@ -277,17 +281,22 @@ class ScannerPanel(QWidget):
             self._log(f"Modelo → {model}")
 
     # ------------------------------------------------------------------
-    # Callbacks del controlador (desde threads)
+    # Callbacks del controller (llamados desde threads — usan señales)
     # ------------------------------------------------------------------
 
     def _on_state_changed(self, state: ScannerState, mode: OperationMode) -> None:
         self._log(f"Estado → {state.value.upper()} / {mode.value.upper()}")
 
     def _on_result(self, result: InspectionResult, streak: int) -> None:
-        self._last_overlay = result.overlay.copy()
-        self._overlay_until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
+        until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
+        self._sig_overlay.emit(result.overlay.copy(), until_ms)
         label = "OK" if result.status == "OK" else f"NOK — {result.report.missing} faltante(s)"
         self._log(f"{label}  |  racha={streak}")
+
+    def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
+        """Slot — ejecutado en el hilo principal."""
+        self._last_overlay    = overlay
+        self._overlay_until_ms = until_ms
 
     # ------------------------------------------------------------------
     # Helpers
@@ -311,8 +320,9 @@ class ScannerPanel(QWidget):
         self.model_combo.blockSignals(False)
 
     def _log(self, msg: str) -> None:
+        """Thread-safe: emite señal al hilo principal."""
         ts = datetime.now().strftime("%H:%M:%S")
-        self._log_widget.append(f"[{ts}] {msg}")
+        self._sig_log.emit(f"[{ts}] {msg}")
 
 
 # ------------------------------------------------------------------
@@ -322,7 +332,7 @@ class ScannerPanel(QWidget):
 class OperatorWindow(QMainWindow):
     def __init__(self, system: InspectionSystem) -> None:
         super().__init__()
-        self._system = system
+        self._system      = system
         self._service_win = None
         self.setWindowTitle("DEFYVISION — Metalconf")
         self.resize(1400, 860)
@@ -399,38 +409,44 @@ class OperatorWindow(QMainWindow):
 
         outer.addStretch()
 
-        # ── Derecha: PLC status + botón + logo ──────────────────────
+        # ── Derecha: PLC badge + 2 botones en fila ──────────────────
         right = QWidget()
         right.setStyleSheet("background:transparent;")
         right_lay = QVBoxLayout(right)
         right_lay.setContentsMargins(0, 8, 0, 8)
-        right_lay.setSpacing(4)
-        right_lay.setAlignment(Qt.AlignmentFlag.AlignRight)
+        right_lay.setSpacing(5)
+        right_lay.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         self._plc_badge = QLabel("● PLC: —")
-        self._plc_badge.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._plc_badge.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._plc_badge.setStyleSheet(
             "color:#94a3b8;font-size:11px;font-weight:600;background:transparent;"
         )
         right_lay.addWidget(self._plc_badge)
 
+        # Ambos botones en una sola fila
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(6)
+
         reconnect_btn = QPushButton("Reconectar PLC")
-        reconnect_btn.setFixedHeight(24)
+        reconnect_btn.setFixedHeight(22)
         reconnect_btn.setStyleSheet(
             "background:#1e40af;color:white;border-radius:5px;"
             "font-size:10px;padding:0 10px;border:none;"
         )
         reconnect_btn.clicked.connect(self._reconnect_plc)
-        right_lay.addWidget(reconnect_btn)
 
         service_btn = QPushButton("Modo Servicio")
-        service_btn.setFixedHeight(24)
+        service_btn.setFixedHeight(22)
         service_btn.setStyleSheet(
             "background:#374151;color:white;border-radius:5px;"
             "font-size:10px;padding:0 10px;border:none;"
         )
         service_btn.clicked.connect(self._open_service)
-        right_lay.addWidget(service_btn)
+
+        btn_row.addWidget(reconnect_btn)
+        btn_row.addWidget(service_btn)
+        right_lay.addLayout(btn_row)
 
         outer.addWidget(right)
 
@@ -467,7 +483,7 @@ class OperatorWindow(QMainWindow):
             panel.refresh_status()
 
     def _reconnect_plc(self) -> None:
-        ok = self._system.connect_plc()
+        ok  = self._system.connect_plc()
         msg = "PLC conectado." if ok else "No se pudo conectar al PLC."
         for panel in self._panels.values():
             panel._log(f"[Sistema] {msg}")
@@ -518,10 +534,11 @@ def _bgr_to_pixmap(frame: np.ndarray, max_w: int, max_h: int) -> QPixmap:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         qimg = QImage(rgb.data, rgb.shape[1], rgb.shape[0],
                       rgb.strides[0], QImage.Format.Format_RGB888)
+    # FastTransformation: mucho menor carga de CPU que Smooth
     return QPixmap.fromImage(qimg.copy()).scaled(
         max_w, max_h,
         Qt.AspectRatioMode.KeepAspectRatio,
-        Qt.TransformationMode.SmoothTransformation,
+        Qt.TransformationMode.FastTransformation,
     )
 
 
