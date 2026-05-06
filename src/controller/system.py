@@ -15,10 +15,14 @@ from src.vision.camera import Camera
 
 logger = logging.getLogger(__name__)
 
+_APP_CONFIG_PATH = Path("config/app.yaml")
+
 
 class InspectionSystem:
     def __init__(self, io_map_path: Path = Path("config/io_map.yaml")) -> None:
         plc_cfg = self._load_plc_config(io_map_path)
+        cam_cfg = self._load_camera_config()
+
         self._client = PLCClient(
             ip=plc_cfg["ip"],
             port=plc_cfg.get("port", 502),
@@ -30,7 +34,11 @@ class InspectionSystem:
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
-            camera = Camera(cfg["camera_index"])
+            camera = Camera(
+                cfg["camera_index"],
+                max_retries=cam_cfg.get("max_retries", 10),
+                retry_interval_s=cam_cfg.get("retry_interval_s", 3.0),
+            )
             scanner = ScannerController(scanner_id, self._io, camera)
             self._cameras[scanner_id] = camera
             self._scanners[scanner_id] = scanner
@@ -92,3 +100,12 @@ class InspectionSystem:
         import yaml
         with path.open("r", encoding="utf-8") as f:
             return yaml.safe_load(f)["plc"]
+
+    @staticmethod
+    def _load_camera_config() -> dict:
+        import yaml
+        if not _APP_CONFIG_PATH.exists():
+            return {}
+        with _APP_CONFIG_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("camera", {})

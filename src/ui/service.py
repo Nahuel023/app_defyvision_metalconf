@@ -243,7 +243,7 @@ class PLCDiagTab(QWidget):
         for i in range(self._COUNT):
             led = self._make_led()
             self._x_leds.append(led)
-            lay.addLayout(self._sig_row(led, f"X{i}", self._x_name.get(i, "")))
+            lay.addLayout(self._sig_row(led, f"X{oct(i)[2:]}", self._x_name.get(i, "")))
         lay.addStretch()
         return grp
 
@@ -264,7 +264,7 @@ class PLCDiagTab(QWidget):
             )
             btn.clicked.connect(lambda _, idx=i: self._toggle(idx))
             self._y_btns.append(btn)
-            lay.addLayout(self._sig_row(led, f"Y{i}", self._y_name.get(i, ""), btn))
+            lay.addLayout(self._sig_row(led, f"Y{oct(i)[2:]}", self._y_name.get(i, ""), btn))
         lay.addStretch()
         return grp
 

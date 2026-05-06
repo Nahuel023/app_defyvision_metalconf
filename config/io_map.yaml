@@ -21,8 +21,8 @@ scanner_1:
     light_green:  1   # Y1  — verde:   RUNNING sin advertencias
     light_yellow: 2   # Y2  — amarillo: racha NOK activa (advertencia)
     light_blue:   3   # Y3  — azul:    IDLE / listo para arrancar
-    solenoid:    10   # Y10 — electroválvula 1 (activa punzonadora)
-    backlight:   12   # Y12 — pantalla roja 1 (iluminación trasera para inspección)
+    solenoid:     8   # Y10 octal → offset decimal 8 — electroválvula 1
+    backlight:   10   # Y12 octal → offset decimal 10 — pantalla roja 1
 
 scanner_2:
   camera_index: 1
@@ -37,5 +37,5 @@ scanner_2:
     light_green:  5   # Y5  — verde
     light_yellow: 6   # Y6  — amarillo
     light_blue:   7   # Y7  — azul
-    solenoid:    11   # Y11 — electroválvula 2
-    backlight:   13   # Y13 — pantalla roja 2
+    solenoid:     9   # Y11 octal → offset decimal 9 — electroválvula 2
+    backlight:   11   # Y13 octal → offset decimal 11 — pantalla roja 2

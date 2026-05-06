@@ -4,3 +4,7 @@ log_file: "logs/defyvision.log"
 service:
   username: "DEFYMOTION"
   password: "defy2026"
+
+camera:
+  max_retries: 10       # intentos de reconexión antes de declarar error permanente
+  retry_interval_s: 3.0 # segundos de espera entre cada intento
