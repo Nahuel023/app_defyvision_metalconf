@@ -1,26 +1,28 @@
 # Mapa de señales PLC — Coolmay CX3G, Modbus TCP
-# Entradas X → Discrete Inputs (base 0x3400), offset = número de X
-# Salidas  Y → Coils           (base 0x3300), offset = número de Y
-# Todos los valores son PLACEHOLDER — ajustar en puesta en marcha.
+# Entradas X → Discrete Inputs  (base 0x3400 + offset)
+# Salidas  Y → Coils             (base 0x3300 + offset)
 
 plc:
   ip: "192.168.10.175"
   port: 502
   unit_id: 1
-  poll_interval_ms: 50      # frecuencia de lectura de entradas
+  poll_interval_ms: 50
 
 scanner_1:
   camera_index: 0
   model: "modelo_A"
   inspection:
-    consecutive_nok_frames: 5   # fallas consecutivas para declarar FAULT
+    consecutive_nok_frames: 5
   inputs:
-    punch_sensor: 0         # X0 — LOW = punzón actuando, lámina quieta
-    mode_switch: 1          # X1 — 0 = manual, 1 = auto
+    punch_sensor: 0   # X0  — sensor inductivo (LOW = lámina quieta → inspeccionar)
+    mode_switch:  1   # X1  — maneta (0=MANUAL, 1=AUTO)
   outputs:
-    start_pistol: 0         # Y0 — activa pistón (inicio de punzonado)
-    stop_line: 1            # Y1 — para la línea
-    fault_light: 2          # Y2 — luz de falla
+    light_red:    0   # Y0  — rojo:    FAULT / parada forzada
+    light_green:  1   # Y1  — verde:   RUNNING sin advertencias
+    light_yellow: 2   # Y2  — amarillo: racha NOK activa (advertencia)
+    light_blue:   3   # Y3  — azul:    IDLE / listo para arrancar
+    solenoid:    10   # Y10 — electroválvula 1 (activa punzonadora)
+    backlight:   12   # Y12 — pantalla roja 1 (iluminación trasera para inspección)
 
 scanner_2:
   camera_index: 1
@@ -28,9 +30,12 @@ scanner_2:
   inspection:
     consecutive_nok_frames: 5
   inputs:
-    punch_sensor: 4         # X4
-    mode_switch: 5          # X5
+    punch_sensor: 2   # X2  — sensor inductivo
+    mode_switch:  3   # X3  — maneta
   outputs:
-    start_pistol: 4         # Y4
-    stop_line: 5            # Y5
-    fault_light: 6          # Y6
+    light_red:    4   # Y4  — rojo
+    light_green:  5   # Y5  — verde
+    light_yellow: 6   # Y6  — amarillo
+    light_blue:   7   # Y7  — azul
+    solenoid:    11   # Y11 — electroválvula 2
+    backlight:   13   # Y13 — pantalla roja 2
