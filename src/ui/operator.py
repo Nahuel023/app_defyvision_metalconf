@@ -323,6 +323,7 @@ class OperatorWindow(QMainWindow):
     def __init__(self, system: InspectionSystem) -> None:
         super().__init__()
         self._system = system
+        self._service_win = None
         self.setWindowTitle("DEFYVISION — Metalconf")
         self.resize(1400, 860)
         self._build_ui()
@@ -422,6 +423,15 @@ class OperatorWindow(QMainWindow):
         reconnect_btn.clicked.connect(self._reconnect_plc)
         right_lay.addWidget(reconnect_btn)
 
+        service_btn = QPushButton("Modo Servicio")
+        service_btn.setFixedHeight(24)
+        service_btn.setStyleSheet(
+            "background:#374151;color:white;border-radius:5px;"
+            "font-size:10px;padding:0 10px;border:none;"
+        )
+        service_btn.clicked.connect(self._open_service)
+        right_lay.addWidget(service_btn)
+
         outer.addWidget(right)
 
         logo_right = QLabel("METALCONF")
@@ -461,6 +471,21 @@ class OperatorWindow(QMainWindow):
         msg = "PLC conectado." if ok else "No se pudo conectar al PLC."
         for panel in self._panels.values():
             panel._log(f"[Sistema] {msg}")
+
+    def _open_service(self) -> None:
+        from src.ui.login_dialog import LoginDialog
+        from src.ui.service import ServiceWindow
+        from PyQt6.QtWidgets import QDialog
+
+        dlg = LoginDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        if self._service_win is None or not self._service_win.isVisible():
+            self._service_win = ServiceWindow(self._system, parent=None)
+        self._service_win.show()
+        self._service_win.raise_()
+        self._service_win.activateWindow()
 
     # ------------------------------------------------------------------
     # Cierre

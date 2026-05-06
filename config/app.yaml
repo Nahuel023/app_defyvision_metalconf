@@ -1,2 +1,6 @@
 log_level: "INFO"
 log_file: "logs/defyvision.log"
+
+service:
+  username: "servicio"
+  password: "defyvision2024"

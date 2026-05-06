@@ -82,13 +82,6 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_gui(_: argparse.Namespace) -> int:
-    from src.gui_app import launch_gui
-
-    launch_gui()
-    return 0
-
-
 def cmd_operator_ui(_: argparse.Namespace) -> int:
     from src.qt_operator_app import launch_operator_ui
 
@@ -109,6 +102,35 @@ def cmd_run(_: argparse.Namespace) -> int:
     system.start_cameras()      # intenta abrir cámaras; errores van al log de la UI
 
     launch_production_ui(system)
+    system.shutdown()
+    return 0
+
+
+def cmd_service(_: argparse.Namespace) -> int:
+    """Modo servicio: UI de diagnóstico con login (independiente del operador)."""
+    import sys
+    from PyQt6.QtWidgets import QApplication, QDialog
+    from src.utils.logger import setup_logging
+    from src.controller.system import InspectionSystem
+    from src.ui.login_dialog import LoginDialog
+    from src.ui.service import ServiceWindow
+
+    setup_logging()
+
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    dlg = LoginDialog()
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return 0
+
+    system = InspectionSystem()
+    system.connect_plc()
+    system.start_cameras()
+
+    win = ServiceWindow(system)
+    win.show()
+    app.exec()
+
     system.shutdown()
     return 0
 
@@ -139,14 +161,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--save", action="store_true", help="Guardar resultados en data/output.")
     sp.set_defaults(func=cmd_run_folder)
 
-    sp = sub.add_parser("gui", help="Abrir interfaz minima en tkinter.")
-    sp.set_defaults(func=cmd_gui)
-
     sp = sub.add_parser("operator-ui", help="Abrir interfaz de operador en PyQt (batch).")
     sp.set_defaults(func=cmd_operator_ui)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.set_defaults(func=cmd_run)
+
+    sp = sub.add_parser("service", help="Modo servicio: diagnóstico PLC/cámaras/logs con login.")
+    sp.set_defaults(func=cmd_service)
 
     return p
 

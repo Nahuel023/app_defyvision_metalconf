@@ -49,6 +49,14 @@ class ScannerController:
         self._mode = OperationMode.MANUAL
         self._nok_streak = 0
         self._last_result: Optional[InspectionResult] = None
+
+        # Métricas de sesión (resetean en start())
+        self._total_inspections: int = 0
+        self._ok_count: int = 0
+        self._nok_count: int = 0
+        self._session_start: Optional[datetime] = None
+        self._max_nok_streak: int = 0
+
         self._lock = threading.Lock()
 
         self._trigger_event = threading.Event()
@@ -79,6 +87,11 @@ class ScannerController:
 
         with self._lock:
             self._nok_streak = 0
+            self._total_inspections = 0
+            self._ok_count = 0
+            self._nok_count = 0
+            self._session_start = datetime.now()
+            self._max_nok_streak = 0
             self._stop_event.clear()
             self._trigger_event.clear()
 
@@ -154,6 +167,11 @@ class ScannerController:
                 "mode": self._mode,
                 "nok_streak": self._nok_streak,
                 "last_result": self._last_result,
+                "total_inspections": self._total_inspections,
+                "ok_count": self._ok_count,
+                "nok_count": self._nok_count,
+                "session_start": self._session_start,
+                "max_nok_streak": self._max_nok_streak,
             }
 
     # ------------------------------------------------------------------
@@ -227,11 +245,16 @@ class ScannerController:
             fault_triggered = False
             with self._lock:
                 self._last_result = result
+                self._total_inspections += 1
                 if result.status == "NOK":
                     self._nok_streak += 1
+                    self._nok_count += 1
                 else:
                     self._nok_streak = 0
+                    self._ok_count += 1
                 streak = self._nok_streak
+                if streak > self._max_nok_streak:
+                    self._max_nok_streak = streak
                 if streak >= self._consecutive_nok and self._state == ScannerState.RUNNING:
                     self._state = ScannerState.FAULT
                     fault_triggered = True

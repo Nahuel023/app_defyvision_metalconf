@@ -61,6 +61,10 @@ class IOMap:
     def plc_config(self) -> dict[str, Any]:
         return self._config["plc"]
 
+    def signals(self) -> dict[str, tuple[str, int]]:
+        """Devuelve una copia del índice {signal_full_name: (type, address)}."""
+        return dict(self._index)
+
     # ------------------------------------------------------------------
     # Internos
     # ------------------------------------------------------------------
