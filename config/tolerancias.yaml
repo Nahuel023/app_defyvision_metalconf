@@ -1,12 +1,40 @@
-threshold: 160
-use_channel: gray
+threshold: 175
+use_channel: r
 polarity: bright
-min_area: 40.0
-circularity_min: 0.4
-tol_xy_px: 30.0
-aspect_ratio_max: 2.5
-align_match_tol_px: 80.0
-min_match_count: 8
-consecutive_nok_frames: 5
+min_area: 80.0
+circularity_min: 0.8
+tol_xy_px: 22.0
+aspect_ratio_max: 2.0
+align_match_tol_px: 150.0
+min_match_count: 6
+consecutive_nok_frames: 8
 frame_rate_hz: 5.0
-max_response_sec: 1.0
+max_response_sec: 1.6
+edge_margin_px: 15.0
+# Margen para build-pattern: más grande excluye agujeros de borde que desaparecen
+# cuando la lámina se desplaza. Si no se define, usa edge_margin_px.
+pattern_edge_margin_px: 40.0
+use_clahe: true
+clahe_clip: 3.0
+clahe_tile: 8
+use_otsu: true
+burst_frames: 5
+burst_delay_ms: 50
+# Modo de inspección: punch_triggered (trigger por sensor PLC) o continuous
+# Puede sobreescribirse por scanner en io_map.yaml bajo inspection.inspection_mode
+inspection_mode: punch_triggered
+# Parámetros del modo continuo
+continuous_motion_threshold: 3.0  # diferencia media de píxeles; > esto = en movimiento
+continuous_settling_frames: 5     # frames quietos antes de disparar inspección
+continuous_cooldown_frames: 10    # frames a ignorar tras cada inspección
+
+# ── Overrides por modelo ──────────────────────────────────────────────────────
+# Solo especificar los parámetros que difieren del global.
+# Los no especificados heredan los valores de arriba.
+# Ejemplo:
+#   modelo_B:
+#     min_area: 60.0          # agujeros más chicos
+#     tol_xy_px: 18.0         # distribución más densa
+#     consecutive_nok_frames: 6
+models:
+  modelo_A: {}               # usa todos los defaults globales

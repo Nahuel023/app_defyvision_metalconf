@@ -17,6 +17,13 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "consecutive_nok_frames": 5,
     "frame_rate_hz": 5.0,
     "max_response_sec": 1.0,
+    "edge_margin_px": 15.0,
+    "use_clahe": False,
+    "clahe_clip": 2.0,
+    "clahe_tile": 8,
+    "use_otsu": False,
+    "burst_frames": 3,
+    "burst_delay_ms": 80,
 }
 
 
@@ -24,7 +31,21 @@ def tolerances_path() -> Path:
     return Path("config/tolerancias.yaml")
 
 
-def load_tolerances() -> dict[str, Any]:
+def load_tolerances(model: str | None = None) -> dict[str, Any]:
+    """Load tolerances, optionally merging per-model overrides.
+
+    tolerancias.yaml structure:
+        # global params (apply to every model)
+        threshold: 175
+        min_area: 80.0
+        ...
+        # per-model overrides (only specify what differs from global)
+        models:
+          modelo_A: {}
+          modelo_B:
+            min_area: 60.0
+            tol_xy_px: 18.0
+    """
     cfg_path = tolerances_path()
     if not cfg_path.exists():
         return dict(DEFAULT_TOLERANCES)
@@ -36,7 +57,14 @@ def load_tolerances() -> dict[str, Any]:
         return dict(DEFAULT_TOLERANCES)
 
     cfg = dict(DEFAULT_TOLERANCES)
-    cfg.update({k: v for k, v in data.items() if v is not None})
+    # Apply global params (skip the 'models' block)
+    cfg.update({k: v for k, v in data.items() if k != "models" and v is not None})
+
+    # Apply per-model overrides if a model is specified
+    if model:
+        model_overrides = (data.get("models") or {}).get(model) or {}
+        cfg.update({k: v for k, v in model_overrides.items() if v is not None})
+
     return cfg
 
 

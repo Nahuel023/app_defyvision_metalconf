@@ -13,22 +13,31 @@ Acepta un InspectionSystem existente (desde OperatorWindow) o crea uno propio.
 
 import logging
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import Qt, QTimer, QObject, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont
+import cv2
+
+from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QPixmap, QImage
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
+    QFormLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
+    QSlider,
+    QSpinBox,
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
@@ -38,6 +47,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.controller.system import InspectionSystem
+from src.utils import camera_config
 from src.utils.state import OperationMode, ScannerState
 
 logger = logging.getLogger(__name__)
@@ -337,6 +347,7 @@ class SystemTab(QWidget):
         super().__init__(parent)
         self._system = system
         self._scanner_labels: dict[str, dict[str, QLabel]] = {}
+        self._scanner_btns: dict[str, dict[str, QPushButton]] = {}
         self._plc_ip_lbl: Optional[QLabel]   = None
         self._plc_conn_lbl: Optional[QLabel] = None
         self._build_ui()
@@ -384,18 +395,64 @@ class SystemTab(QWidget):
             group = QGroupBox(sid.replace("_", " ").upper())
             group.setStyleSheet(self._group_style())
             from PyQt6.QtWidgets import QGridLayout
-            grid = QGridLayout(group)
-            grid.setSpacing(8)
+            vbox = QVBoxLayout(group)
+            vbox.setSpacing(8)
+            vbox.setContentsMargins(10, 14, 10, 10)
 
+            grid = QGridLayout()
+            grid.setSpacing(8)
             widgets: dict[str, QLabel] = {}
             for i, (key, label) in enumerate(_FIELDS):
                 row, col = divmod(i, 3)
                 w, lbl = self._kv(label, "—")
                 grid.addWidget(w, row, col)
                 widgets[key] = lbl
+            vbox.addLayout(grid)
+
+            # Control buttons
+            ctrl = QHBoxLayout()
+            ctrl.setSpacing(8)
+            ctrl.setContentsMargins(0, 4, 0, 0)
+
+            def _btn(text: str, color: str) -> QPushButton:
+                b = QPushButton(text)
+                b.setFixedHeight(30)
+                b.setStyleSheet(
+                    f"background:{color};color:white;border-radius:5px;"
+                    "font-size:11px;font-weight:700;border:none;padding:0 12px;"
+                )
+                return b
+
+            start_btn = _btn("▶  Iniciar",  "#166534")
+            stop_btn  = _btn("■  Detener",  "#7f1d1d")
+            reset_btn = _btn("↺  Reset",    "#1e3a5f")
+            sim_btn   = _btn("⚡  Simular Punch", "#78350f")
+            cap_btn   = _btn("Capturar frame",    "#1e3a5f")
+            cap_btn.setStyleSheet(
+                "background:#0f4c81;color:white;border-radius:5px;"
+                "font-size:11px;font-weight:700;border:none;padding:0 12px;"
+            )
+
+            start_btn.clicked.connect(lambda _, s=sid: self._system.scanner(s).start())
+            stop_btn.clicked.connect( lambda _, s=sid: self._system.scanner(s).stop())
+            reset_btn.clicked.connect(lambda _, s=sid: self._system.scanner(s).reset())
+            sim_btn.clicked.connect(  lambda _, s=sid: self._system.scanner(s).force_trigger())
+            cap_btn.clicked.connect(  lambda _, s=sid: self._capture_frame(s))
+
+            for b in (start_btn, stop_btn, reset_btn, sim_btn, cap_btn):
+                ctrl.addWidget(b)
+            ctrl.addStretch()
+            vbox.addLayout(ctrl)
 
             lay.addWidget(group)
             self._scanner_labels[sid] = widgets
+            self._scanner_btns[sid] = {
+                "start": start_btn,
+                "stop":  stop_btn,
+                "reset": reset_btn,
+                "sim":   sim_btn,
+                "cap":   cap_btn,
+            }
 
         lay.addStretch()
         scroll.setWidget(content)
@@ -473,6 +530,35 @@ class SystemTab(QWidget):
             wdg["camera"].setText(
                 f"#{cam.index} {'activa' if cam.is_running else 'inactiva'}"
             )
+
+            # Button states
+            if sid in self._scanner_btns:
+                btns = self._scanner_btns[sid]
+                is_idle    = state == ScannerState.IDLE
+                is_running = state == ScannerState.RUNNING
+                is_fault   = state == ScannerState.FAULT
+                btns["start"].setEnabled(is_idle)
+                btns["stop"].setEnabled(is_running or is_fault)
+                btns["reset"].setEnabled(is_fault)
+                btns["sim"].setEnabled(is_running)
+                btns["cap"].setEnabled(self._system.camera(sid).is_running)
+
+    def _capture_frame(self, scanner_id: str) -> None:
+        import cv2
+        from pathlib import Path
+
+        cam = self._system.camera(scanner_id)
+        frame = cam.get_frame()
+        if frame is None:
+            logger.warning(f"[{scanner_id}] no hay frame disponible para capturar")
+            return
+
+        out_dir = Path("data/frames")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = out_dir / f"ref_{scanner_id}_{ts}.png"
+        cv2.imwrite(str(path), frame)
+        logger.info(f"[{scanner_id}] frame guardado: {path}")
 
 
 # ==================================================================
@@ -619,6 +705,770 @@ class ConfigTab(QWidget):
 
 
 # ==================================================================
+# Tab 5: Grabación / Análisis / Navegador
+# ==================================================================
+
+class _AnalysisWorker(QThread):
+    progress = pyqtSignal(int, int)          # (done, total)
+    finished = pyqtSignal(list)              # list[InspectionResult]
+    error    = pyqtSignal(str)
+
+    def __init__(self, model: str, frame_paths: list, parent=None) -> None:
+        super().__init__(parent)
+        self._model = model
+        self._paths = frame_paths
+
+    def run(self) -> None:
+        try:
+            from src.inspection import inspect_image
+            results = []
+            for i, p in enumerate(self._paths):
+                results.append(inspect_image(self._model, p))
+                self.progress.emit(i + 1, len(self._paths))
+            self.finished.emit(results)
+        except Exception as exc:
+            self.error.emit(str(exc))
+
+
+class RecordingTab(QWidget):
+    """Grabación continua de frames, análisis offline y navegador de resultados."""
+
+    def __init__(self, system: InspectionSystem, parent=None) -> None:
+        super().__init__(parent)
+        self._system       = system
+        self._recording    = False
+        self._rec_dir: Optional[Path] = None
+        self._frame_paths: list[Path] = []
+        self._results: list           = []
+        self._current_idx: int        = 0
+        self._worker: Optional[_AnalysisWorker] = None
+
+        self._rec_timer = QTimer(self)
+        self._rec_timer.timeout.connect(self._grab_frame)
+
+        self._build_ui()
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        # ── Control bar ───────────────────────────────────────────────
+        ctrl = QGroupBox("Control de grabación")
+        ctrl.setStyleSheet(self._grp_style())
+        ctrl_lay = QHBoxLayout(ctrl)
+        ctrl_lay.setSpacing(10)
+        ctrl_lay.setContentsMargins(12, 14, 12, 10)
+
+        lbl_sc = QLabel("Scanner:")
+        lbl_sc.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ctrl_lay.addWidget(lbl_sc)
+
+        self._scanner_combo = QComboBox()
+        self._scanner_combo.addItems(self._system.scanner_ids())
+        self._scanner_combo.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 6px;font-size:11px;min-width:90px;"
+        )
+        ctrl_lay.addWidget(self._scanner_combo)
+
+        lbl_fps = QLabel("FPS captura:")
+        lbl_fps.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ctrl_lay.addWidget(lbl_fps)
+
+        self._fps_spin = QSpinBox()
+        self._fps_spin.setRange(1, 30)
+        self._fps_spin.setValue(5)
+        self._fps_spin.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 6px;font-size:11px;max-width:60px;"
+        )
+        ctrl_lay.addWidget(self._fps_spin)
+
+        ctrl_lay.addSpacing(12)
+
+        self._btn_start = self._mk_btn("▶  Iniciar grabación", "#166534")
+        self._btn_stop  = self._mk_btn("■  Detener",           "#7f1d1d")
+        self._btn_stop.setEnabled(False)
+        ctrl_lay.addWidget(self._btn_start)
+        ctrl_lay.addWidget(self._btn_stop)
+
+        ctrl_lay.addSpacing(16)
+
+        self._frame_lbl = QLabel("0 frames")
+        self._frame_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:13px;font-weight:700;"
+        )
+        ctrl_lay.addWidget(self._frame_lbl)
+        ctrl_lay.addStretch()
+
+        self._status_lbl = QLabel("Listo")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ctrl_lay.addWidget(self._status_lbl)
+
+        root.addWidget(ctrl)
+
+        # ── Analysis bar ──────────────────────────────────────────────
+        ana = QGroupBox("Análisis")
+        ana.setStyleSheet(self._grp_style())
+        ana_lay = QHBoxLayout(ana)
+        ana_lay.setSpacing(10)
+        ana_lay.setContentsMargins(12, 14, 12, 10)
+
+        self._btn_analyze = self._mk_btn("⚙  Analizar grabación", "#0f4c81")
+        self._btn_analyze.setEnabled(False)
+        ana_lay.addWidget(self._btn_analyze)
+
+        ana_lay.addSpacing(16)
+        self._ana_progress = QLabel("")
+        self._ana_progress.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ana_lay.addWidget(self._ana_progress)
+
+        ana_lay.addStretch()
+
+        self._summary_lbl = QLabel("")
+        self._summary_lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;font-weight:600;")
+        ana_lay.addWidget(self._summary_lbl)
+
+        root.addWidget(ana)
+
+        # ── Browser ───────────────────────────────────────────────────
+        browser = QGroupBox("Navegador de capturas")
+        browser.setStyleSheet(self._grp_style())
+        brow_lay = QVBoxLayout(browser)
+        brow_lay.setContentsMargins(12, 14, 12, 10)
+        brow_lay.setSpacing(8)
+
+        # Nav buttons row
+        nav_row = QHBoxLayout()
+        self._btn_prev = self._mk_btn("◀  Anterior", "#334155")
+        self._btn_next = self._mk_btn("Siguiente  ▶", "#334155")
+        self._nav_lbl  = QLabel("—")
+        self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._nav_lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;min-width:160px;")
+        self._overlay_toggle = QPushButton("Ver overlay")
+        self._overlay_toggle.setCheckable(True)
+        self._overlay_toggle.setChecked(True)
+        self._overlay_toggle.setFixedHeight(28)
+        self._overlay_toggle.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;font-size:11px;padding:0 10px;border:none;"
+            "checked: background:#1e3a5f;"
+        )
+        self._overlay_toggle.toggled.connect(lambda _: self._show_frame(self._current_idx))
+
+        for w in (self._btn_prev, self._nav_lbl, self._btn_next, self._overlay_toggle):
+            nav_row.addWidget(w)
+        nav_row.addStretch()
+
+        self._result_lbl = QLabel("")
+        self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;")
+        nav_row.addWidget(self._result_lbl)
+        brow_lay.addLayout(nav_row)
+
+        # Image display
+        self._img_label = QLabel("Sin frames")
+        self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img_label.setStyleSheet(
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:6px;"
+            f"color:{_MUTED};font-size:13px;"
+        )
+        self._img_label.setMinimumHeight(360)
+        self._img_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        brow_lay.addWidget(self._img_label, stretch=1)
+
+        root.addWidget(browser, stretch=1)
+
+        # ── Signal wiring ─────────────────────────────────────────────
+        self._btn_start.clicked.connect(self._on_start)
+        self._btn_stop.clicked.connect(self._on_stop)
+        self._btn_analyze.clicked.connect(self._on_analyze)
+        self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
+        self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
+
+        self._update_nav_state()
+
+    # ------------------------------------------------------------------
+    # Recording
+    # ------------------------------------------------------------------
+
+    def _on_start(self) -> None:
+        sid = self._scanner_combo.currentText()
+        cam = self._system.camera(sid)
+        if not cam.is_running:
+            self._status_lbl.setText("La cámara no está activa")
+            return
+
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        self._rec_dir = Path("data/recordings") / ts
+        self._rec_dir.mkdir(parents=True, exist_ok=True)
+        self._frame_paths.clear()
+        self._results.clear()
+        self._current_idx = 0
+        self._summary_lbl.setText("")
+        self._ana_progress.setText("")
+        self._img_label.setText("Sin frames")
+        self._update_nav_state()
+
+        interval_ms = max(33, 1000 // self._fps_spin.value())
+        self._rec_timer.start(interval_ms)
+        self._recording = True
+
+        self._btn_start.setEnabled(False)
+        self._btn_stop.setEnabled(True)
+        self._btn_analyze.setEnabled(False)
+        self._scanner_combo.setEnabled(False)
+        self._fps_spin.setEnabled(False)
+        self._status_lbl.setText(f"Grabando → {self._rec_dir.name}")
+        logger.info(f"[Grabación] inicio en {self._rec_dir}")
+
+    def _on_stop(self) -> None:
+        self._rec_timer.stop()
+        self._recording = False
+        self._btn_start.setEnabled(True)
+        self._btn_stop.setEnabled(False)
+        self._scanner_combo.setEnabled(True)
+        self._fps_spin.setEnabled(True)
+        n = len(self._frame_paths)
+        self._status_lbl.setText(f"Detenido — {n} frames en {self._rec_dir.name}")
+        self._btn_analyze.setEnabled(n > 0)
+        if n > 0:
+            self._show_frame(0)
+        logger.info(f"[Grabación] detenida — {n} frames")
+
+    def _grab_frame(self) -> None:
+        import cv2
+        sid = self._scanner_combo.currentText()
+        cam = self._system.camera(sid)
+        frame = cam.get_frame()
+        if frame is None:
+            return
+        idx = len(self._frame_paths)
+        path = self._rec_dir / f"frame_{idx:04d}.png"
+        cv2.imwrite(str(path), frame)
+        self._frame_paths.append(path)
+        self._frame_lbl.setText(f"{idx + 1} frames")
+
+    # ------------------------------------------------------------------
+    # Analysis
+    # ------------------------------------------------------------------
+
+    def _on_analyze(self) -> None:
+        if not self._frame_paths:
+            return
+        sid   = self._scanner_combo.currentText()
+        model = self._system.io.scanner_config(sid).get("model", "modelo_A")
+
+        self._btn_analyze.setEnabled(False)
+        self._results.clear()
+        self._ana_progress.setText("Analizando…")
+
+        self._worker = _AnalysisWorker(model, list(self._frame_paths), parent=self)
+        self._worker.progress.connect(self._on_ana_progress)
+        self._worker.finished.connect(self._on_ana_done)
+        self._worker.error.connect(self._on_ana_error)
+        self._worker.start()
+
+    def _on_ana_progress(self, done: int, total: int) -> None:
+        self._ana_progress.setText(f"Analizando {done}/{total}…")
+
+    def _on_ana_done(self, results: list) -> None:
+        self._results = results
+        ok  = sum(1 for r in results if r.status == "OK")
+        nok = len(results) - ok
+        self._summary_lbl.setText(f"OK: {ok}  NOK: {nok}  Total: {len(results)}")
+        self._ana_progress.setText("Análisis completo")
+        self._btn_analyze.setEnabled(True)
+        self._show_frame(0)
+        logger.info(f"[Grabación] análisis completo — OK={ok} NOK={nok}")
+
+    def _on_ana_error(self, msg: str) -> None:
+        self._ana_progress.setText(f"Error: {msg}")
+        self._btn_analyze.setEnabled(True)
+        logger.error(f"[Grabación] error de análisis: {msg}")
+
+    # ------------------------------------------------------------------
+    # Browser
+    # ------------------------------------------------------------------
+
+    def _show_frame(self, idx: int) -> None:
+        if not self._frame_paths:
+            return
+        idx = max(0, min(idx, len(self._frame_paths) - 1))
+        self._current_idx = idx
+
+        show_overlay = self._overlay_toggle.isChecked() and idx < len(self._results)
+        if show_overlay:
+            import numpy as np
+            bgr = self._results[idx].overlay
+        else:
+            import cv2, numpy as np
+            bgr = cv2.imread(str(self._frame_paths[idx]))
+
+        if bgr is not None:
+            rgb   = bgr[:, :, ::-1].copy()
+            h, w  = rgb.shape[:2]
+            qi    = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            px    = QPixmap.fromImage(qi)
+            avail = self._img_label.size()
+            self._img_label.setPixmap(
+                px.scaled(avail, Qt.AspectRatioMode.KeepAspectRatio,
+                          Qt.TransformationMode.SmoothTransformation)
+            )
+
+        total = len(self._frame_paths)
+        self._nav_lbl.setText(f"Frame {idx + 1} / {total}")
+
+        if idx < len(self._results):
+            r = self._results[idx]
+            color = _OK if r.status == "OK" else _NOK
+            missing = len(r.report.missing_points)
+            self._result_lbl.setText(f"{r.status}  missing={missing}")
+            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
+        else:
+            self._result_lbl.setText("")
+
+        self._update_nav_state()
+
+    def _update_nav_state(self) -> None:
+        n = len(self._frame_paths)
+        self._btn_prev.setEnabled(self._current_idx > 0)
+        self._btn_next.setEnabled(self._current_idx < n - 1)
+
+    # ------------------------------------------------------------------
+
+    def _mk_btn(self, text: str, bg: str) -> QPushButton:
+        b = QPushButton(text)
+        b.setFixedHeight(30)
+        b.setStyleSheet(
+            f"background:{bg};color:white;border-radius:5px;"
+            "font-size:11px;font-weight:700;border:none;padding:0 12px;"
+        )
+        return b
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+
+# ==================================================================
+# Calibración de cámara
+# ==================================================================
+
+@dataclass
+class _ParamDef:
+    key:      str
+    label:    str
+    min_val:  int
+    max_val:  int
+    default:  int
+    auto_key: str | None = None   # settings key for the matching boolean auto
+
+
+_PARAM_DEFS: list[_ParamDef] = [
+    _ParamDef("focus",                  "Foco",            0,    255, 100, "autofocus"),
+    _ParamDef("exposure",               "Exposición",    -13,      0,  -7, "auto_exposure"),
+    _ParamDef("white_balance",          "Bal. Blanco",  2800,   6500, 4500, "auto_white_balance"),
+    _ParamDef("gain",                   "Ganancia",        0,    255,   0),
+    _ParamDef("brightness",             "Brillo",          0,    255, 128),
+    _ParamDef("contrast",               "Contraste",       0,    255, 140),
+    _ParamDef("saturation",             "Saturación",      0,    255,  50),
+    _ParamDef("sharpness",              "Nitidez",         0,    255, 160),
+    _ParamDef("gamma",                  "Gamma",         100,    500, 110),
+    _ParamDef("backlight_compensation", "Comp. backlight", 0,      1,   0),
+]
+
+
+class CameraCalibTab(QWidget):
+    """Vista en vivo + sliders de todos los parámetros UVC de la cámara."""
+
+    def __init__(self, system: InspectionSystem, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._sliders:     dict[str, QSlider]   = {}
+        self._spinboxes:   dict[str, QSpinBox]  = {}
+        self._auto_checks: dict[str, QCheckBox] = {}
+        self._block_apply = False  # avoid feedback loops while populating UI
+
+        self._preview_timer = QTimer(self)
+        self._preview_timer.timeout.connect(self._update_preview)
+        self._preview_timer.setInterval(200)
+
+        self._build_ui()
+        self._populate_scanner_selector()
+
+    # ------------------------------------------------------------------
+    # UI
+    # ------------------------------------------------------------------
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
+
+        # ── top bar ──────────────────────────────────────────────────
+        top = QHBoxLayout()
+        top.setSpacing(10)
+
+        lbl = QLabel("Scanner:")
+        lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        top.addWidget(lbl)
+
+        self._scanner_combo = QComboBox()
+        self._scanner_combo.setFixedWidth(130)
+        self._scanner_combo.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:4px 8px;font-size:12px;"
+        )
+        self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+        top.addWidget(self._scanner_combo)
+
+        self._cam_btn = QPushButton("Iniciar cámara")
+        self._cam_btn.setFixedWidth(140)
+        self._cam_btn.clicked.connect(self._toggle_camera)
+        top.addWidget(self._cam_btn)
+
+        self._read_btn = QPushButton("Leer de cámara")
+        self._read_btn.setFixedWidth(140)
+        self._read_btn.clicked.connect(self._read_from_camera)
+        top.addWidget(self._read_btn)
+
+        top.addStretch()
+
+        self._status_lbl = QLabel("—")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        top.addWidget(self._status_lbl)
+
+        root.addLayout(top)
+
+        # ── main split ───────────────────────────────────────────────
+        main = QHBoxLayout()
+        main.setSpacing(12)
+
+        # Left: live preview
+        prev_grp = QGroupBox("Vista en vivo")
+        prev_grp.setStyleSheet(self._grp_style())
+        prev_grp.setMinimumWidth(560)
+        prev_lay = QVBoxLayout(prev_grp)
+
+        self._preview_lbl = QLabel("Sin señal de cámara")
+        self._preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_lbl.setMinimumSize(540, 340)
+        self._preview_lbl.setStyleSheet(
+            f"background:{_DARK};color:{_MUTED};border-radius:6px;font-size:13px;"
+        )
+        prev_lay.addWidget(self._preview_lbl, stretch=1)
+
+        self._fps_lbl = QLabel("")
+        self._fps_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._fps_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
+        prev_lay.addWidget(self._fps_lbl)
+
+        main.addWidget(prev_grp, stretch=3)
+
+        # Right: parameter panel
+        params_grp = QGroupBox("Parámetros de cámara")
+        params_grp.setStyleSheet(self._grp_style())
+        params_outer = QVBoxLayout(params_grp)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background:{_PANEL};border:none; }}"
+            f"QScrollBar:vertical {{ background:{_DARK};width:8px; }}"
+            f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:4px; }}"
+        )
+        inner = QWidget()
+        inner.setStyleSheet(f"background:{_PANEL};")
+        form = QFormLayout(inner)
+        form.setContentsMargins(8, 8, 8, 8)
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+
+        for pd in _PARAM_DEFS:
+            self._add_param_row(form, pd)
+
+        scroll.setWidget(inner)
+        params_outer.addWidget(scroll, stretch=1)
+
+        # buttons
+        btn_lay = QHBoxLayout()
+        save_btn = QPushButton("Guardar configuración")
+        save_btn.clicked.connect(self._save_settings)
+        save_btn.setStyleSheet(
+            f"background:{_ACCENT};color:#000;font-weight:700;"
+            "border-radius:6px;padding:7px 18px;"
+        )
+        def_btn = QPushButton("Restaurar defaults")
+        def_btn.clicked.connect(self._restore_defaults)
+        def_btn.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:7px 18px;"
+        )
+        btn_lay.addWidget(save_btn)
+        btn_lay.addWidget(def_btn)
+        btn_lay.addStretch()
+        params_outer.addLayout(btn_lay)
+
+        main.addWidget(params_grp, stretch=2)
+        root.addLayout(main, stretch=1)
+
+    def _add_param_row(self, form: QFormLayout, pd: _ParamDef) -> None:
+        row = QWidget()
+        row.setStyleSheet(f"background:{_PANEL};")
+        hl = QHBoxLayout(row)
+        hl.setContentsMargins(0, 0, 0, 0)
+        hl.setSpacing(6)
+
+        # Optional auto checkbox
+        if pd.auto_key:
+            cb = QCheckBox("Auto")
+            cb.setStyleSheet(f"color:{_TEXT};font-size:11px;")
+            cb.setChecked(True)
+            cb.toggled.connect(lambda checked, ak=pd.auto_key: self._on_auto_toggled(ak, checked))
+            self._auto_checks[pd.auto_key] = cb
+            hl.addWidget(cb)
+
+        # Slider (mapped 0 → max-min)
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(0, pd.max_val - pd.min_val)
+        slider.setValue(pd.default - pd.min_val)
+        slider.setMinimumWidth(160)
+        slider.setStyleSheet(
+            f"QSlider::groove:horizontal {{ height:4px;background:{_BORDER};border-radius:2px; }}"
+            f"QSlider::handle:horizontal {{ width:14px;height:14px;margin:-5px 0;"
+            f"background:{_ACCENT};border-radius:7px; }}"
+            f"QSlider::sub-page:horizontal {{ background:{_ACCENT};border-radius:2px; }}"
+        )
+        self._sliders[pd.key] = slider
+
+        # SpinBox
+        sb = QSpinBox()
+        sb.setRange(pd.min_val, pd.max_val)
+        sb.setValue(pd.default)
+        sb.setFixedWidth(72)
+        sb.setStyleSheet(
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 4px;font-size:12px;"
+        )
+        self._spinboxes[pd.key] = sb
+
+        # Bidirectional link slider ↔ spinbox
+        slider.valueChanged.connect(
+            lambda v, _pd=pd, _sb=sb: self._on_slider_changed(_pd, v, _sb)
+        )
+        sb.valueChanged.connect(
+            lambda v, _pd=pd, _sl=slider: self._on_spinbox_changed(_pd, v, _sl)
+        )
+
+        hl.addWidget(slider, stretch=1)
+        hl.addWidget(sb)
+
+        lbl = QLabel(f"<b>{pd.label}</b>")
+        lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        form.addRow(lbl, row)
+
+        # Start with auto enabled → manual controls disabled
+        if pd.auto_key:
+            slider.setEnabled(False)
+            sb.setEnabled(False)
+
+    # ------------------------------------------------------------------
+    # Slots
+    # ------------------------------------------------------------------
+
+    def _on_scanner_changed(self, scanner_id: str) -> None:
+        running = self._get_camera_running(scanner_id)
+        self._cam_btn.setText("Detener cámara" if running else "Iniciar cámara")
+        if running:
+            self._preview_timer.start()
+        else:
+            self._preview_timer.stop()
+            self._preview_lbl.setText("Sin señal de cámara")
+
+    def _toggle_camera(self) -> None:
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return
+        cam = self._system.camera(scanner_id)
+        if cam.is_running:
+            cam.stop()
+            self._preview_timer.stop()
+            self._cam_btn.setText("Iniciar cámara")
+            self._preview_lbl.setText("Sin señal de cámara")
+        else:
+            ok = cam.start()
+            if ok:
+                self._preview_timer.start()
+                self._cam_btn.setText("Detener cámara")
+                self._status_lbl.setText("Cámara iniciada")
+            else:
+                self._status_lbl.setStyleSheet(f"color:{_NOK};font-size:11px;")
+                self._status_lbl.setText("Error al abrir cámara")
+
+    def _on_slider_changed(self, pd: _ParamDef, slider_val: int, sb: QSpinBox) -> None:
+        real_val = pd.min_val + slider_val
+        sb.blockSignals(True)
+        sb.setValue(real_val)
+        sb.blockSignals(False)
+        if not self._block_apply:
+            self._apply_param(pd.key, real_val)
+
+    def _on_spinbox_changed(self, pd: _ParamDef, val: int, slider: QSlider) -> None:
+        slider.blockSignals(True)
+        slider.setValue(val - pd.min_val)
+        slider.blockSignals(False)
+        if not self._block_apply:
+            self._apply_param(pd.key, val)
+
+    def _on_auto_toggled(self, auto_key: str, checked: bool) -> None:
+        # Find the param that owns this auto_key and enable/disable its controls
+        for pd in _PARAM_DEFS:
+            if pd.auto_key == auto_key:
+                self._sliders[pd.key].setEnabled(not checked)
+                self._spinboxes[pd.key].setEnabled(not checked)
+                break
+        if not self._block_apply:
+            self._apply_param(auto_key, 1.0 if checked else 0.0)
+
+    def _apply_param(self, key: str, value: float) -> None:
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return
+        try:
+            cam = self._system.camera(scanner_id)
+            if cam.is_running:
+                ok = cam.apply_setting(key, value)
+                dot = "●" if ok else "○"
+                self._status_lbl.setStyleSheet(
+                    f"color:{'#4ade80' if ok else '#fbbf24'};font-size:11px;"
+                )
+                self._status_lbl.setText(f"{dot} {key}={value:.0f}")
+        except KeyError:
+            pass
+
+    def _update_preview(self) -> None:
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return
+        try:
+            cam = self._system.camera(scanner_id)
+        except KeyError:
+            return
+        frame = cam.get_frame()
+        if frame is None:
+            return
+        h, w = frame.shape[:2]
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        pix = QPixmap.fromImage(img)
+        target = self._preview_lbl.size()
+        self._preview_lbl.setPixmap(
+            pix.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.SmoothTransformation)
+        )
+
+    def _read_from_camera(self) -> None:
+        """Read all current property values from the camera driver and update UI."""
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return
+        try:
+            cam = self._system.camera(scanner_id)
+        except KeyError:
+            return
+        if not cam.is_running:
+            self._status_lbl.setText("Cámara no iniciada")
+            return
+
+        self._block_apply = True
+        try:
+            for pd in _PARAM_DEFS:
+                val = cam.read_setting(pd.key)
+                if val >= 0:
+                    sb = self._spinboxes[pd.key]
+                    sb.setValue(int(round(val)))
+            for auto_key, cb in self._auto_checks.items():
+                val = cam.read_setting(auto_key)
+                if val >= 0:
+                    cb.setChecked(bool(val > 0.5))
+        finally:
+            self._block_apply = False
+
+        self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+        self._status_lbl.setText("Valores leídos de la cámara")
+
+    def _save_settings(self) -> None:
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return
+        settings: dict = {}
+        for pd in _PARAM_DEFS:
+            settings[pd.key] = self._spinboxes[pd.key].value()
+        for auto_key, cb in self._auto_checks.items():
+            settings[auto_key] = cb.isChecked()
+        try:
+            camera_config.save_camera_settings(scanner_id, settings)
+            self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+            self._status_lbl.setText("Guardado en config/camera.yaml")
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
+
+    def _restore_defaults(self) -> None:
+        self._block_apply = True
+        try:
+            for pd in _PARAM_DEFS:
+                self._spinboxes[pd.key].setValue(pd.default)
+                if pd.auto_key and pd.auto_key in self._auto_checks:
+                    self._auto_checks[pd.auto_key].setChecked(True)
+        finally:
+            self._block_apply = False
+        # Apply all defaults at once
+        for pd in _PARAM_DEFS:
+            self._apply_param(pd.key, float(pd.default))
+        for auto_key, cb in self._auto_checks.items():
+            self._apply_param(auto_key, 1.0 if cb.isChecked() else 0.0)
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        self._status_lbl.setText("Defaults restaurados (no guardados)")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _populate_scanner_selector(self) -> None:
+        ids = self._system.scanner_ids()
+        self._scanner_combo.addItems(ids)
+        if ids:
+            self._on_scanner_changed(ids[0])
+
+    def _get_camera_running(self, scanner_id: str) -> bool:
+        try:
+            return self._system.camera(scanner_id).is_running
+        except KeyError:
+            return False
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+
+# ==================================================================
 # Ventana de servicio
 # ==================================================================
 
@@ -669,12 +1519,16 @@ class ServiceWindow(QMainWindow):
         self._sys_tab  = SystemTab(self._system)
         self._log_tab  = LogsTab(self._log_handler)
         self._cfg_tab  = ConfigTab()
+        self._rec_tab  = RecordingTab(self._system)
+        self._cam_tab  = CameraCalibTab(self._system)
 
         self._tabs.addTab(self._plc_tab,  "PLC I/O")
         self._tabs.addTab(self._diag_tab, "Diagnóstico HW")
         self._tabs.addTab(self._sys_tab,  "Sistema")
         self._tabs.addTab(self._log_tab,  "Logs")
         self._tabs.addTab(self._cfg_tab,  "Configuración")
+        self._tabs.addTab(self._rec_tab,  "Grabación")
+        self._tabs.addTab(self._cam_tab,  "Cámara")
 
         root.addWidget(self._tabs, stretch=1)
 

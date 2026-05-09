@@ -14,10 +14,14 @@ Threads:
 
 import logging
 import threading
+import time
 from datetime import datetime
 from typing import Callable, Optional
 
-from src.inspection import InspectionResult
+import cv2
+import numpy as np
+
+from src.inspection import InspectionResult, save_result_images
 from src.plc.io_map import IOMap
 from src.utils.config import load_tolerances
 from src.utils.state import OperationMode, ScannerState
@@ -41,7 +45,18 @@ class ScannerController:
             insp_cfg.get("consecutive_nok_frames",
                          tolerances["consecutive_nok_frames"])
         )
+        self._save_nok    = bool(insp_cfg.get("save_nok_frames", True))
+        self._save_ok     = bool(insp_cfg.get("save_ok_frames",  False))
+        self._burst_frames = int(tolerances.get("burst_frames", 3))
+        self._burst_delay  = float(tolerances.get("burst_delay_ms", 80)) / 1000.0
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
+        self._inspection_mode = str(
+            insp_cfg.get("inspection_mode",
+                         tolerances.get("inspection_mode", "punch_triggered"))
+        )
+        self._cont_motion_thr = float(tolerances.get("continuous_motion_threshold", 3.0))
+        self._cont_settling   = int(tolerances.get("continuous_settling_frames", 5))
+        self._cont_cooldown   = int(tolerances.get("continuous_cooldown_frames", 10))
 
         self._state       = ScannerState.IDLE
         self._mode        = OperationMode.MANUAL
@@ -134,6 +149,21 @@ class ScannerController:
         logger.info(f"[{self._id}] reset, reanudando")
         return True
 
+    def force_trigger(self) -> bool:
+        """Dispara una inspección manualmente — mismo flujo que el sensor real.
+
+        Requiere estado RUNNING. Funciona en modo MANUAL o AUTO.
+        """
+        with self._lock:
+            if self._state != ScannerState.RUNNING:
+                logger.warning(
+                    f"[{self._id}] force_trigger ignorado, estado={self._state.value}"
+                )
+                return False
+        self._trigger_event.set()
+        logger.info(f"[{self._id}] trigger manual")
+        return True
+
     def set_model(self, model: str) -> None:
         cfg = self._io.scanner_config(self._id)
         cfg["model"] = model
@@ -215,6 +245,7 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def _inspect_loop(self) -> None:
+        """Punch-triggered mode: wait for PLC trigger, burst-capture, inspect."""
         frame_counter = 0
 
         while not self._stop_event.is_set():
@@ -229,54 +260,141 @@ class ScannerController:
                     continue
                 model = self._io.scanner_config(self._id)["model"]
 
-            frame = self._camera.get_frame()
-            if frame is None:
-                logger.warning(f"[{self._id}] sin frame disponible")
-                self._transition(ScannerState.ERROR)
-                continue
-
             frame_counter += 1
             frame_id = f"{self._id}_{datetime.now().strftime('%H%M%S')}_{frame_counter:04d}"
 
-            result = self._inspector.inspect(model, frame, frame_id=frame_id)
-            if result is None:
+            # Reload burst params — may differ per model
+            tols = load_tolerances(model)
+            burst_frames = int(tols.get("burst_frames", self._burst_frames))
+            burst_delay  = float(tols.get("burst_delay_ms", self._burst_delay * 1000)) / 1000.0
+
+            burst_results = []
+            for b in range(burst_frames):
+                if b > 0:
+                    time.sleep(self._burst_delay)
+                frame = self._camera.get_frame()
+                if frame is None:
+                    continue
+                bid = frame_id if b == 0 else f"{frame_id}_b{b + 1}"
+                res = self._inspector.inspect(model, frame, frame_id=bid)
+                if res is None:
+                    continue
+                burst_results.append(res)
+                if res.status == "OK":
+                    break
+
+            if not burst_results:
+                logger.warning(f"[{self._id}] sin frames válidos en burst")
+                self._transition(ScannerState.ERROR)
                 continue
 
-            fault_triggered = False
+            result = min(
+                burst_results,
+                key=lambda r: (r.status != "OK", len(r.report.missing_points)),
+            )
+            logger.debug(
+                f"[{self._id}] burst {len(burst_results)}/{burst_frames} frames"
+                f" → mejor: {result.status} missing={len(result.report.missing_points)}"
+            )
+            self._handle_result(result, model)
+
+    def _continuous_loop(self) -> None:
+        """Continuous mode: frame differencing detects motion; inspect when settled."""
+        prev_gray: Optional[np.ndarray] = None
+        settle_count  = 0
+        cooldown_count = 0
+        frame_counter = 0
+
+        while not self._stop_event.is_set():
             with self._lock:
-                self._last_result = result
-                self._total_inspections += 1
-                if result.status == "NOK":
-                    self._nok_streak += 1
-                    self._nok_count  += 1
+                if self._state != ScannerState.RUNNING:
+                    self._stop_event.wait(timeout=0.05)
+                    continue
+                model = self._io.scanner_config(self._id)["model"]
+
+            frame = self._camera.get_frame()
+            if frame is None:
+                self._stop_event.wait(timeout=0.02)
+                continue
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            if prev_gray is not None:
+                diff   = cv2.absdiff(gray, prev_gray)
+                motion = float(np.mean(diff))
+
+                if motion < self._cont_motion_thr:
+                    settle_count += 1
                 else:
-                    self._nok_streak  = 0
-                    self._ok_count   += 1
-                streak = self._nok_streak
-                if streak > self._max_nok_streak:
-                    self._max_nok_streak = streak
-                if streak >= self._consecutive_nok and self._state == ScannerState.RUNNING:
-                    self._state   = ScannerState.FAULT
-                    fault_triggered = True
+                    settle_count = 0
+                    cooldown_count = 0
 
-            if fault_triggered:
-                logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
-                self._io.write(f"{self._id}.solenoid",  False)
-                self._io.write(f"{self._id}.backlight", False)
-                self._set_lights(red=True)
-                self._fire_state_changed()
-            elif streak > 0:
-                # Racha NOK activa pero sin alcanzar umbral → amarillo
-                self._set_lights(yellow=True)
+                if settle_count >= self._cont_settling and cooldown_count == 0:
+                    frame_counter += 1
+                    fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
+                           f"_{frame_counter:04d}")
+                    res = self._inspector.inspect(model, frame, frame_id=fid)
+                    if res is not None:
+                        logger.debug(
+                            f"[{self._id}] continuous: motion={motion:.2f}"
+                            f" → {res.status} missing={len(res.report.missing_points)}"
+                        )
+                        self._handle_result(res, model)
+                    settle_count = 0
+                    cooldown_count = self._cont_cooldown
+
+                if cooldown_count > 0:
+                    cooldown_count -= 1
+
+            prev_gray = gray
+            self._stop_event.wait(timeout=0.033)  # ~30 fps polling
+
+    def _handle_result(self, result: InspectionResult, model: str = "") -> None:
+        """Update state machine and fire callbacks after any inspection result."""
+        if (result.status == "NOK" and self._save_nok) or \
+           (result.status == "OK"  and self._save_ok):
+            try:
+                save_result_images(result)
+            except Exception as exc:
+                logger.error(f"[{self._id}] error guardando imagen: {exc}")
+
+        # Reload consecutive_nok threshold — may differ per model
+        tols = load_tolerances(model) if model else load_tolerances()
+        consecutive_nok = int(tols.get("consecutive_nok_frames", self._consecutive_nok))
+
+        fault_triggered = False
+        with self._lock:
+            self._last_result = result
+            self._total_inspections += 1
+            if result.status == "NOK":
+                self._nok_streak += 1
+                self._nok_count  += 1
             else:
-                # Streak reseteado → verde
-                self._set_lights(green=True)
+                self._nok_streak  = 0
+                self._ok_count   += 1
+            streak = self._nok_streak
+            if streak > self._max_nok_streak:
+                self._max_nok_streak = streak
+            if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
+                self._state   = ScannerState.FAULT
+                fault_triggered = True
 
-            if self.on_result:
-                try:
-                    self.on_result(result, streak)
-                except Exception as exc:
-                    logger.error(f"[{self._id}] on_result callback error: {exc}")
+        if fault_triggered:
+            logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
+            self._io.write(f"{self._id}.solenoid",  False)
+            self._io.write(f"{self._id}.backlight", False)
+            self._set_lights(red=True)
+            self._fire_state_changed()
+        elif streak > 0:
+            self._set_lights(yellow=True)
+        else:
+            self._set_lights(green=True)
+
+        if self.on_result:
+            try:
+                self.on_result(result, streak)
+            except Exception as exc:
+                logger.error(f"[{self._id}] on_result callback error: {exc}")
 
     # ------------------------------------------------------------------
     # Internos
@@ -293,14 +411,20 @@ class ScannerController:
             self._io.write(signal, value)
 
     def _start_threads(self) -> None:
+        inspector_target = (
+            self._continuous_loop
+            if self._inspection_mode == "continuous"
+            else self._inspect_loop
+        )
         self._poller_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name=f"{self._id}-poller"
         )
         self._inspector_thread = threading.Thread(
-            target=self._inspect_loop, daemon=True, name=f"{self._id}-inspector"
+            target=inspector_target, daemon=True, name=f"{self._id}-inspector"
         )
         self._poller_thread.start()
         self._inspector_thread.start()
+        logger.info(f"[{self._id}] modo inspección: {self._inspection_mode}")
 
     def _join_threads(self) -> None:
         if self._poller_thread:

@@ -15,6 +15,52 @@ def _show_scaled_window(name: str, image, max_width: int = 1280, max_height: int
     cv2.imshow(name, image)
 
 
+def cmd_define_roi(args: argparse.Namespace) -> int:
+    """Selección interactiva de ROI sobre una imagen o frame de cámara."""
+    import json
+    import cv2
+
+    if args.img:
+        frame = cv2.imread(str(args.img))
+        if frame is None:
+            print(f"[define-roi] no se pudo leer: {args.img}")
+            return 1
+    else:
+        cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            print(f"[define-roi] no se pudo abrir cámara {args.camera}")
+            return 1
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+        for _ in range(5):
+            cap.read()
+        ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            print("[define-roi] no se pudo capturar frame")
+            return 1
+
+    win = "Seleccionar ROI — arrastra con mouse, ENTER confirma, C cancela"
+    h_img, w_img = frame.shape[:2]
+    scale = min(1280 / w_img, 800 / h_img, 1.0)
+    cv2.namedWindow(win, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(win, max(1, int(w_img * scale)), max(1, int(h_img * scale)))
+    print("Dibujá un rectángulo con el mouse. ENTER o ESPACIO para confirmar, C para cancelar.")
+    x, y, w, h = (int(v) for v in cv2.selectROI(win, frame, fromCenter=False, showCrosshair=True))
+    cv2.destroyAllWindows()
+
+    if w == 0 or h == 0:
+        print("[define-roi] cancelado o ROI vacío")
+        return 1
+
+    out_path = Path("data") / "patterns" / args.model / "roi.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({"x": x, "y": y, "w": w, "h": h}), encoding="utf-8")
+    print(f"[define-roi] ROI guardado: x={x} y={y} w={w} h={h} → {out_path}")
+    return 0
+
+
 def cmd_build_pattern(args: argparse.Namespace) -> int:
     from src.patterns.pattern_build import build_pattern_from_image
 
@@ -141,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
         description="MVP CLI: inspeccion de patron de agujeros (OK/NOK).",
     )
     sub = p.add_subparsers(dest="command", required=True)
+
+    sp = sub.add_parser("define-roi", help="Seleccionar ROI interactivamente desde imagen o cámara.")
+    sp.add_argument("--model",  required=True, help="Nombre del modelo (ej: modelo_A).")
+    sp.add_argument("--img",    type=Path, default=None, help="Imagen existente; si se omite usa la cámara.")
+    sp.add_argument("--camera", type=int,  default=0,    help="Índice de cámara (default 0).")
+    sp.set_defaults(func=cmd_define_roi)
 
     sp = sub.add_parser("build-pattern", help="Construir patron (holes.json) desde imagen OK.")
     sp.add_argument("--model", required=True, help="Nombre del modelo (ej: modelo_B).")

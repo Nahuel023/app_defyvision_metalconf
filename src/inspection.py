@@ -90,7 +90,7 @@ def inspect_frame(
 
 def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> InspectionResult:
     """Core inspection logic on a pre-loaded BGR frame."""
-    tolerances = load_tolerances()
+    tolerances = load_tolerances(model)
     threshold = int(tolerances["threshold"])
     use_channel = str(tolerances["use_channel"])
     polarity = str(tolerances["polarity"])
@@ -100,6 +100,12 @@ def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> Inspecti
     aspect_ratio_max = float(tolerances["aspect_ratio_max"])
     align_match_tol_px = float(tolerances["align_match_tol_px"])
     min_match_count = int(tolerances["min_match_count"])
+    use_clahe = bool(tolerances.get("use_clahe", False))
+    clahe_clip = float(tolerances.get("clahe_clip", 2.0))
+    clahe_tile = int(tolerances.get("clahe_tile", 8))
+    use_otsu = bool(tolerances.get("use_otsu", False))
+
+    edge_margin_px = float(tolerances.get("edge_margin_px", 0.0))
 
     pattern = load_pattern(pattern_path(model))
 
@@ -108,29 +114,84 @@ def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> Inspecti
     roi = load_roi(model)
     img = apply_roi(img_aligned, roi) if roi is not None else img_aligned
 
-    mask0 = preprocess_for_holes(img, threshold=threshold,
-                                  use_channel=use_channel, polarity=polarity)
-    holes0 = detect_holes_from_mask(mask0, min_area=min_area,
-                                     circularity_min=circularity_min,
-                                     aspect_ratio_max=aspect_ratio_max)
+    preprocess_kw = dict(
+        threshold=threshold, use_channel=use_channel, polarity=polarity,
+        use_clahe=use_clahe, clahe_clip=clahe_clip, clahe_tile=clahe_tile,
+        use_otsu=use_otsu,
+    )
+    detect_kw = dict(
+        min_area=min_area, circularity_min=circularity_min,
+        aspect_ratio_max=aspect_ratio_max, edge_margin_px=edge_margin_px,
+    )
 
+    # Single detection pass on the aligned+ROI image.
+    mask = preprocess_for_holes(img, **preprocess_kw)
+    holes = detect_holes_from_mask(mask, **detect_kw)
+    detected_points = [(h.x, h.y) for h in holes]
+
+    img_h, img_w = img.shape[:2]
+
+    # Estimate the affine transform that maps detected holes → pattern space.
     shift_xy: tuple[float, float] | None = None
     transform = _estimate_alignment_transform(
-        pattern.points, holes0,
+        pattern.points, holes,
         match_tol_px=align_match_tol_px, min_match_count=min_match_count,
     )
+
+    # Project pattern into detected coordinate space via the inverse transform.
     if transform is not None:
         shift_xy = (float(transform[0, 2]), float(transform[1, 2]))
-        img = cv2.warpAffine(img, transform, (img.shape[1], img.shape[0]),
-                             flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        inv = cv2.invertAffineTransform(transform)
+        pat_arr = np.array(pattern.points, dtype=np.float32).reshape(-1, 1, 2)
+        projected = cv2.transform(pat_arr, inv).reshape(-1, 2)
+        compare_points = [
+            (float(ex), float(ey)) for ex, ey in projected
+            if edge_margin_px <= ex <= img_w - edge_margin_px
+            and edge_margin_px <= ey <= img_h - edge_margin_px
+        ]
 
-    mask = preprocess_for_holes(img, threshold=threshold,
-                                 use_channel=use_channel, polarity=polarity)
-    holes = detect_holes_from_mask(mask, min_area=min_area,
-                                    circularity_min=circularity_min,
-                                    aspect_ratio_max=aspect_ratio_max)
-    detected_points = [(h.x, h.y) for h in holes]
-    report = compare_missing_only(pattern.points, detected_points, tol_xy_px=tol_xy_px)
+        # Alias guard: on periodic patterns the voting can alias by ±dx.
+        # Count how many projected expected points have a nearby detected hole.
+        # If the match rate is <80% and pattern has grid info, try ±dx correction
+        # and adopt whichever gives the best match rate.
+        if pattern.has_grid and compare_points and holes:
+            det_arr = np.array([(h.x, h.y) for h in holes], dtype=np.float32)
+
+            def _match_count(cp: list[tuple[float, float]]) -> int:
+                if not cp:
+                    return 0
+                return sum(
+                    1 for ex, ey in cp
+                    if np.linalg.norm(det_arr - [ex, ey], axis=1).min() < tol_xy_px
+                )
+
+            current_matches = _match_count(compare_points)
+            if current_matches / len(compare_points) < 0.80:
+                for delta_x in (-pattern.dx, +pattern.dx):
+                    t2 = transform.copy()
+                    t2[0, 2] += delta_x
+                    inv2 = cv2.invertAffineTransform(t2)
+                    proj2 = cv2.transform(pat_arr, inv2).reshape(-1, 2)
+                    cp2 = [
+                        (float(ex), float(ey)) for ex, ey in proj2
+                        if edge_margin_px <= ex <= img_w - edge_margin_px
+                        and edge_margin_px <= ey <= img_h - edge_margin_px
+                    ]
+                    m2 = _match_count(cp2)
+                    if m2 > current_matches:
+                        transform = t2
+                        compare_points = cp2
+                        shift_xy = (float(t2[0, 2]), float(t2[1, 2]))
+                        current_matches = m2
+                        break
+    else:
+        compare_points = [
+            (px, py) for px, py in pattern.points
+            if edge_margin_px <= px <= img_w - edge_margin_px
+            and edge_margin_px <= py <= img_h - edge_margin_px
+        ]
+
+    report = compare_missing_only(compare_points, detected_points, tol_xy_px=tol_xy_px)
     overlay = draw_compare_overlay(img, holes, report.missing_points, report.status)
 
     return InspectionResult(
@@ -194,11 +255,16 @@ def inspect_folder(
     )
 
 
-def _save_result_images(result: InspectionResult) -> None:
+def save_result_images(result: InspectionResult) -> None:
+    """Guarda overlay en data/output/ok|nok y máscara en data/output/debug."""
     out_dir = Path("data/output/ok") if result.status == "OK" else Path("data/output/nok")
     dbg_dir = Path("data/output/debug")
     save_image(dbg_dir / f"{result.image_path.stem}_mask.png", result.mask)
-    save_image(out_dir / f"{result.image_path.stem}_overlay.png", result.overlay)
+    save_image(out_dir  / f"{result.image_path.stem}_overlay.png", result.overlay)
+
+
+# Alias privado para compatibilidad interna
+_save_result_images = save_result_images
 
 
 def _estimate_alignment_transform(
@@ -213,9 +279,36 @@ def _estimate_alignment_transform(
     det_np = np.array([(h.x, h.y) for h in detected_holes], dtype=np.float32)
     pat_np = np.array(pattern_points, dtype=np.float32)
 
-    c_det = det_np.mean(axis=0)
-    c_pat = pat_np.mean(axis=0)
-    shifted_det = det_np + (c_pat - c_det)
+    # Build candidate pre-shifts: voting histogram (top-8) + centroid.
+    # Each candidate is verified by tight inlier count; best wins.
+    # Voting is robust when centroid fails (large shifts in symmetric patterns).
+    # Centroid is added as fallback when voting aliases on regular grids.
+    _bin = 12.0
+    _verify_tol = 20.0  # tight: << grid spacing (~97px), ensures alias rejection
+    diffs = pat_np[:, None, :] - det_np[None, :, :]  # (n_pat, n_det, 2)
+    bx = np.round(diffs[:, :, 0] / _bin).astype(np.int32).ravel()
+    by = np.round(diffs[:, :, 1] / _bin).astype(np.int32).ravel()
+    votes: dict[tuple[int, int], int] = {}
+    for kx, ky in zip(bx.tolist(), by.tolist()):
+        key = (kx, ky)
+        votes[key] = votes.get(key, 0) + 1
+    candidates: list[np.ndarray] = [
+        np.array([kx * _bin, ky * _bin], dtype=np.float32)
+        for (kx, ky), _ in sorted(votes.items(), key=lambda x: -x[1])[:8]
+    ]
+    candidates.append((pat_np.mean(axis=0) - det_np.mean(axis=0)).astype(np.float32))
+    best_inliers = -1
+    pre_shift = np.zeros(2, dtype=np.float32)
+    for cand in candidates:
+        shifted = det_np + cand
+        inliers = sum(
+            1 for ds in shifted
+            if np.linalg.norm(pat_np - ds, axis=1).min() < _verify_tol
+        )
+        if inliers > best_inliers:
+            best_inliers = inliers
+            pre_shift = cand
+    shifted_det = det_np + pre_shift
 
     src_points: list[np.ndarray] = []
     dst_points: list[np.ndarray] = []

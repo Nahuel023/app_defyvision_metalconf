@@ -11,6 +11,7 @@ from pathlib import Path
 from src.plc.client import PLCClient
 from src.plc.io_map import IOMap
 from src.controller.scanner_controller import ScannerController
+from src.utils.camera_config import load_camera_settings
 from src.vision.camera import Camera
 
 logger = logging.getLogger(__name__)
@@ -34,10 +35,14 @@ class InspectionSystem:
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
+            # Merge: camera.yaml defaults ← io_map camera_settings override
+            cam_settings = load_camera_settings(scanner_id)
+            cam_settings.update(cfg.get("camera_settings") or {})
             camera = Camera(
                 cfg["camera_index"],
                 max_retries=cam_cfg.get("max_retries", 10),
                 retry_interval_s=cam_cfg.get("retry_interval_s", 3.0),
+                settings=cam_settings,
             )
             scanner = ScannerController(scanner_id, self._io, camera)
             self._cameras[scanner_id] = camera

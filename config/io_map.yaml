@@ -10,9 +10,11 @@ plc:
 
 scanner_1:
   camera_index: 0
+  camera_settings: {}  # overrides sobre config/camera.yaml; vacío = usa camera.yaml
   model: "modelo_A"
   inspection:
     consecutive_nok_frames: 5
+    # inspection_mode: punch_triggered  # o continuous; default desde tolerancias.yaml
   inputs:
     punch_sensor: 0   # X0  — sensor inductivo (LOW = lámina quieta → inspeccionar)
     mode_switch:  1   # X1  — maneta (0=MANUAL, 1=AUTO)
