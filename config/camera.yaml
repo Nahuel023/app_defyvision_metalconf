@@ -13,11 +13,14 @@ scanner_1:
   auto_exposure: false
   auto_white_balance: false
 scanner_2:
-  autofocus: true
-  focus: 100
-  auto_exposure: true
-  exposure: -7
-  auto_white_balance: true
+  # Modo manual fijo para inspección consistente (igual que scanner_1).
+  # Ajustar exposure, focus y white_balance en planta con backlight encendido
+  # hasta que los agujeros se vean brillantes y nítidos.
+  autofocus: false
+  focus: 100                  # ajustar en planta: objetivo = agujeros nítidos
+  auto_exposure: false
+  exposure: -7                # ajustar en planta: objetivo = agujeros bien iluminados sin saturar
+  auto_white_balance: false
   white_balance: 4500
   gain: 0
   brightness: 128

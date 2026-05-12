@@ -38,3 +38,20 @@ continuous_position_threshold: 8.0
 #     consecutive_nok_frames: 6
 models:
   modelo_A: {}               # usa todos los defaults globales
+
+  modelo_B:
+    # ── Detección ──────────────────────────────────────────────────────────
+    # Producción: backlight encendido → agujeros brillantes → polarity bright.
+    # IMPORTANTE: si se reconstruye el patrón con Fotos/1.jpeg (sin backlight),
+    # cambiar temporalmente a polarity: dark, luego volver a bright.
+    polarity: bright
+    min_area: 300.0           # agujeros grandes (área mediana ~1100 px² en ref.)
+    circularity_min: 0.75     # ligeramente más permisivo que global 0.8
+    aspect_ratio_max: 2.0
+    # ── Matching ───────────────────────────────────────────────────────────
+    tol_xy_px: 28.0           # tolerancia mayor para variación de posición + aliasing de grilla
+    align_match_tol_px: 120.0
+    min_match_count: 5        # patrón puede estar parcialmente fuera de frame
+    # ── Bordes ─────────────────────────────────────────────────────────────
+    edge_margin_px: 25.0
+    pattern_edge_margin_px: 80.0  # excluir agujeros de borde que se desplazan fuera de frame
