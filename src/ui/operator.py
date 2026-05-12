@@ -645,10 +645,21 @@ def _bgr_to_pixmap(frame: np.ndarray, max_w: int, max_h: int) -> QPixmap:
 # ------------------------------------------------------------------
 
 def launch_operator_ui(system: InspectionSystem) -> None:
+    # Registrar AppUserModelID antes de crear QApplication para que Windows
+    # muestre el ícono correcto en la barra de tareas en vez del ícono de Python.
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "DEFYMOTION.DEFYVISION.1.0"
+        )
+    except Exception:
+        pass
+
     app = QApplication.instance() or QApplication(sys.argv)
     icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
     if not icon_pix.isNull():
-        app.setWindowIcon(QIcon(icon_pix))
+        icon = QIcon(icon_pix)
+        app.setWindowIcon(icon)
     win = OperatorWindow(system)
     win.show()
     app.exec()
