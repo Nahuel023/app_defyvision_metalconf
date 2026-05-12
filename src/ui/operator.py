@@ -377,9 +377,7 @@ class OperatorWindow(QMainWindow):
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
             self.setWindowIcon(QIcon(icon_pix))
-        # Tema claro base — panels y controles heredan blanco/gris claro
         self.setStyleSheet(
-            "QMainWindow, QWidget { background:#eef2f7; }"
             "QToolTip { background:#1e293b; color:#f1f5f9; border:none; }"
         )
         self.resize(1400, 880)
@@ -397,6 +395,7 @@ class OperatorWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget()
+        central.setStyleSheet("background:#eef2f7;")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(12, 10, 12, 10)
