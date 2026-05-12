@@ -13,16 +13,16 @@ scanner_1:
   auto_exposure: false
   auto_white_balance: false
 scanner_2:
-  autofocus: true
-  focus: 100
-  auto_exposure: true
-  exposure: -7
-  auto_white_balance: true
-  white_balance: 4500
+  focus: 34
+  exposure: -9
+  white_balance: 4821
   gain: 0
-  brightness: 128
+  brightness: 60
   contrast: 140
-  saturation: 50
-  sharpness: 160
+  saturation: 79
+  sharpness: 100
   gamma: 110
   backlight_compensation: 0
+  autofocus: false
+  auto_exposure: false
+  auto_white_balance: false
