@@ -20,8 +20,7 @@ clahe_tile: 8
 use_otsu: true
 burst_frames: 5
 burst_delay_ms: 50
-# Modo de inspección: continuous (posición) o punch_triggered (sensor PLC)
-# Puede sobreescribirse por scanner en io_map.yaml bajo inspection.inspection_mode
+# Modo de inspección activo: continuous (único modo soportado)
 inspection_mode: continuous
 # Umbral de diferencia media de píxeles entre el frame actual y el último
 # inspeccionado para considerar que hay suficiente material nuevo y disparar

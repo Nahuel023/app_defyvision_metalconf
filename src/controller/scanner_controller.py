@@ -8,8 +8,8 @@ Estados:
   ERROR   → fallo de hardware (cámara o PLC)
 
 Threads:
-  _poller_thread   — lee PLC cada poll_interval_ms, detecta flanco HIGH→LOW
-  _inspector_thread — espera trigger, captura frame, inspecciona
+  _poller_thread   — lee PLC cada poll_interval_ms (selector de modo)
+  _inspector_thread — modo continuo: inspecciona por diferencia de posición
 """
 
 import logging
@@ -47,13 +47,7 @@ class ScannerController:
         )
         self._save_nok    = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok     = bool(insp_cfg.get("save_ok_frames",  False))
-        self._burst_frames = int(tolerances.get("burst_frames", 3))
-        self._burst_delay  = float(tolerances.get("burst_delay_ms", 80)) / 1000.0
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
-        self._inspection_mode = str(
-            insp_cfg.get("inspection_mode",
-                         tolerances.get("inspection_mode", "punch_triggered"))
-        )
         # Umbral de diferencia media de píxeles entre el frame actual y el último
         # inspeccionado para considerar que hay suficiente material nuevo.
         self._cont_pos_thr = float(
@@ -72,9 +66,9 @@ class ScannerController:
         self._session_start: Optional[datetime] = None
         self._max_nok_streak:    int       = 0
 
-        self._lock          = threading.Lock()
-        self._trigger_event = threading.Event()
-        self._stop_event    = threading.Event()
+        self._lock           = threading.Lock()
+        self._force_inspect  = threading.Event()   # forzar inspección inmediata
+        self._stop_event     = threading.Event()
 
         self._poller_thread:   Optional[threading.Thread] = None
         self._inspector_thread: Optional[threading.Thread] = None
@@ -107,7 +101,7 @@ class ScannerController:
             self._session_start      = datetime.now()
             self._max_nok_streak     = 0
             self._stop_event.clear()
-            self._trigger_event.clear()
+            self._force_inspect.clear()
 
         self._start_threads()
         self._transition(ScannerState.RUNNING)
@@ -133,7 +127,6 @@ class ScannerController:
         self._set_lights(blue=True)   # IDLE = azul
 
         self._stop_event.set()
-        self._trigger_event.set()
         self._join_threads()
         logger.info(f"[{self._id}] detenido")
 
@@ -151,19 +144,19 @@ class ScannerController:
         logger.info(f"[{self._id}] reset, reanudando")
         return True
 
-    def force_trigger(self) -> bool:
-        """Dispara una inspección manualmente — mismo flujo que el sensor real.
+    def force_inspect(self) -> bool:
+        """Fuerza una inspección inmediata ignorando el umbral de posición.
 
-        Requiere estado RUNNING. Funciona en modo MANUAL o AUTO.
+        Requiere estado RUNNING. Útil para diagnóstico desde la UI de servicio.
         """
         with self._lock:
             if self._state != ScannerState.RUNNING:
                 logger.warning(
-                    f"[{self._id}] force_trigger ignorado, estado={self._state.value}"
+                    f"[{self._id}] force_inspect ignorado, estado={self._state.value}"
                 )
                 return False
-        self._trigger_event.set()
-        logger.info(f"[{self._id}] trigger manual")
+        self._force_inspect.set()
+        logger.info(f"[{self._id}] inspección forzada")
         return True
 
     def set_model(self, model: str) -> None:
@@ -214,91 +207,17 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def _poll_loop(self) -> None:
-        prev_punch: Optional[bool] = None
-
         while not self._stop_event.is_set():
             mode_raw = self._io.read(f"{self._id}.mode_switch")
             if mode_raw is not None:
                 new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
                 with self._lock:
                     self._mode = new_mode
-
-            punch = self._io.read(f"{self._id}.punch_sensor")
-            if punch is None:
-                with self._lock:
-                    current = self._state
-                if current == ScannerState.RUNNING:
-                    self._transition(ScannerState.ERROR)
-            else:
-                if prev_punch is True and punch is False:   # flanco HIGH→LOW
-                    with self._lock:
-                        should_trigger = (
-                            self._state == ScannerState.RUNNING
-                            and self._mode == OperationMode.AUTO
-                        )
-                    if should_trigger:
-                        self._trigger_event.set()
-                prev_punch = punch
-
             self._stop_event.wait(timeout=self._poll_interval)
 
     # ------------------------------------------------------------------
     # Thread: inspector
     # ------------------------------------------------------------------
-
-    def _inspect_loop(self) -> None:
-        """Punch-triggered mode: wait for PLC trigger, burst-capture, inspect."""
-        frame_counter = 0
-
-        while not self._stop_event.is_set():
-            triggered = self._trigger_event.wait(timeout=1.0)
-            self._trigger_event.clear()
-
-            if not triggered or self._stop_event.is_set():
-                continue
-
-            with self._lock:
-                if self._state != ScannerState.RUNNING:
-                    continue
-                model = self._io.scanner_config(self._id)["model"]
-
-            frame_counter += 1
-            frame_id = f"{self._id}_{datetime.now().strftime('%H%M%S')}_{frame_counter:04d}"
-
-            # Reload burst params — may differ per model
-            tols = load_tolerances(model)
-            burst_frames = int(tols.get("burst_frames", self._burst_frames))
-            burst_delay  = float(tols.get("burst_delay_ms", self._burst_delay * 1000)) / 1000.0
-
-            burst_results = []
-            for b in range(burst_frames):
-                if b > 0:
-                    time.sleep(self._burst_delay)
-                frame = self._camera.get_frame()
-                if frame is None:
-                    continue
-                bid = frame_id if b == 0 else f"{frame_id}_b{b + 1}"
-                res = self._inspector.inspect(model, frame, frame_id=bid)
-                if res is None:
-                    continue
-                burst_results.append(res)
-                if res.status == "OK":
-                    break
-
-            if not burst_results:
-                logger.warning(f"[{self._id}] sin frames válidos en burst")
-                self._transition(ScannerState.ERROR)
-                continue
-
-            result = min(
-                burst_results,
-                key=lambda r: (r.status != "OK", len(r.report.missing_points)),
-            )
-            logger.debug(
-                f"[{self._id}] burst {len(burst_results)}/{burst_frames} frames"
-                f" → mejor: {result.status} missing={len(result.report.missing_points)}"
-            )
-            self._handle_result(result, model)
 
     def _continuous_loop(self) -> None:
         """Modo continuo: inspecciona siempre que el material avanzó lo suficiente.
@@ -330,7 +249,10 @@ class ScannerController:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             # Comparar con el último frame inspeccionado — no con el anterior
-            if last_gray is not None:
+            forced = self._force_inspect.is_set()
+            if forced:
+                self._force_inspect.clear()
+            if last_gray is not None and not forced:
                 diff = float(np.mean(cv2.absdiff(gray, last_gray)))
                 if diff < pos_thr:
                     # Misma posición que la última inspección — esperar
@@ -411,20 +333,14 @@ class ScannerController:
             self._io.write(signal, value)
 
     def _start_threads(self) -> None:
-        inspector_target = (
-            self._continuous_loop
-            if self._inspection_mode == "continuous"
-            else self._inspect_loop
-        )
         self._poller_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name=f"{self._id}-poller"
         )
         self._inspector_thread = threading.Thread(
-            target=inspector_target, daemon=True, name=f"{self._id}-inspector"
+            target=self._continuous_loop, daemon=True, name=f"{self._id}-inspector"
         )
         self._poller_thread.start()
         self._inspector_thread.start()
-        logger.info(f"[{self._id}] modo inspección: {self._inspection_mode}")
 
     def _join_threads(self) -> None:
         if self._poller_thread:

@@ -426,7 +426,7 @@ class SystemTab(QWidget):
             start_btn = _btn("▶  Iniciar",  "#166534")
             stop_btn  = _btn("■  Detener",  "#7f1d1d")
             reset_btn = _btn("↺  Reset",    "#1e3a5f")
-            sim_btn   = _btn("⚡  Simular Punch", "#78350f")
+            sim_btn   = _btn("⚡  Forzar Inspección", "#78350f")
             cap_btn   = _btn("Capturar frame",    "#1e3a5f")
             cap_btn.setStyleSheet(
                 "background:#0f4c81;color:white;border-radius:5px;"
@@ -436,7 +436,7 @@ class SystemTab(QWidget):
             start_btn.clicked.connect(lambda _, s=sid: self._system.scanner(s).start())
             stop_btn.clicked.connect( lambda _, s=sid: self._system.scanner(s).stop())
             reset_btn.clicked.connect(lambda _, s=sid: self._system.scanner(s).reset())
-            sim_btn.clicked.connect(  lambda _, s=sid: self._system.scanner(s).force_trigger())
+            sim_btn.clicked.connect(  lambda _, s=sid: self._system.scanner(s).force_inspect())
             cap_btn.clicked.connect(  lambda _, s=sid: self._capture_frame(s))
 
             for b in (start_btn, stop_btn, reset_btn, sim_btn, cap_btn):
