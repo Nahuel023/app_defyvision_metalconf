@@ -54,9 +54,11 @@ class ScannerController:
             insp_cfg.get("inspection_mode",
                          tolerances.get("inspection_mode", "punch_triggered"))
         )
-        self._cont_motion_thr = float(tolerances.get("continuous_motion_threshold", 3.0))
-        self._cont_settling   = int(tolerances.get("continuous_settling_frames", 5))
-        self._cont_cooldown   = int(tolerances.get("continuous_cooldown_frames", 10))
+        # Umbral de diferencia media de píxeles entre el frame actual y el último
+        # inspeccionado para considerar que hay suficiente material nuevo.
+        self._cont_pos_thr = float(
+            tolerances.get("continuous_position_threshold", 8.0)
+        )
 
         self._state       = ScannerState.IDLE
         self._mode        = OperationMode.MANUAL
@@ -299,10 +301,17 @@ class ScannerController:
             self._handle_result(result, model)
 
     def _continuous_loop(self) -> None:
-        """Continuous mode: frame differencing detects motion; inspect when settled."""
-        prev_gray: Optional[np.ndarray] = None
-        settle_count  = 0
-        cooldown_count = 0
+        """Modo continuo: inspecciona siempre que el material avanzó lo suficiente.
+
+        Compara cada frame con el ÚLTIMO FRAME INSPECCIONADO (no con el anterior).
+        Si la diferencia media supera continuous_position_threshold → nueva sección
+        de material → inspeccionar → actualizar referencia.
+
+        Maneja sin distinción: máquina parada (inspecciona una vez, luego bloquea),
+        avance lento (inspecciona por sección) y avance rápido (inspecciona tan
+        rápido como el pipeline lo permite).
+        """
+        last_gray: Optional[np.ndarray] = None
         frame_counter = 0
 
         while not self._stop_event.is_set():
@@ -310,44 +319,35 @@ class ScannerController:
                 if self._state != ScannerState.RUNNING:
                     self._stop_event.wait(timeout=0.05)
                     continue
-                model = self._io.scanner_config(self._id)["model"]
+                model    = self._io.scanner_config(self._id)["model"]
+                pos_thr  = self._cont_pos_thr
 
             frame = self._camera.get_frame()
             if frame is None:
-                self._stop_event.wait(timeout=0.02)
+                self._stop_event.wait(timeout=0.033)
                 continue
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            if prev_gray is not None:
-                diff   = cv2.absdiff(gray, prev_gray)
-                motion = float(np.mean(diff))
+            # Comparar con el último frame inspeccionado — no con el anterior
+            if last_gray is not None:
+                diff = float(np.mean(cv2.absdiff(gray, last_gray)))
+                if diff < pos_thr:
+                    # Misma posición que la última inspección — esperar
+                    self._stop_event.wait(timeout=0.033)
+                    continue
+                logger.debug(f"[{self._id}] nueva sección detectada (diff={diff:.1f})")
 
-                if motion < self._cont_motion_thr:
-                    settle_count += 1
-                else:
-                    settle_count = 0
-                    cooldown_count = 0
+            # Nueva posición (o primer frame) → inspeccionar
+            frame_counter += 1
+            fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
+                   f"_{frame_counter:04d}")
+            res = self._inspector.inspect(model, frame, frame_id=fid)
+            if res is not None:
+                last_gray = gray   # referencia actualizada solo con inspecciones exitosas
+                self._handle_result(res, model)
 
-                if settle_count >= self._cont_settling and cooldown_count == 0:
-                    frame_counter += 1
-                    fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
-                           f"_{frame_counter:04d}")
-                    res = self._inspector.inspect(model, frame, frame_id=fid)
-                    if res is not None:
-                        logger.debug(
-                            f"[{self._id}] continuous: motion={motion:.2f}"
-                            f" → {res.status} missing={len(res.report.missing_points)}"
-                        )
-                        self._handle_result(res, model)
-                    settle_count = 0
-                    cooldown_count = self._cont_cooldown
-
-                if cooldown_count > 0:
-                    cooldown_count -= 1
-
-            prev_gray = gray
-            self._stop_event.wait(timeout=0.033)  # ~30 fps polling
+            self._stop_event.wait(timeout=0.033)
 
     def _handle_result(self, result: InspectionResult, model: str = "") -> None:
         """Update state machine and fire callbacks after any inspection result."""

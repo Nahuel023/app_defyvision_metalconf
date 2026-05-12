@@ -20,13 +20,14 @@ clahe_tile: 8
 use_otsu: true
 burst_frames: 5
 burst_delay_ms: 50
-# Modo de inspección: punch_triggered (trigger por sensor PLC) o continuous
+# Modo de inspección: continuous (posición) o punch_triggered (sensor PLC)
 # Puede sobreescribirse por scanner en io_map.yaml bajo inspection.inspection_mode
-inspection_mode: punch_triggered
-# Parámetros del modo continuo
-continuous_motion_threshold: 3.0  # diferencia media de píxeles; > esto = en movimiento
-continuous_settling_frames: 5     # frames quietos antes de disparar inspección
-continuous_cooldown_frames: 10    # frames a ignorar tras cada inspección
+inspection_mode: continuous
+# Umbral de diferencia media de píxeles entre el frame actual y el último
+# inspeccionado para considerar que hay suficiente material nuevo y disparar
+# una inspección. Más alto = menos inspecciones (secciones más separadas).
+# Ajustar en planta según velocidad de avance y tamaño del patrón.
+continuous_position_threshold: 8.0
 
 # ── Overrides por modelo ──────────────────────────────────────────────────────
 # Solo especificar los parámetros que difieren del global.
