@@ -11,6 +11,7 @@ Uso:
 import logging
 import threading
 import time
+from collections import deque
 from typing import Optional
 
 import cv2
@@ -54,6 +55,8 @@ class Camera:
         self._lock    = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
+        # FPS real: timestamps de los últimos 60 frames capturados exitosamente
+        self._frame_times: deque = deque(maxlen=60)
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -103,6 +106,15 @@ class Camera:
     @property
     def index(self) -> int:
         return self._index
+
+    @property
+    def fps(self) -> float:
+        """FPS real medido sobre los últimos frames capturados."""
+        times = list(self._frame_times)
+        if len(times) < 2:
+            return 0.0
+        elapsed = times[-1] - times[0]
+        return (len(times) - 1) / elapsed if elapsed > 0 else 0.0
 
     # ------------------------------------------------------------------
     # Ajuste en vivo de parámetros
@@ -243,3 +255,4 @@ class Camera:
 
             with self._lock:
                 self._frame = frame
+            self._frame_times.append(time.monotonic())

@@ -11,6 +11,7 @@ from pathlib import Path
 from src.plc.client import PLCClient
 from src.plc.io_map import IOMap
 from src.controller.scanner_controller import ScannerController
+from src.metrics.recorder import MetricsRecorder
 from src.utils.camera_config import load_camera_settings
 from src.vision.camera import Camera
 
@@ -47,6 +48,9 @@ class InspectionSystem:
             self._cameras[scanner_id] = camera
             self._scanners[scanner_id] = scanner
 
+        self._recorder = MetricsRecorder()
+        self._recorder.start(self)
+
     # ------------------------------------------------------------------
     # Ciclo de vida
     # ------------------------------------------------------------------
@@ -68,7 +72,8 @@ class InspectionSystem:
         return results
 
     def shutdown(self) -> None:
-        """Detiene todos los scanners, cámaras y cierra el PLC."""
+        """Detiene todos los scanners, cámaras, recorder y cierra el PLC."""
+        self._recorder.stop()
         for scanner in self._scanners.values():
             scanner.stop()
         for camera in self._cameras.values():
@@ -96,6 +101,10 @@ class InspectionSystem:
     @property
     def plc(self) -> PLCClient:
         return self._client
+
+    @property
+    def metrics(self) -> MetricsRecorder:
+        return self._recorder
 
     # ------------------------------------------------------------------
 

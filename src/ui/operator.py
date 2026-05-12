@@ -108,7 +108,8 @@ class ScannerPanel(QWidget):
         root.setSpacing(6)
 
         # ── Título del scanner ───────────────────────────────────────
-        title = QLabel(self._id.replace("_", " ").upper())
+        _num = self._id.split("_")[-1]
+        title = QLabel(f"{self._id.replace('_', ' ').upper()}   ·   BAL {_num}")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
             "font-size:13px;font-weight:700;color:#1e293b;"
@@ -373,6 +374,7 @@ class OperatorWindow(QMainWindow):
         super().__init__()
         self._system      = system
         self._service_win = None
+        self._metrics_win = None
         self.setWindowTitle("DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
@@ -500,22 +502,24 @@ class OperatorWindow(QMainWindow):
         ctrl_lay.setSpacing(5)
         ctrl_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        self._plc_badge = QLabel("● PLC: —")
+        # Badge solo visible cuando hay problema de PLC
+        self._plc_badge = QLabel("● PLC: Desconectado")
         self._plc_badge.setStyleSheet(
-            "color:#94a3b8;font-size:11px;font-weight:600;background:transparent;"
+            "color:#f87171;font-size:11px;font-weight:600;background:transparent;"
         )
+        self._plc_badge.hide()
         ctrl_lay.addWidget(self._plc_badge)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(5)
 
-        reconnect_btn = QPushButton("Reconectar PLC")
-        reconnect_btn.setFixedHeight(22)
-        reconnect_btn.setStyleSheet(
+        metrics_btn = QPushButton("Métricas")
+        metrics_btn.setFixedHeight(22)
+        metrics_btn.setStyleSheet(
             "background:#1e40af;color:white;border-radius:5px;"
             "font-size:10px;padding:0 8px;border:none;"
         )
-        reconnect_btn.clicked.connect(self._reconnect_plc)
+        metrics_btn.clicked.connect(self._open_metrics)
 
         service_btn = QPushButton("Modo Servicio")
         service_btn.setFixedHeight(22)
@@ -525,7 +529,7 @@ class OperatorWindow(QMainWindow):
         )
         service_btn.clicked.connect(self._open_service)
 
-        btn_row.addWidget(reconnect_btn)
+        btn_row.addWidget(metrics_btn)
         btn_row.addWidget(service_btn)
         ctrl_lay.addLayout(btn_row)
 
@@ -551,23 +555,23 @@ class OperatorWindow(QMainWindow):
 
     def _refresh_status(self) -> None:
         if self._system.plc.connected:
-            self._plc_badge.setText("● PLC: Conectado")
-            self._plc_badge.setStyleSheet(
-                "color:#4ade80;font-size:11px;font-weight:600;background:transparent;"
-            )
+            self._plc_badge.hide()
         else:
             self._plc_badge.setText("● PLC: Desconectado")
             self._plc_badge.setStyleSheet(
                 "color:#f87171;font-size:11px;font-weight:600;background:transparent;"
             )
+            self._plc_badge.show()
         for panel in self._panels.values():
             panel.refresh_status()
 
-    def _reconnect_plc(self) -> None:
-        ok  = self._system.connect_plc()
-        msg = "PLC conectado." if ok else "No se pudo conectar al PLC."
-        for panel in self._panels.values():
-            panel._log(f"[Sistema] {msg}")
+    def _open_metrics(self) -> None:
+        from src.ui.metrics_window import MetricsWindow
+        if self._metrics_win is None or not self._metrics_win.isVisible():
+            self._metrics_win = MetricsWindow(self._system)
+        self._metrics_win.show()
+        self._metrics_win.raise_()
+        self._metrics_win.activateWindow()
 
     def _open_service(self) -> None:
         from src.ui.login_dialog import LoginDialog

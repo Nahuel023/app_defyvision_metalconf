@@ -65,6 +65,10 @@ class ScannerController:
         self._nok_count:         int       = 0
         self._session_start: Optional[datetime] = None
         self._max_nok_streak:    int       = 0
+        self._fault_count:       int       = 0
+        self._total_missing:     int       = 0   # suma de agujeros faltantes en NOKs
+        self._nok_with_missing:  int       = 0   # NOKs con datos de missing
+        self._last_position_diff: float    = 0.0  # última diff detectada en continuous_loop
 
         self._lock           = threading.Lock()
         self._force_inspect  = threading.Event()   # forzar inspección inmediata
@@ -100,6 +104,10 @@ class ScannerController:
             self._nok_count          = 0
             self._session_start      = datetime.now()
             self._max_nok_streak     = 0
+            self._fault_count        = 0
+            self._total_missing      = 0
+            self._nok_with_missing   = 0
+            self._last_position_diff = 0.0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -190,16 +198,23 @@ class ScannerController:
 
     def get_status(self) -> dict:
         with self._lock:
+            avg_missing = (
+                self._total_missing / self._nok_with_missing
+                if self._nok_with_missing > 0 else 0.0
+            )
             return {
-                "state":             self._state,
-                "mode":              self._mode,
-                "nok_streak":        self._nok_streak,
-                "last_result":       self._last_result,
-                "total_inspections": self._total_inspections,
-                "ok_count":          self._ok_count,
-                "nok_count":         self._nok_count,
-                "session_start":     self._session_start,
-                "max_nok_streak":    self._max_nok_streak,
+                "state":              self._state,
+                "mode":               self._mode,
+                "nok_streak":         self._nok_streak,
+                "last_result":        self._last_result,
+                "total_inspections":  self._total_inspections,
+                "ok_count":           self._ok_count,
+                "nok_count":          self._nok_count,
+                "session_start":      self._session_start,
+                "max_nok_streak":     self._max_nok_streak,
+                "fault_count":        self._fault_count,
+                "avg_missing_holes":  avg_missing,
+                "last_position_diff": self._last_position_diff,
             }
 
     # ------------------------------------------------------------------
@@ -254,6 +269,8 @@ class ScannerController:
                 self._force_inspect.clear()
             if last_gray is not None and not forced:
                 diff = float(np.mean(cv2.absdiff(gray, last_gray)))
+                with self._lock:
+                    self._last_position_diff = diff
                 if diff < pos_thr:
                     # Misma posición que la última inspección — esperar
                     self._stop_event.wait(timeout=0.033)
@@ -291,6 +308,8 @@ class ScannerController:
             if result.status == "NOK":
                 self._nok_streak += 1
                 self._nok_count  += 1
+                self._total_missing    += result.report.missing
+                self._nok_with_missing += 1
             else:
                 self._nok_streak  = 0
                 self._ok_count   += 1
@@ -300,6 +319,7 @@ class ScannerController:
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
                 self._state   = ScannerState.FAULT
                 fault_triggered = True
+                self._fault_count += 1
 
         if fault_triggered:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")

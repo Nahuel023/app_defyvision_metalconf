@@ -21,7 +21,7 @@ from typing import Optional
 import cv2
 
 from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QPixmap, QImage
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPixmap, QImage
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -51,6 +51,11 @@ from src.utils import camera_config
 from src.utils.state import OperationMode, ScannerState
 
 logger = logging.getLogger(__name__)
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# Ancho fijo de cada ala del header — igualar ambos lados centra el título
+_HEADER_WING_W = 310
 
 # ------------------------------------------------------------------
 # Paleta
@@ -1468,6 +1473,28 @@ class CameraCalibTab(QWidget):
         )
 
 
+# ------------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------------
+
+def _logo_label(rel_path: str, max_h: int) -> QLabel:
+    """Carga logo desde raíz del proyecto escalado a max_h px de alto."""
+    lbl = QLabel()
+    lbl.setStyleSheet("background:transparent;")
+    pix = QPixmap(str(_ROOT / rel_path))
+    if not pix.isNull():
+        pix = pix.scaledToHeight(max_h, Qt.TransformationMode.SmoothTransformation)
+        lbl.setPixmap(pix)
+    else:
+        lbl.setText(Path(rel_path).stem.upper())
+        lbl.setStyleSheet(
+            "color:#38bdf8;font-size:14px;font-weight:700;"
+            "letter-spacing:2px;background:transparent;"
+        )
+    lbl.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignCenter)
+    return lbl
+
+
 # ==================================================================
 # Ventana de servicio
 # ==================================================================
@@ -1477,6 +1504,9 @@ class ServiceWindow(QMainWindow):
         super().__init__(parent)
         self._system = system
         self.setWindowTitle("DEFYVISION — Modo Servicio")
+        icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+        if not icon_pix.isNull():
+            self.setWindowIcon(QIcon(icon_pix))
         self.resize(1200, 760)
 
         self._log_handler = QtLogHandler()
@@ -1533,41 +1563,105 @@ class ServiceWindow(QMainWindow):
         root.addWidget(self._tabs, stretch=1)
 
     def _build_header(self) -> QWidget:
+        """
+        Header oscuro con logos reales — misma estructura que OperatorWindow.
+
+        Layout de 3 secciones de ancho fijo igual (_HEADER_WING_W px c/u):
+          [ala izquierda] | [centro: título, stretch=1] | [ala derecha]
+        """
         header = QWidget()
-        header.setFixedHeight(56)
+        header.setFixedHeight(84)
         header.setStyleSheet(
-            f"background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f"stop:0 {_DARK}, stop:1 #1e3a5f); border-radius:10px;"
+            "QWidget { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #05101f, stop:0.5 #0c2340, stop:1 #05101f);"
+            "border-radius:10px; }"
         )
-        lay = QHBoxLayout(header)
-        lay.setContentsMargins(22, 0, 22, 0)
-        lay.setSpacing(14)
 
-        logo = QLabel("DEFYMOTION")
-        logo.setStyleSheet(
-            f"color:{_ACCENT};font-size:16px;font-weight:700;"
-            "letter-spacing:2px;background:transparent;"
-        )
-        lay.addWidget(logo)
-        lay.addStretch()
+        outer = QHBoxLayout(header)
+        outer.setContentsMargins(18, 0, 18, 0)
+        outer.setSpacing(0)
 
-        title = QLabel("DEFYVISION  ·  Modo Servicio")
+        # ── Ala izquierda: logo Metalconf ────────────────────────────
+        left_wing = QWidget()
+        left_wing.setFixedWidth(_HEADER_WING_W)
+        left_wing.setStyleSheet("background:transparent;")
+        left_lay = QHBoxLayout(left_wing)
+        left_lay.setContentsMargins(0, 10, 0, 10)
+        left_lay.setSpacing(0)
+        left_lay.addWidget(_logo_label("logos/metalconf.png", 56))
+        left_lay.addStretch()
+        outer.addWidget(left_wing)
+
+        # ── Centro: título ────────────────────────────────────────────
+        center = QWidget()
+        center.setStyleSheet("background:transparent;")
+        center_lay = QVBoxLayout(center)
+        center_lay.setContentsMargins(0, 0, 0, 0)
+        center_lay.setSpacing(3)
+        center_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        title = QLabel("DEFYVISION")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"color:{_TEXT};font-size:18px;font-weight:700;background:transparent;"
+            "color:#f1f5f9;font-size:26px;font-weight:700;"
+            "letter-spacing:4px;background:transparent;"
         )
-        lay.addWidget(title)
-        lay.addStretch()
+        subtitle = QLabel("Modo Servicio  ·  Diagnóstico")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet(
+            "color:#475569;font-size:10px;letter-spacing:1.5px;"
+            "background:transparent;"
+        )
+        center_lay.addWidget(title)
+        center_lay.addWidget(subtitle)
+        outer.addWidget(center, stretch=1)
+
+        # ── Ala derecha: PLC badge + logo DEFYMOTION ─────────────────
+        right_wing = QWidget()
+        right_wing.setFixedWidth(_HEADER_WING_W)
+        right_wing.setStyleSheet("background:transparent;")
+        right_lay = QHBoxLayout(right_wing)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(10)
+
+        ctrl = QWidget()
+        ctrl.setStyleSheet("background:transparent;")
+        ctrl_lay = QVBoxLayout(ctrl)
+        ctrl_lay.setContentsMargins(0, 10, 0, 10)
+        ctrl_lay.setSpacing(5)
+        ctrl_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self._header_plc = QLabel("● PLC: —")
         self._header_plc.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;"
         )
-        lay.addWidget(self._header_plc)
+        ctrl_lay.addWidget(self._header_plc)
+
+        reconnect_btn = QPushButton("Reconectar PLC")
+        reconnect_btn.setFixedHeight(22)
+        reconnect_btn.setStyleSheet(
+            "background:#1e40af;color:white;border-radius:5px;"
+            "font-size:10px;padding:0 8px;border:none;"
+        )
+        reconnect_btn.clicked.connect(self._reconnect_plc)
+        ctrl_lay.addWidget(reconnect_btn)
+
+        right_lay.addStretch()
+        right_lay.addWidget(ctrl)
+
+        dm_logo = _logo_label("logos/defymotion.jpg", 48)
+        dm_logo.setContentsMargins(6, 0, 0, 0)
+        right_lay.addWidget(dm_logo)
+
+        outer.addWidget(right_wing)
 
         return header
 
     # ------------------------------------------------------------------
+
+    def _reconnect_plc(self) -> None:
+        ok = self._system.connect_plc()
+        logger.info(f"[Servicio] Reconectar PLC → {'OK' if ok else 'FALLO'}")
 
     def _refresh(self) -> None:
         connected = self._system.plc.connected
@@ -1598,7 +1692,18 @@ class ServiceWindow(QMainWindow):
 # ------------------------------------------------------------------
 
 def launch_service_ui(system: InspectionSystem) -> None:
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "DEFYMOTION.DEFYVISION.1.0"
+        )
+    except Exception:
+        pass
+
     app = QApplication.instance() or QApplication(sys.argv)
+    icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+    if not icon_pix.isNull():
+        app.setWindowIcon(QIcon(icon_pix))
     win = ServiceWindow(system)
     win.show()
     app.exec()
