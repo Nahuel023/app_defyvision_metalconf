@@ -9,6 +9,9 @@ Muestra ambos scanners en paralelo con:
   - Controles: INICIAR / DETENER / RESET
   - Selector de modelo por scanner
   - Log de eventos compacto e independiente por scanner (thread-safe via señal)
+
+Tema: claro fijo (fondo blanco/gris claro) — legibilidad en entorno industrial.
+Header: oscuro — ancla visual y contraste para logos.
 """
 
 import sys
@@ -42,25 +45,27 @@ from src.controller.system import InspectionSystem
 from src.inspection import InspectionResult
 from src.utils.state import OperationMode, ScannerState
 
-# Raíz del proyecto (src/ui/operator.py → ../../..)
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
 # ------------------------------------------------------------------
 # Constantes
 # ------------------------------------------------------------------
 _COLOR = {
-    ScannerState.IDLE:    ("#475569", "#ffffff"),
-    ScannerState.RUNNING: ("#166534", "#ffffff"),
+    ScannerState.IDLE:    ("#64748b", "#ffffff"),
+    ScannerState.RUNNING: ("#15803d", "#ffffff"),
     ScannerState.FAULT:   ("#b91c1c", "#ffffff"),
     ScannerState.ERROR:   ("#92400e", "#ffffff"),
 }
 _MODE_COLOR = {
-    OperationMode.AUTO:   "#38bdf8",
-    OperationMode.MANUAL: "#94a3b8",
+    OperationMode.AUTO:   "#1d4ed8",
+    OperationMode.MANUAL: "#64748b",
 }
-_CAMERA_REFRESH_MS = 50      # 20 fps
+_CAMERA_REFRESH_MS = 50
 _STATUS_REFRESH_MS = 200
 _OVERLAY_HOLD_MS   = 2500
+
+# Ancho fijo de cada ala del header — igualar ambos lados centra el título
+_HEADER_WING_W = 310
 
 
 # ------------------------------------------------------------------
@@ -71,7 +76,7 @@ class ScannerPanel(QWidget):
     """Panel completo para un scanner (cámara + estado + métricas + controles + log)."""
 
     _sig_log     = pyqtSignal(str)
-    _sig_overlay = pyqtSignal(object, int)   # (np.ndarray, until_ms)
+    _sig_overlay = pyqtSignal(object, int)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
                  parent: QWidget | None = None) -> None:
@@ -102,30 +107,30 @@ class ScannerPanel(QWidget):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(6)
 
-        # ── Título ──────────────────────────────────────────────────
+        # ── Título del scanner ───────────────────────────────────────
         title = QLabel(self._id.replace("_", " ").upper())
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            "font-size:13px;font-weight:700;color:#cbd5e1;"
-            "background:#1e293b;border-radius:6px;padding:5px;"
+            "font-size:13px;font-weight:700;color:#1e293b;"
+            "background:#e2e8f0;border-radius:6px;padding:5px;"
             "letter-spacing:1px;"
         )
         root.addWidget(title)
 
-        # ── Feed de cámara ──────────────────────────────────────────
+        # ── Feed de cámara ─ fondo oscuro para contraste ─────────────
         self.camera_label = QLabel()
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.camera_label.setMinimumSize(440, 280)
         self.camera_label.setStyleSheet(
-            "background:#050e1a;border-radius:8px;"
-            "border:1px solid #1e293b;"
+            "background:#0a0f1a;border-radius:8px;"
+            "border:1px solid #cbd5e1;"
         )
         self.camera_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         root.addWidget(self.camera_label, stretch=1)
 
-        # ── Badge de estado (ancho completo, muy visible) ────────────
+        # ── Badge de estado ──────────────────────────────────────────
         self.state_badge = QLabel("● IDLE")
         self.state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.state_badge.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
@@ -135,24 +140,22 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
-        # ── Panel de métricas operativas (grilla 2×3 sobre fondo oscuro) ──
+        # ── Panel de métricas operativas (grilla 2×3) ────────────────
         metrics_frame = QFrame()
         metrics_frame.setStyleSheet(
-            "background:#0a1628;border-radius:8px;"
-            "border:1px solid #1e293b;"
+            "QFrame { background:#f1f5f9;border-radius:8px;"
+            "border:1px solid #cbd5e1; }"
         )
         grid = QGridLayout(metrics_frame)
         grid.setContentsMargins(8, 8, 8, 8)
         grid.setSpacing(5)
 
-        # Fila 0: modo | total | último resultado
         self._mode_val   = self._metric_card("MODO",      "MANUAL", _MODE_COLOR[OperationMode.MANUAL])
-        self._total_val  = self._metric_card("TOTAL",     "0",      "#64748b")
-        self._result_val = self._metric_card("ÚLTIMO",    "—",      "#64748b")
-        # Fila 1: racha | OK | NOK
-        self._streak_val = self._metric_card("RACHA NOK", "0",      "#64748b")
-        self._ok_val     = self._metric_card("✓ OK",      "0",      "#4ade80")
-        self._nok_val    = self._metric_card("✗ NOK",     "0",      "#64748b")
+        self._total_val  = self._metric_card("TOTAL",     "0",      "#94a3b8")
+        self._result_val = self._metric_card("ÚLTIMO",    "—",      "#94a3b8")
+        self._streak_val = self._metric_card("RACHA NOK", "0",      "#94a3b8")
+        self._ok_val     = self._metric_card("✓ OK",      "0",      "#94a3b8")
+        self._nok_val    = self._metric_card("✗ NOK",     "0",      "#94a3b8")
 
         for col, mv in enumerate([self._mode_val, self._total_val, self._result_val]):
             grid.addWidget(mv[0], 0, col)
@@ -168,8 +171,8 @@ class ScannerPanel(QWidget):
         lbl.setStyleSheet("font-size:11px;color:#64748b;font-weight:600;")
         self.model_combo = QComboBox()
         self.model_combo.setStyleSheet(
-            "font-size:11px;background:#1e293b;color:#cbd5e1;"
-            "border:1px solid #334155;border-radius:5px;padding:2px 6px;"
+            "font-size:11px;background:#ffffff;color:#1e293b;"
+            "border:1px solid #cbd5e1;border-radius:5px;padding:2px 6px;"
         )
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
         model_row.addWidget(lbl)
@@ -179,7 +182,7 @@ class ScannerPanel(QWidget):
         # ── Botones de control ───────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(6)
-        self.start_btn = self._control_btn("▶  INICIAR", "#166534")
+        self.start_btn = self._control_btn("▶  INICIAR", "#15803d")
         self.stop_btn  = self._control_btn("■  DETENER", "#b91c1c")
         self.reset_btn = self._control_btn("↺  RESET",   "#1d4ed8")
         self.start_btn.clicked.connect(self._on_start)
@@ -190,32 +193,31 @@ class ScannerPanel(QWidget):
         btn_row.addWidget(self.reset_btn)
         root.addLayout(btn_row)
 
-        # ── Log — compacto, rol secundario ───────────────────────────
+        # ── Log — compacto, visual secundario ────────────────────────
         self._log_widget = QTextEdit()
         self._log_widget.setReadOnly(True)
-        self._log_widget.setMaximumHeight(54)
-        self._log_widget.setMinimumHeight(54)
+        self._log_widget.setFixedHeight(54)
         self._log_widget.setFont(QFont("Consolas", 7))
         self._log_widget.setStyleSheet(
-            "background:#050e1a;color:#334155;border:none;"
-            "border-radius:5px;padding:3px;"
+            "background:#f8fafc;color:#94a3b8;"
+            "border:1px solid #e2e8f0;border-radius:5px;padding:3px;"
         )
         root.addWidget(self._log_widget)
 
         self._refresh_buttons(ScannerState.IDLE)
 
     def _metric_card(self, title: str, value: str, color: str) -> tuple[QWidget, QLabel]:
-        """Tarjeta de métrica con estilo oscuro/HMI."""
+        """Tarjeta de métrica — tema claro."""
         w = QWidget()
         w.setStyleSheet(
-            "background:#0f172a;border-radius:6px;"
-            "border:1px solid #1e293b;"
+            "background:#ffffff;border-radius:6px;"
+            "border:1px solid #e2e8f0;"
         )
         lay = QVBoxLayout(w)
         lay.setContentsMargins(6, 5, 6, 5)
         lay.setSpacing(1)
         t = QLabel(title)
-        t.setStyleSheet("font-size:8px;color:#475569;letter-spacing:0.5px;")
+        t.setStyleSheet("font-size:8px;color:#94a3b8;letter-spacing:0.5px;")
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v = QLabel(value)
         v.setStyleSheet(f"font-size:15px;font-weight:700;color:{color};")
@@ -234,7 +236,7 @@ class ScannerPanel(QWidget):
         return btn
 
     # ------------------------------------------------------------------
-    # Refresco (llamado por timers del padre — hilo principal)
+    # Refresco (hilo principal)
     # ------------------------------------------------------------------
 
     def refresh_camera(self) -> None:
@@ -261,7 +263,6 @@ class ScannerPanel(QWidget):
         ok_cnt  = s["ok_count"]
         nok_cnt = s["nok_count"]
 
-        # Badge de estado
         bg, fg = _COLOR[state]
         self.state_badge.setText(f"● {state.value.upper()}")
         self.state_badge.setStyleSheet(
@@ -269,30 +270,26 @@ class ScannerPanel(QWidget):
             "padding:8px 14px;font-size:14px;font-weight:700;"
         )
 
-        # Modo
         mc = _MODE_COLOR[mode]
         self._mode_val[1].setText(mode.value.upper())
         self._mode_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{mc};")
 
-        # Racha NOK
-        sc = "#f87171" if streak > 0 else "#64748b"
+        sc = "#b91c1c" if streak > 0 else "#94a3b8"
         self._streak_val[1].setText(str(streak))
         self._streak_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{sc};")
 
-        # Totales de sesión
         self._total_val[1].setText(str(total))
 
-        ok_c = "#4ade80" if ok_cnt > 0 else "#64748b"
+        ok_c = "#15803d" if ok_cnt > 0 else "#94a3b8"
         self._ok_val[1].setText(str(ok_cnt))
         self._ok_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{ok_c};")
 
-        nok_c = "#f87171" if nok_cnt > 0 else "#64748b"
+        nok_c = "#b91c1c" if nok_cnt > 0 else "#94a3b8"
         self._nok_val[1].setText(str(nok_cnt))
         self._nok_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{nok_c};")
 
-        # Último resultado
         if result:
-            rc = "#4ade80" if result.status == "OK" else "#f87171"
+            rc = "#15803d" if result.status == "OK" else "#b91c1c"
             missing_txt = f" ({result.report.missing}✗)" if result.report.missing else ""
             self._result_val[1].setText(f"{result.status}{missing_txt}")
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{rc};")
@@ -325,7 +322,7 @@ class ScannerPanel(QWidget):
             self._log(f"Modelo → {model}")
 
     # ------------------------------------------------------------------
-    # Callbacks del controller (llamados desde threads — usan señales)
+    # Callbacks del controller (threads → señales → hilo principal)
     # ------------------------------------------------------------------
 
     def _on_state_changed(self, state: ScannerState, mode: OperationMode) -> None:
@@ -377,7 +374,11 @@ class OperatorWindow(QMainWindow):
         self._system      = system
         self._service_win = None
         self.setWindowTitle("DEFYVISION — Metalconf")
-        self.setStyleSheet("QMainWindow { background:#0a1628; }")
+        # Tema claro base — panels y controles heredan blanco/gris claro
+        self.setStyleSheet(
+            "QMainWindow, QWidget { background:#eef2f7; }"
+            "QToolTip { background:#1e293b; color:#f1f5f9; border:none; }"
+        )
         self.resize(1400, 880)
         self._build_ui()
 
@@ -393,7 +394,6 @@ class OperatorWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         central = QWidget()
-        central.setStyleSheet("background:#0a1628;")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
         root.setContentsMargins(12, 10, 12, 10)
@@ -403,18 +403,17 @@ class OperatorWindow(QMainWindow):
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
-        splitter.setStyleSheet("QSplitter::handle { background:#1e293b; width:2px; }")
+        splitter.setStyleSheet(
+            "QSplitter::handle { background:#cbd5e1; width:2px; }"
+        )
         self._panels: dict[str, ScannerPanel] = {}
 
         for sid in self._system.scanner_ids():
             panel = ScannerPanel(sid, self._system)
-            panel.setStyleSheet(
-                "ScannerPanel { background:#0f172a;border-radius:10px; }"
-            )
             frame = QFrame()
             frame.setStyleSheet(
-                "QFrame { background:#0f172a;border-radius:10px;"
-                "border:1px solid #1e293b; }"
+                "QFrame { background:#ffffff;border-radius:10px;"
+                "border:1px solid #cbd5e1; }"
             )
             fl = QVBoxLayout(frame)
             fl.setContentsMargins(0, 0, 0, 0)
@@ -428,89 +427,115 @@ class OperatorWindow(QMainWindow):
         root.addWidget(splitter, stretch=1)
 
     def _build_header(self) -> QWidget:
+        """
+        Header oscuro con logos reales.
+
+        Layout de 3 secciones de ancho fijo igual (_HEADER_WING_W px c/u):
+          [ala izquierda] | [centro: título, stretch=1] | [ala derecha]
+
+        Ambas alas tienen el mismo ancho → el título queda perfectamente centrado.
+        """
         header = QWidget()
-        header.setFixedHeight(82)
+        header.setFixedHeight(84)
         header.setStyleSheet(
-            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #050e1a, stop:0.5 #0f2040, stop:1 #050e1a);"
-            "border-radius:10px;"
-            "border:1px solid #1e293b;"
+            "QWidget { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #05101f, stop:0.5 #0c2340, stop:1 #05101f);"
+            "border-radius:10px; }"
         )
 
         outer = QHBoxLayout(header)
-        outer.setContentsMargins(20, 0, 20, 0)
-        outer.setSpacing(20)
+        outer.setContentsMargins(18, 0, 18, 0)
+        outer.setSpacing(0)
 
-        # ── Logo Metalconf (izquierda — cliente) ────────────────────
-        outer.addWidget(_logo_label("logos/metalconf.png", 56))
+        # ── Ala izquierda: logo Metalconf ────────────────────────────
+        left_wing = QWidget()
+        left_wing.setFixedWidth(_HEADER_WING_W)
+        left_wing.setStyleSheet("background:transparent;")
+        left_lay = QHBoxLayout(left_wing)
+        left_lay.setContentsMargins(0, 10, 0, 10)
+        left_lay.setSpacing(0)
+        left_lay.addWidget(_logo_label("logos/metalconf.png", 56))
+        left_lay.addStretch()
+        outer.addWidget(left_wing)
 
-        outer.addStretch()
-
-        # ── Centro: título ──────────────────────────────────────────
-        center = QVBoxLayout()
-        center.setSpacing(2)
-        center.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+        # ── Centro: título ────────────────────────────────────────────
+        center = QWidget()
+        center.setStyleSheet("background:transparent;")
+        center_lay = QVBoxLayout(center)
+        center_lay.setContentsMargins(0, 0, 0, 0)
+        center_lay.setSpacing(3)
+        center_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         title = QLabel("DEFYVISION")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            "color:#f1f5f9;font-size:22px;font-weight:700;"
-            "letter-spacing:3px;background:transparent;"
+            "color:#f1f5f9;font-size:26px;font-weight:700;"
+            "letter-spacing:4px;background:transparent;"
         )
-        subtitle = QLabel("Sistema de Inspección Visual · Metalconf")
+        subtitle = QLabel("Sistema de Inspección Visual  ·  Metalconf")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(
-            "color:#475569;font-size:10px;letter-spacing:1px;"
+            "color:#475569;font-size:10px;letter-spacing:1.5px;"
             "background:transparent;"
         )
-        center.addWidget(title)
-        center.addWidget(subtitle)
-        outer.addLayout(center)
+        center_lay.addWidget(title)
+        center_lay.addWidget(subtitle)
+        outer.addWidget(center, stretch=1)
 
-        outer.addStretch()
+        # ── Ala derecha: controles + logo DEFYMOTION ─────────────────
+        right_wing = QWidget()
+        right_wing.setFixedWidth(_HEADER_WING_W)
+        right_wing.setStyleSheet("background:transparent;")
+        right_lay = QHBoxLayout(right_wing)
+        right_lay.setContentsMargins(0, 0, 0, 0)
+        right_lay.setSpacing(10)
 
-        # ── PLC badge + botones ─────────────────────────────────────
-        right = QWidget()
-        right.setStyleSheet("background:transparent;")
-        right_lay = QVBoxLayout(right)
-        right_lay.setContentsMargins(0, 10, 0, 10)
-        right_lay.setSpacing(5)
-        right_lay.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # Sub-columna izquierda: PLC badge + botones
+        ctrl = QWidget()
+        ctrl.setStyleSheet("background:transparent;")
+        ctrl_lay = QVBoxLayout(ctrl)
+        ctrl_lay.setContentsMargins(0, 10, 0, 10)
+        ctrl_lay.setSpacing(5)
+        ctrl_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self._plc_badge = QLabel("● PLC: —")
-        self._plc_badge.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._plc_badge.setStyleSheet(
             "color:#94a3b8;font-size:11px;font-weight:600;background:transparent;"
         )
-        right_lay.addWidget(self._plc_badge)
+        ctrl_lay.addWidget(self._plc_badge)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
+        btn_row.setSpacing(5)
 
         reconnect_btn = QPushButton("Reconectar PLC")
         reconnect_btn.setFixedHeight(22)
         reconnect_btn.setStyleSheet(
             "background:#1e40af;color:white;border-radius:5px;"
-            "font-size:10px;padding:0 10px;border:none;"
+            "font-size:10px;padding:0 8px;border:none;"
         )
         reconnect_btn.clicked.connect(self._reconnect_plc)
 
         service_btn = QPushButton("Modo Servicio")
         service_btn.setFixedHeight(22)
         service_btn.setStyleSheet(
-            "background:#1e293b;color:#94a3b8;border-radius:5px;"
-            "font-size:10px;padding:0 10px;border:1px solid #334155;"
+            "background:#334155;color:#94a3b8;border-radius:5px;"
+            "font-size:10px;padding:0 8px;border:none;"
         )
         service_btn.clicked.connect(self._open_service)
 
         btn_row.addWidget(reconnect_btn)
         btn_row.addWidget(service_btn)
-        right_lay.addLayout(btn_row)
+        ctrl_lay.addLayout(btn_row)
 
-        outer.addWidget(right)
+        right_lay.addStretch()
+        right_lay.addWidget(ctrl)
 
-        # ── Logo DEFYMOTION (derecha — desarrollador) ───────────────
-        outer.addWidget(_logo_label("logos/defymotion.jpg", 48))
+        # Sub-columna derecha: logo DEFYMOTION
+        dm_logo = _logo_label("logos/defymotion.jpg", 48)
+        dm_logo.setContentsMargins(6, 0, 0, 0)
+        right_lay.addWidget(dm_logo)
+
+        outer.addWidget(right_wing)
 
         return header
 
@@ -558,8 +583,6 @@ class OperatorWindow(QMainWindow):
         self._service_win.activateWindow()
 
     # ------------------------------------------------------------------
-    # Cierre
-    # ------------------------------------------------------------------
 
     def closeEvent(self, event) -> None:
         reply = QMessageBox.question(
@@ -581,8 +604,8 @@ class OperatorWindow(QMainWindow):
 # ------------------------------------------------------------------
 
 def _logo_label(rel_path: str, max_h: int) -> QLabel:
-    """Carga un logo desde la raíz del proyecto, escalado a max_h px de alto.
-    Si el archivo no existe cae a texto para no romper el layout.
+    """Carga logo desde raíz del proyecto escalado a max_h px de alto.
+    Fallback a texto si el archivo no existe.
     """
     lbl = QLabel()
     lbl.setStyleSheet("background:transparent;")
