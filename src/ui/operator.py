@@ -317,9 +317,11 @@ class ScannerPanel(QWidget):
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado FAULT.")
 
-    def _on_model_changed(self, model: str) -> None:
-        if model:
-            self._scanner.set_model(model)
+    def _on_model_changed(self, display_name: str) -> None:
+        from src.utils.model_names import to_internal
+        internal = to_internal(display_name)
+        if internal:
+            self._scanner.set_model(internal)
             self._log(f"Modelo → {model}")
 
     # ------------------------------------------------------------------
@@ -349,15 +351,13 @@ class ScannerPanel(QWidget):
         self.reset_btn.setEnabled(state == ScannerState.FAULT)
 
     def _populate_models(self) -> None:
-        patterns_dir = Path("data/patterns")
-        models = sorted(p.name for p in patterns_dir.iterdir() if p.is_dir()) \
-            if patterns_dir.exists() else []
-        current = self._system.io.scanner_config(self._id).get("model", "")
+        from src.utils.model_names import DISPLAY_NAMES, to_display
+        current_internal = self._system.io.scanner_config(self._id).get("model", "")
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
-        self.model_combo.addItems(models)
-        if current in models:
-            self.model_combo.setCurrentText(current)
+        self.model_combo.addItems(DISPLAY_NAMES)
+        if current_internal:
+            self.model_combo.setCurrentText(to_display(current_internal))
         self.model_combo.blockSignals(False)
 
     def _log(self, msg: str) -> None:

@@ -41,8 +41,8 @@ def load_tolerances(model: str | None = None) -> dict[str, Any]:
         ...
         # per-model overrides (only specify what differs from global)
         models:
-          modelo_A: {}
-          modelo_B:
+          modelo_A: {}        # Esterilla
+          modelo_B:           # Microperforado
             min_area: 60.0
             tol_xy_px: 18.0
     """

@@ -256,10 +256,9 @@ class OperatorWindow(QMainWindow):
         self.refresh_models()
 
     def refresh_models(self) -> None:
-        models_dir = Path("data/patterns")
-        models = sorted(p.name for p in models_dir.iterdir() if p.is_dir()) if models_dir.exists() else []
+        from src.utils.model_names import DISPLAY_NAMES
         self.model_combo.clear()
-        self.model_combo.addItems(models)
+        self.model_combo.addItems(DISPLAY_NAMES)
 
     def choose_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta de frames", str(self.current_folder))
@@ -268,7 +267,8 @@ class OperatorWindow(QMainWindow):
             self.folder_edit.setText(folder)
 
     def analyze_folder(self) -> None:
-        model = self.model_combo.currentText().strip()
+        from src.utils.model_names import to_internal
+        model = to_internal(self.model_combo.currentText().strip())
         folder = Path(self.folder_edit.text().strip())
         if not model:
             QMessageBox.warning(self, "Modelo", "Selecciona un modelo.")
