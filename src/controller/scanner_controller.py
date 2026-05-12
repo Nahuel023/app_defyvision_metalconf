@@ -253,8 +253,7 @@ class ScannerController:
                 if self._state != ScannerState.RUNNING:
                     self._stop_event.wait(timeout=0.05)
                     continue
-                model    = self._io.scanner_config(self._id)["model"]
-                pos_thr  = self._cont_pos_thr
+                model = self._io.scanner_config(self._id)["model"]
 
             frame = self._camera.get_frame()
             if frame is None:
@@ -262,6 +261,12 @@ class ScannerController:
                 continue
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            # Reload position threshold — may have per-model override
+            pos_thr = float(
+                load_tolerances(model).get("continuous_position_threshold",
+                                           self._cont_pos_thr)
+            )
 
             # Comparar con el último frame inspeccionado — no con el anterior
             forced = self._force_inspect.is_set()

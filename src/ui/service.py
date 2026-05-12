@@ -796,6 +796,13 @@ class RecordingTab(QWidget):
 
         ctrl_lay.addSpacing(12)
 
+        self._live_chk = QCheckBox("Análisis en vivo")
+        self._live_chk.setChecked(False)
+        self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:11px;")
+        ctrl_lay.addWidget(self._live_chk)
+
+        ctrl_lay.addSpacing(8)
+
         self._btn_start = self._mk_btn("▶  Iniciar grabación", "#166534")
         self._btn_stop  = self._mk_btn("■  Detener",           "#7f1d1d")
         self._btn_stop.setEnabled(False)
@@ -932,7 +939,9 @@ class RecordingTab(QWidget):
         self._btn_analyze.setEnabled(False)
         self._scanner_combo.setEnabled(False)
         self._fps_spin.setEnabled(False)
-        self._status_lbl.setText(f"Grabando → {self._rec_dir.name}")
+        self._live_chk.setEnabled(False)
+        mode_txt = " (en vivo)" if self._live_chk.isChecked() else ""
+        self._status_lbl.setText(f"Grabando{mode_txt} → {self._rec_dir.name}")
         logger.info(f"[Grabación] inicio en {self._rec_dir}")
 
     def _on_stop(self) -> None:
@@ -942,10 +951,13 @@ class RecordingTab(QWidget):
         self._btn_stop.setEnabled(False)
         self._scanner_combo.setEnabled(True)
         self._fps_spin.setEnabled(True)
+        self._live_chk.setEnabled(True)
         n = len(self._frame_paths)
         self._status_lbl.setText(f"Detenido — {n} frames en {self._rec_dir.name}")
+        # If live analysis was active, results are already populated; show analyze button
+        # to allow re-analysis if desired (e.g. after changing tolerances).
         self._btn_analyze.setEnabled(n > 0)
-        if n > 0:
+        if n > 0 and not self._results:
             self._show_frame(0)
         logger.info(f"[Grabación] detenida — {n} frames")
 
@@ -961,6 +973,19 @@ class RecordingTab(QWidget):
         cv2.imwrite(str(path), frame)
         self._frame_paths.append(path)
         self._frame_lbl.setText(f"{idx + 1} frames")
+
+        if self._live_chk.isChecked():
+            try:
+                from src.inspection import inspect_image
+                model = self._system.io.scanner_config(sid).get("model", "modelo_A")
+                result = inspect_image(model, path)
+                self._results.append(result)
+                ok  = sum(1 for r in self._results if r.status == "OK")
+                nok = len(self._results) - ok
+                self._summary_lbl.setText(f"OK: {ok}  NOK: {nok}  Total: {len(self._results)}")
+                self._show_frame(idx)
+            except Exception as exc:
+                logger.error(f"[Live análisis] error en frame {idx}: {exc}")
 
     # ------------------------------------------------------------------
     # Analysis

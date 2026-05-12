@@ -7,7 +7,7 @@ tol_xy_px: 22.0
 aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
-consecutive_nok_frames: 8
+consecutive_nok_frames: 9999  # CALIBRACIÓN — deshabilita FAULT temporalmente
 frame_rate_hz: 5.0
 max_response_sec: 1.6
 edge_margin_px: 15.0
@@ -55,3 +55,7 @@ models:
     # ── Bordes ─────────────────────────────────────────────────────────────
     edge_margin_px: 25.0
     pattern_edge_margin_px: 80.0  # excluir agujeros de borde que se desplazan fuera de frame
+    # ── Modo continuo ──────────────────────────────────────────────────────
+    # Grabaciones @ 10fps muestran diff máx 5.21px. Global=8.0 nunca dispara
+    # para este material. Con 4.0 se obtienen ~100-140 inspecciones / 321 frames.
+    continuous_position_threshold: 4.0
