@@ -23,7 +23,7 @@ from typing import Optional
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QImage, QPixmap
+from PyQt6.QtGui import QFont, QIcon, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -373,7 +373,10 @@ class OperatorWindow(QMainWindow):
         super().__init__()
         self._system      = system
         self._service_win = None
-        self.setWindowTitle("DEFYVISION — Metalconf")
+        self.setWindowTitle("DEFYVISION")
+        icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+        if not icon_pix.isNull():
+            self.setWindowIcon(QIcon(icon_pix))
         # Tema claro base — panels y controles heredan blanco/gris claro
         self.setStyleSheet(
             "QMainWindow, QWidget { background:#eef2f7; }"
