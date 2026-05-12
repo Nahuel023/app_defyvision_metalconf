@@ -646,6 +646,9 @@ def _bgr_to_pixmap(frame: np.ndarray, max_w: int, max_h: int) -> QPixmap:
 
 def launch_operator_ui(system: InspectionSystem) -> None:
     app = QApplication.instance() or QApplication(sys.argv)
+    icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+    if not icon_pix.isNull():
+        app.setWindowIcon(QIcon(icon_pix))
     win = OperatorWindow(system)
     win.show()
     app.exec()
