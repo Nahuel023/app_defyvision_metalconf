@@ -474,7 +474,7 @@ class OperatorWindow(QMainWindow):
             "color:#f1f5f9;font-size:26px;font-weight:700;"
             "letter-spacing:4px;background:transparent;"
         )
-        subtitle = QLabel("Sistema de Inspección Visual  ·  Metalconf")
+        subtitle = QLabel("Visión Artificial  ·  Robótica Industrial")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(
             "color:#475569;font-size:10px;letter-spacing:1.5px;"
