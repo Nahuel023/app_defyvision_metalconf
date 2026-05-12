@@ -6,5 +6,4 @@ service:
   password: "defy2026"
 
 camera:
-  max_retries: 10       # intentos de reconexión antes de declarar error permanente
-  retry_interval_s: 3.0 # segundos de espera entre cada intento
+  retry_interval_s: 3.0 # segundos de espera entre cada intento de reconexión

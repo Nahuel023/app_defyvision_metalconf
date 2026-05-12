@@ -40,7 +40,6 @@ class InspectionSystem:
             cam_settings.update(cfg.get("camera_settings") or {})
             camera = Camera(
                 cfg["camera_index"],
-                max_retries=cam_cfg.get("max_retries", 10),
                 retry_interval_s=cam_cfg.get("retry_interval_s", 3.0),
                 settings=cam_settings,
             )
