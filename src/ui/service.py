@@ -1268,7 +1268,9 @@ class RecordingTab(QWidget):
                 failed.append(param)
 
         if "fps" in profile:
-            self._fps_spin.setValue(int(profile["fps"]))
+            fps_val = int(profile["fps"])
+            self._fps_spin.setValue(fps_val)
+            cam.apply_setting("fps", float(fps_val))
 
         self._current_profile_slug = slug
         display = profile.get("display_name", slug)
@@ -1287,18 +1289,19 @@ class RecordingTab(QWidget):
             self._cam_info_lbl.setText("cámara no disponible")
             return
         _READ = [
-            ("exp",    "exposure"),
-            ("foc",    "focus"),
-            ("gain",   "gain"),
-            ("bri",    "brightness"),
-            ("sharp",  "sharpness"),
+            ("exp",   "exposure"),
+            ("foc",   "focus"),
+            ("gain",  "gain"),
+            ("bri",   "brightness"),
+            ("sharp", "sharpness"),
+            ("fps",   "fps"),
         ]
         parts = []
         for label, key in _READ:
             v = cam.read_setting(key)
             parts.append(f"{label}:{v:.0f}" if v >= 0 else f"{label}:?")
         fps_real = cam.fps
-        parts.append(f"cam_fps:{fps_real:.1f}" if fps_real > 0 else "cam_fps:—")
+        parts.append(f"real:{fps_real:.1f}" if fps_real > 0 else "real:—")
         self._cam_info_lbl.setText("  ".join(parts))
 
     def _on_save_profile(self) -> None:

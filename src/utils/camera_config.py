@@ -8,6 +8,9 @@ _PATH          = Path("config/camera.yaml")
 _PROFILES_PATH = Path("config/camera_profiles.yaml")
 
 DEFAULTS: dict[str, Any] = {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
     "autofocus": True,
     "focus": 100,
     "auto_exposure": True,
