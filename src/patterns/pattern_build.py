@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from src.io.load_images import load_bgr_image
-from src.patterns.pattern_io import Pattern, save_pattern, pattern_path
+from src.patterns.pattern_io import Pattern, save_pattern, pattern_path, find_pattern_path
 from src.pipeline.grid_fitting import estimate_spacing, estimate_phase, assign_cells
 from src.patterns.roi import load_roi, apply_roi
 from src.pipeline.align_edge import align_image_by_right_edge
@@ -13,6 +13,7 @@ from src.utils.config import load_tolerances
 def build_pattern_from_image(
     model: str,
     img_path: Path,
+    scanner_id: str | None = None,
     threshold: int | None = None,
     min_area: float | None = None,
     circularity_min: float | None = None,
@@ -30,7 +31,7 @@ def build_pattern_from_image(
     img_aligned, align_res = align_image_by_right_edge(img_full)
     print(f"[align-pattern] angle_deg={align_res.angle_deg:.2f} lines={align_res.used_lines}")
 
-    roi = load_roi(model)
+    roi = load_roi(model, scanner_id)
     if roi is not None:
         img = apply_roi(img_aligned, roi)
     else:
@@ -80,6 +81,6 @@ def build_pattern_from_image(
         model=model, image_size=(w, h), points=points, radii=radii,
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
     )
-    out = pattern_path(model)
+    out = pattern_path(model, scanner_id)
     save_pattern(pat, out)
     return out

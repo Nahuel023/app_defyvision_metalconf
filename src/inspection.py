@@ -7,7 +7,7 @@ import numpy as np
 
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
-from src.patterns.pattern_io import load_pattern, pattern_path
+from src.patterns.pattern_io import load_pattern, find_pattern_path
 from src.patterns.roi import apply_roi, load_roi
 from src.pipeline.align_edge import align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay
@@ -66,10 +66,15 @@ def iter_image_files(input_dir: Path) -> Iterable[Path]:
             yield path
 
 
-def inspect_image(model: str, img_path: Path, save: bool = False) -> InspectionResult:
+def inspect_image(
+    model: str,
+    img_path: Path,
+    save: bool = False,
+    scanner_id: str | None = None,
+) -> InspectionResult:
     """Inspect an image from disk."""
     img_full = load_bgr_image(img_path)
-    result = _inspect_bgr(model, img_full, image_path=img_path)
+    result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id)
     if save:
         _save_result_images(result)
     return result
@@ -80,15 +85,21 @@ def inspect_frame(
     frame: np.ndarray,
     frame_id: str = "live",
     save: bool = False,
+    scanner_id: str | None = None,
 ) -> InspectionResult:
     """Inspect a BGR frame captured from a live camera (no disk read)."""
-    result = _inspect_bgr(model, frame, image_path=Path(frame_id))
+    result = _inspect_bgr(model, frame, image_path=Path(frame_id), scanner_id=scanner_id)
     if save:
         _save_result_images(result)
     return result
 
 
-def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> InspectionResult:
+def _inspect_bgr(
+    model: str,
+    img_full: np.ndarray,
+    image_path: Path,
+    scanner_id: str | None = None,
+) -> InspectionResult:
     """Core inspection logic on a pre-loaded BGR frame."""
     tolerances = load_tolerances(model)
     threshold = int(tolerances["threshold"])
@@ -107,11 +118,11 @@ def _inspect_bgr(model: str, img_full: np.ndarray, image_path: Path) -> Inspecti
 
     edge_margin_px = float(tolerances.get("edge_margin_px", 0.0))
 
-    pattern = load_pattern(pattern_path(model))
+    pattern = load_pattern(find_pattern_path(model, scanner_id))
 
     img_aligned, align_res = align_image_by_right_edge(img_full)
 
-    roi = load_roi(model)
+    roi = load_roi(model, scanner_id)
     img = apply_roi(img_aligned, roi) if roi is not None else img_aligned
 
     preprocess_kw = dict(
@@ -215,6 +226,7 @@ def inspect_folder(
     frame_rate_hz: float | None = None,
     consecutive_nok_frames: int | None = None,
     max_response_sec: float | None = None,
+    scanner_id: str | None = None,
 ) -> FolderInspectionSummary:
     tolerances = load_tolerances()
     frame_rate_hz = float(
@@ -230,7 +242,8 @@ def inspect_folder(
     )
 
     image_paths = list(iter_image_files(input_dir))
-    results = [inspect_image(model, path, save=save) for path in image_paths]
+    results = [inspect_image(model, path, save=save, scanner_id=scanner_id)
+               for path in image_paths]
     ok_count = sum(1 for result in results if result.status == "OK")
     temporal_results = _apply_temporal_rule(results, consecutive_nok_frames)
     temporal_ok = sum(1 for item in temporal_results if item.decision_status == "OK")

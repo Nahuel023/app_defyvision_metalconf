@@ -54,7 +54,8 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
         print("[define-roi] cancelado o ROI vacío")
         return 1
 
-    out_path = Path("data") / "patterns" / args.model / "roi.json"
+    from src.patterns.roi import roi_path
+    out_path = roi_path(args.model, args.scanner)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps({"x": x, "y": y, "w": w, "h": h}), encoding="utf-8")
     print(f"[define-roi] ROI guardado: x={x} y={y} w={w} h={h} → {out_path}")
@@ -64,7 +65,8 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
 def cmd_build_pattern(args: argparse.Namespace) -> int:
     from src.patterns.pattern_build import build_pattern_from_image
 
-    out = build_pattern_from_image(model=args.model, img_path=args.img)
+    out = build_pattern_from_image(model=args.model, img_path=args.img,
+                                   scanner_id=args.scanner)
     print(f"[build-pattern] saved: {out}")
     return 0
 
@@ -74,7 +76,8 @@ def cmd_run_image(args: argparse.Namespace) -> int:
 
     from src.inspection import inspect_image
 
-    result = inspect_image(args.model, args.img, save=args.save)
+    result = inspect_image(args.model, args.img, save=args.save,
+                           scanner_id=args.scanner)
     print(f"[align] angle_deg={result.angle_deg:.2f} lines={result.used_lines}")
     if result.shift_xy is None:
         print("[shift] skipped (not enough points)")
@@ -107,6 +110,7 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
         args.input,
         save=args.save,
         frame_rate_hz=args.fps,
+        scanner_id=args.scanner,
     )
     print(
         f"[run-folder] model={args.model} total={summary.total} "
@@ -183,25 +187,29 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     sp = sub.add_parser("define-roi", help="Seleccionar ROI interactivamente desde imagen o cámara.")
-    sp.add_argument("--model",  required=True, help="Nombre del modelo (ej: modelo_A).")
-    sp.add_argument("--img",    type=Path, default=None, help="Imagen existente; si se omite usa la cámara.")
-    sp.add_argument("--camera", type=int,  default=0,    help="Índice de cámara (default 0).")
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_A).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_2). Si se omite, ROI compartida.")
+    sp.add_argument("--img",     type=Path, default=None, help="Imagen existente; si se omite usa la cámara.")
+    sp.add_argument("--camera",  type=int,  default=0,    help="Índice de cámara (default 0).")
     sp.set_defaults(func=cmd_define_roi)
 
     sp = sub.add_parser("build-pattern", help="Construir patron (holes.json) desde imagen OK.")
-    sp.add_argument("--model", required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_2). Si se omite, patrón compartido.")
     sp.add_argument("--img", required=True, type=Path, help="Ruta a imagen OK de referencia.")
     sp.set_defaults(func=cmd_build_pattern)
 
     sp = sub.add_parser("run-image", help="Procesar una imagen contra un patron.")
-    sp.add_argument("--model", required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner para resolver patrón específico.")
     sp.add_argument("--img", required=True, type=Path, help="Ruta a imagen a procesar.")
     sp.add_argument("--show", action="store_true", help="Mostrar ventanas de debug (OpenCV).")
     sp.add_argument("--save", action="store_true", help="Guardar resultados en data/output.")
     sp.set_defaults(func=cmd_run_image)
 
     sp = sub.add_parser("run-folder", help="Procesar una carpeta completa contra un patron.")
-    sp.add_argument("--model", required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner para resolver patrón específico.")
     sp.add_argument("--input", required=True, type=Path, help="Carpeta con imagenes a procesar.")
     sp.add_argument("--fps", type=float, default=None, help="FPS efectivo de la secuencia para decision temporal.")
     sp.add_argument("--save", action="store_true", help="Guardar resultados en data/output.")
