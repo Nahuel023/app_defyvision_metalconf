@@ -1,0 +1,163 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Perfiles de cámara para caracterización de adquisición.
+#
+# Diseñados específicamente para:
+#   - Backlight directo (agujeros brillantes sobre fondo oscuro)
+#   - Movimiento continuo de lámina (~100 px/s a 10fps)
+#   - Logitech C920 via DSHOW, Windows
+#   - Pipeline con Otsu + CLAHE, thresholding en canal R
+#
+# Parámetros UVC:
+#   exposure:  logarítmico (DSHOW): -1=500ms, -7=7.8ms, -9=2ms, -11=0.5ms, -13=0.12ms
+#   focus:     0-255 (0=lejos/infinito, valores altos=más cerca)
+#   gain:      0-255 (amplifcación analógica; >32 introduce ruido visible)
+#   fps:       frecuencia de muestreo del grabador (timer); la cámara captura a su máximo
+#
+# REFERENCIA MEDIDA (grabaciones 20260512):
+#   - Velocidad lámina: ~100px/s (8-14px/frame a 10fps)
+#   - Laplacian variance: 5-8 (bajo por naturaleza binaria del backlit)
+#   - Holes detectados en pos. óptima: 155-251 (Microperforado)
+#   - Shift entre frames consecutivos: 2-14px
+# ─────────────────────────────────────────────────────────────────────────────
+
+profiles:
+
+  baseline:
+    display_name: "Actual (Referencia)"
+    description: >
+      Configuración actual de producción. Punto de referencia obligatorio:
+      todas las comparaciones se hacen contra este perfil.
+      exp=-7 (~7.8ms), focus=100, gain=0, fps=10.
+    fps: 10
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -7
+    white_balance: 4500
+    gain: 0
+    brightness: 128
+    contrast: 140
+    saturation: 50
+    sharpness: 160
+    gamma: 110
+    backlight_compensation: 0
+
+  anti_blur:
+    display_name: "Anti-blur (exp. corta)"
+    description: >
+      Exposición muy corta (-11, ~0.5ms) para freezar completamente el
+      movimiento continuo. A 100px/s: blur residual < 0.05px.
+      Compensa con gain=16. FPS=30 para mayor resolución temporal.
+      ESPERAR: imagen más ruidosa, agujeros pueden verse más pequeños.
+    fps: 30
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -11
+    white_balance: 4500
+    gain: 16
+    brightness: 128
+    contrast: 150
+    saturation: 50
+    sharpness: 200
+    gamma: 110
+    backlight_compensation: 0
+
+  high_contrast:
+    display_name: "Alto Contraste (sin saturación)"
+    description: >
+      Brightness reducido (60) para evitar saturación total de los agujeros.
+      Con backlight fuerte los holes saturan a 255 → se pierde gradiente de
+      borde. Con brightness más bajo los holes quedan brillantes pero no
+      clipeados → mejor definición de contorno → centroides más precisos.
+      Contrast=200 + gamma=80 acentúan la separación agujero/fondo.
+    fps: 30
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -9
+    white_balance: 4500
+    gain: 0
+    brightness: 60
+    contrast: 200
+    saturation: 30
+    sharpness: 200
+    gamma: 80
+    backlight_compensation: 0
+
+  fps30_standard:
+    display_name: "30fps Estándar (solo FPS)"
+    description: >
+      Exactamente igual al Baseline pero a 30fps.
+      Objetivo: aislar el efecto del FPS puro, sin cambiar nada más.
+      3x más muestras por columna de agujeros.
+      displacement/frame cae de ~10px a ~3px.
+    fps: 30
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -7
+    white_balance: 4500
+    gain: 0
+    brightness: 128
+    contrast: 140
+    saturation: 50
+    sharpness: 160
+    gamma: 110
+    backlight_compensation: 0
+
+  industrial_balanced:
+    display_name: "Industrial Balanceado"
+    description: >
+      Combinación optimizada para inspección continua estable.
+      exp=-10 (~1ms): freezes motion, mínimo blur.
+      gain=8: compensa parcialmente la menor exposición.
+      brightness=90: previene saturación total de holes.
+      fps=30: resolución temporal máxima en C920@1920x1080.
+      Candidato para configuración definitiva de producción.
+    fps: 30
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -10
+    white_balance: 4500
+    gain: 8
+    brightness: 90
+    contrast: 160
+    saturation: 40
+    sharpness: 180
+    gamma: 100
+    backlight_compensation: 0
+
+  extreme:
+    display_name: "Extremo Agresivo"
+    description: >
+      Exposición mínima posible (-13, ~0.12ms) + gain=48.
+      Prueba de límites absolutos del hardware C920.
+      ESPERAR: mucho ruido, posible pérdida de agujeros tenues.
+      Útil para medir si el gain introduce demasiado ruido para
+      el pipeline de detección geométrica.
+    fps: 30
+    autofocus: false
+    auto_exposure: false
+    auto_white_balance: false
+    focus: 100
+    exposure: -13
+    white_balance: 4500
+    gain: 48
+    brightness: 128
+    contrast: 128
+    saturation: 50
+    sharpness: 255
+    gamma: 110
+    backlight_compensation: 0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Perfiles guardados por el usuario desde la UI
+# ─────────────────────────────────────────────────────────────────────────────
+user_profiles: {}

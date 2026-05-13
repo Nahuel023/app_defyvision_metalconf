@@ -754,7 +754,11 @@ class RecordingTab(QWidget):
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
 
+        self._current_profile_slug: str = ""
+        self._profiles: dict = {}
+
         self._build_ui()
+        self._load_profiles()
 
     # ------------------------------------------------------------------
     # UI
@@ -847,6 +851,52 @@ class RecordingTab(QWidget):
 
         root.addWidget(ctrl)
 
+        # ── Camera panel ──────────────────────────────────────────────
+        cam_grp = QGroupBox("Cámara")
+        cam_grp.setStyleSheet(self._grp_style())
+        cam_lay = QHBoxLayout(cam_grp)
+        cam_lay.setSpacing(10)
+        cam_lay.setContentsMargins(12, 14, 12, 10)
+
+        lbl_prof = QLabel("Perfil:")
+        lbl_prof.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        cam_lay.addWidget(lbl_prof)
+
+        self._profile_combo = QComboBox()
+        self._profile_combo.setMinimumWidth(220)
+        self._profile_combo.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 6px;font-size:11px;"
+        )
+        cam_lay.addWidget(self._profile_combo)
+
+        self._btn_apply_profile = self._mk_btn("▶  Aplicar", "#065f46")
+        cam_lay.addWidget(self._btn_apply_profile)
+
+        self._btn_save_profile = self._mk_btn("💾  Guardar preset", "#374151")
+        cam_lay.addWidget(self._btn_save_profile)
+
+        self._btn_read_cam = self._mk_btn("↻  Leer cámara", "#374151")
+        cam_lay.addWidget(self._btn_read_cam)
+
+        cam_lay.addSpacing(16)
+
+        self._cam_info_lbl = QLabel("—")
+        self._cam_info_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
+        )
+        cam_lay.addWidget(self._cam_info_lbl)
+
+        cam_lay.addStretch()
+
+        self._active_profile_lbl = QLabel("")
+        self._active_profile_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:11px;font-weight:700;"
+        )
+        cam_lay.addWidget(self._active_profile_lbl)
+
+        root.addWidget(cam_grp)
+
         # ── Analysis bar ──────────────────────────────────────────────
         ana = QGroupBox("Análisis")
         ana.setStyleSheet(self._grp_style())
@@ -935,6 +985,9 @@ class RecordingTab(QWidget):
         self._btn_stop.clicked.connect(self._on_stop)
         self._btn_load.clicked.connect(self._on_load_recording)
         self._btn_analyze.clicked.connect(self._on_analyze)
+        self._btn_apply_profile.clicked.connect(self._on_apply_profile)
+        self._btn_save_profile.clicked.connect(self._on_save_profile)
+        self._btn_read_cam.clicked.connect(self._refresh_cam_info)
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
 
@@ -965,12 +1018,28 @@ class RecordingTab(QWidget):
         self._update_nav_state()
 
         # Persist metadata alongside the frames so we can reload this recording later
+        _CAM_PARAMS = [
+            "focus", "exposure", "white_balance", "gain", "brightness",
+            "contrast", "saturation", "sharpness", "gamma", "backlight_compensation",
+        ]
+        cam_settings: dict = {}
+        try:
+            for param in _CAM_PARAMS:
+                v = cam.read_setting(param)
+                if v >= 0:
+                    cam_settings[param] = int(v)
+        except Exception:
+            pass
+
         meta = {
             "model": self._active_model(),
             "model_display": self._model_combo.currentText(),
             "fps": self._fps_spin.value(),
             "scanner": self._scanner_combo.currentText(),
             "timestamp": _dt.now().isoformat(),
+            "camera_profile": self._current_profile_slug or "custom",
+            "camera_settings": cam_settings,
+            "cam_fps_real": cam.fps if cam.fps > 0 else None,
         }
         (self._rec_dir / "meta.json").write_text(
             json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -1154,6 +1223,133 @@ class RecordingTab(QWidget):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Camera profiles
+    # ------------------------------------------------------------------
+
+    def _load_profiles(self) -> None:
+        from src.utils.camera_config import load_camera_profiles
+        self._profiles = load_camera_profiles()
+        self._profile_combo.clear()
+        for slug, prof in self._profiles.items():
+            self._profile_combo.addItem(
+                prof.get("display_name", slug), userData=slug
+            )
+        self._refresh_cam_info()
+
+    def _on_apply_profile(self) -> None:
+        from src.utils.camera_config import load_camera_profiles
+        slug = self._profile_combo.currentData()
+        if not slug:
+            return
+        # Reload from disk in case user edited the file
+        profiles = load_camera_profiles()
+        profile = profiles.get(slug)
+        if not profile:
+            return
+
+        sid = self._scanner_combo.currentText()
+        cam = self._system.camera(sid)
+
+        _UVC_PARAMS = [
+            "autofocus", "auto_exposure", "auto_white_balance",
+            "focus", "exposure", "white_balance", "gain",
+            "brightness", "contrast", "saturation", "sharpness",
+            "gamma", "backlight_compensation",
+        ]
+        failed = []
+        for param in _UVC_PARAMS:
+            if param not in profile:
+                continue
+            val = profile[param]
+            ok = cam.apply_setting(param, 1.0 if val is True else 0.0 if val is False else float(val))
+            if not ok:
+                failed.append(param)
+
+        if "fps" in profile:
+            self._fps_spin.setValue(int(profile["fps"]))
+
+        self._current_profile_slug = slug
+        display = profile.get("display_name", slug)
+        self._active_profile_lbl.setText(f"[{display}]")
+        self._refresh_cam_info()
+
+        if failed:
+            logger.warning(f"[Cámara] perfil {slug}: parámetros no aceptados por driver: {failed}")
+        logger.info(f"[Cámara] perfil aplicado: {slug}")
+
+    def _refresh_cam_info(self) -> None:
+        sid = self._scanner_combo.currentText()
+        try:
+            cam = self._system.camera(sid)
+        except Exception:
+            self._cam_info_lbl.setText("cámara no disponible")
+            return
+        _READ = [
+            ("exp",    "exposure"),
+            ("foc",    "focus"),
+            ("gain",   "gain"),
+            ("bri",    "brightness"),
+            ("sharp",  "sharpness"),
+        ]
+        parts = []
+        for label, key in _READ:
+            v = cam.read_setting(key)
+            parts.append(f"{label}:{v:.0f}" if v >= 0 else f"{label}:?")
+        fps_real = cam.fps
+        parts.append(f"cam_fps:{fps_real:.1f}" if fps_real > 0 else "cam_fps:—")
+        self._cam_info_lbl.setText("  ".join(parts))
+
+    def _on_save_profile(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog, QLineEdit
+        from src.utils.camera_config import save_user_profile
+
+        name, ok = QInputDialog.getText(
+            self, "Guardar preset de cámara", "Nombre del perfil:",
+            QLineEdit.EchoMode.Normal,
+            self._active_profile_lbl.text().strip("[]") or "",
+        )
+        if not ok or not name.strip():
+            return
+
+        name = name.strip()
+        slug = "user_" + name.lower().replace(" ", "_").replace("-", "_")[:30]
+
+        sid = self._scanner_combo.currentText()
+        cam = self._system.camera(sid)
+
+        settings: dict = {
+            "display_name": name,
+            "description": "Perfil guardado desde la UI de servicio",
+        }
+        for param in [
+            "focus", "exposure", "white_balance", "gain", "brightness",
+            "contrast", "saturation", "sharpness", "gamma",
+            "backlight_compensation",
+        ]:
+            v = cam.read_setting(param)
+            if v >= 0:
+                settings[param] = int(v) if param not in ("exposure",) else int(v)
+        # Boolean flags: read from driver
+        for flag, prop_name in [
+            ("autofocus", "autofocus"),
+            ("auto_exposure", "auto_exposure"),
+            ("auto_white_balance", "auto_white_balance"),
+        ]:
+            v = cam.read_setting(prop_name)
+            if v >= 0:
+                settings[flag] = bool(v > 0.5)
+        settings["fps"] = self._fps_spin.value()
+
+        save_user_profile(slug, settings)
+        self._load_profiles()
+        # Select the newly saved profile
+        for i in range(self._profile_combo.count()):
+            if self._profile_combo.itemData(i) == slug:
+                self._profile_combo.setCurrentIndex(i)
+                break
+        logger.info(f"[Cámara] preset guardado: {slug}")
 
     def _active_model(self) -> str:
         """Return the internal model ID currently selected in the model combo."""
