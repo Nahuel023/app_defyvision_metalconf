@@ -721,17 +721,20 @@ class _AnalysisWorker(QThread):
     finished = pyqtSignal(list)              # list[InspectionResult]
     error    = pyqtSignal(str)
 
-    def __init__(self, model: str, frame_paths: list, parent=None) -> None:
+    def __init__(self, model: str, frame_paths: list, scanner_id: str | None = None,
+                 parent=None) -> None:
         super().__init__(parent)
-        self._model = model
-        self._paths = frame_paths
+        self._model      = model
+        self._paths      = frame_paths
+        self._scanner_id = scanner_id
 
     def run(self) -> None:
         try:
             from src.inspection import inspect_image
             results = []
             for i, p in enumerate(self._paths):
-                results.append(inspect_image(self._model, p))
+                results.append(inspect_image(self._model, p,
+                                             scanner_id=self._scanner_id))
                 self.progress.emit(i + 1, len(self._paths))
             self.finished.emit(results)
         except Exception as exc:
@@ -1096,7 +1099,8 @@ class RecordingTab(QWidget):
         if self._live_chk.isChecked():
             try:
                 from src.inspection import inspect_image
-                result = inspect_image(self._active_model(), path)
+                result = inspect_image(self._active_model(), path,
+                                      scanner_id=self._scanner_combo.currentText() or None)
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -1117,7 +1121,11 @@ class RecordingTab(QWidget):
         self._stats_lbl.setText("")
         self._ana_progress.setText("Analizando…")
 
-        self._worker = _AnalysisWorker(self._active_model(), list(self._frame_paths), parent=self)
+        self._worker = _AnalysisWorker(
+            self._active_model(), list(self._frame_paths),
+            scanner_id=self._scanner_combo.currentText() or None,
+            parent=self,
+        )
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
         self._worker.error.connect(self._on_ana_error)
