@@ -322,7 +322,7 @@ class ScannerPanel(QWidget):
         internal = to_internal(display_name)
         if internal:
             self._scanner.set_model(internal)
-            self._log(f"Modelo → {model}")
+            self._log(f"Modelo → {display_name}")
 
     # ------------------------------------------------------------------
     # Callbacks del controller (threads → señales → hilo principal)

@@ -11,6 +11,7 @@ Se lanza tras autenticación con LoginDialog.
 Acepta un InspectionSystem existente (desde OperatorWindow) o crea uno propio.
 """
 
+import json
 import logging
 import sys
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from PyQt6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QFileDialog,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -48,6 +50,7 @@ from PyQt6.QtWidgets import (
 
 from src.controller.system import InspectionSystem
 from src.utils import camera_config
+from src.utils.model_names import DISPLAY_NAMES, to_display, to_internal
 from src.utils.state import OperationMode, ScannerState
 
 logger = logging.getLogger(__name__)
@@ -781,13 +784,33 @@ class RecordingTab(QWidget):
         )
         ctrl_lay.addWidget(self._scanner_combo)
 
+        lbl_model = QLabel("Modelo:")
+        lbl_model.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ctrl_lay.addWidget(lbl_model)
+
+        self._model_combo = QComboBox()
+        self._model_combo.addItems(DISPLAY_NAMES)
+        self._model_combo.setStyleSheet(
+            f"background:{_DARK};color:{_ACCENT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;min-width:130px;"
+        )
+        # Sync default selection with scanner's configured model
+        default_sids = self._system.scanner_ids()
+        if default_sids:
+            _init_model = self._system.io.scanner_config(default_sids[0]).get("model", "")
+            if _init_model:
+                self._model_combo.setCurrentText(to_display(_init_model))
+        ctrl_lay.addWidget(self._model_combo)
+
+        self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+
         lbl_fps = QLabel("FPS captura:")
         lbl_fps.setStyleSheet(f"color:{_MUTED};font-size:11px;")
         ctrl_lay.addWidget(lbl_fps)
 
         self._fps_spin = QSpinBox()
-        self._fps_spin.setRange(1, 30)
-        self._fps_spin.setValue(5)
+        self._fps_spin.setRange(1, 60)
+        self._fps_spin.setValue(10)
         self._fps_spin.setStyleSheet(
             f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:4px;padding:2px 6px;font-size:11px;max-width:60px;"
@@ -831,6 +854,9 @@ class RecordingTab(QWidget):
         ana_lay.setSpacing(10)
         ana_lay.setContentsMargins(12, 14, 12, 10)
 
+        self._btn_load = self._mk_btn("📂  Abrir grabación", "#374151")
+        ana_lay.addWidget(self._btn_load)
+
         self._btn_analyze = self._mk_btn("⚙  Analizar grabación", "#0f4c81")
         self._btn_analyze.setEnabled(False)
         ana_lay.addWidget(self._btn_analyze)
@@ -841,6 +867,12 @@ class RecordingTab(QWidget):
         ana_lay.addWidget(self._ana_progress)
 
         ana_lay.addStretch()
+
+        self._stats_lbl = QLabel("")
+        self._stats_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
+        ana_lay.addWidget(self._stats_lbl)
+
+        ana_lay.addSpacing(12)
 
         self._summary_lbl = QLabel("")
         self._summary_lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;font-weight:600;")
@@ -901,6 +933,7 @@ class RecordingTab(QWidget):
         # ── Signal wiring ─────────────────────────────────────────────
         self._btn_start.clicked.connect(self._on_start)
         self._btn_stop.clicked.connect(self._on_stop)
+        self._btn_load.clicked.connect(self._on_load_recording)
         self._btn_analyze.clicked.connect(self._on_analyze)
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
@@ -926,30 +959,47 @@ class RecordingTab(QWidget):
         self._results.clear()
         self._current_idx = 0
         self._summary_lbl.setText("")
+        self._stats_lbl.setText("")
         self._ana_progress.setText("")
         self._img_label.setText("Sin frames")
         self._update_nav_state()
 
-        interval_ms = max(33, 1000 // self._fps_spin.value())
+        # Persist metadata alongside the frames so we can reload this recording later
+        meta = {
+            "model": self._active_model(),
+            "model_display": self._model_combo.currentText(),
+            "fps": self._fps_spin.value(),
+            "scanner": self._scanner_combo.currentText(),
+            "timestamp": _dt.now().isoformat(),
+        }
+        (self._rec_dir / "meta.json").write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+
+        interval_ms = max(16, 1000 // self._fps_spin.value())
         self._rec_timer.start(interval_ms)
         self._recording = True
 
         self._btn_start.setEnabled(False)
         self._btn_stop.setEnabled(True)
         self._btn_analyze.setEnabled(False)
+        self._btn_load.setEnabled(False)
         self._scanner_combo.setEnabled(False)
+        self._model_combo.setEnabled(False)
         self._fps_spin.setEnabled(False)
         self._live_chk.setEnabled(False)
         mode_txt = " (en vivo)" if self._live_chk.isChecked() else ""
         self._status_lbl.setText(f"Grabando{mode_txt} → {self._rec_dir.name}")
-        logger.info(f"[Grabación] inicio en {self._rec_dir}")
+        logger.info(f"[Grabación] inicio en {self._rec_dir}  modelo={meta['model_display']}  fps={meta['fps']}")
 
     def _on_stop(self) -> None:
         self._rec_timer.stop()
         self._recording = False
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
+        self._btn_load.setEnabled(True)
         self._scanner_combo.setEnabled(True)
+        self._model_combo.setEnabled(True)
         self._fps_spin.setEnabled(True)
         self._live_chk.setEnabled(True)
         n = len(self._frame_paths)
@@ -977,8 +1027,7 @@ class RecordingTab(QWidget):
         if self._live_chk.isChecked():
             try:
                 from src.inspection import inspect_image
-                model = self._system.io.scanner_config(sid).get("model", "modelo_A")
-                result = inspect_image(model, path)
+                result = inspect_image(self._active_model(), path)
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -994,14 +1043,12 @@ class RecordingTab(QWidget):
     def _on_analyze(self) -> None:
         if not self._frame_paths:
             return
-        sid   = self._scanner_combo.currentText()
-        model = self._system.io.scanner_config(sid).get("model", "modelo_A")
-
         self._btn_analyze.setEnabled(False)
         self._results.clear()
+        self._stats_lbl.setText("")
         self._ana_progress.setText("Analizando…")
 
-        self._worker = _AnalysisWorker(model, list(self._frame_paths), parent=self)
+        self._worker = _AnalysisWorker(self._active_model(), list(self._frame_paths), parent=self)
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
         self._worker.error.connect(self._on_ana_error)
@@ -1014,7 +1061,27 @@ class RecordingTab(QWidget):
         self._results = results
         ok  = sum(1 for r in results if r.status == "OK")
         nok = len(results) - ok
-        self._summary_lbl.setText(f"OK: {ok}  NOK: {nok}  Total: {len(results)}")
+        pct = round(100 * ok / len(results)) if results else 0
+        self._summary_lbl.setText(f"OK: {ok} ({pct}%)  NOK: {nok}  Total: {len(results)}")
+
+        if results:
+            missing_counts = [len(r.report.missing_points) for r in results]
+            avg_m = sum(missing_counts) / len(missing_counts)
+            min_m, max_m = min(missing_counts), max(missing_counts)
+            shifts = [r.shift_xy for r in results if r.shift_xy is not None]
+            if shifts:
+                import math
+                shift_mags = [math.hypot(s[0], s[1]) for s in shifts]
+                avg_shift = sum(shift_mags) / len(shift_mags)
+                self._stats_lbl.setText(
+                    f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"
+                    f"    shift avg={avg_shift:.1f}px  max={max(shift_mags):.1f}px"
+                )
+            else:
+                self._stats_lbl.setText(
+                    f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"
+                )
+
         self._ana_progress.setText("Análisis completo")
         self._btn_analyze.setEnabled(True)
         self._show_frame(0)
@@ -1083,6 +1150,69 @@ class RecordingTab(QWidget):
             "font-size:11px;font-weight:700;border:none;padding:0 12px;"
         )
         return b
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _active_model(self) -> str:
+        """Return the internal model ID currently selected in the model combo."""
+        return to_internal(self._model_combo.currentText())
+
+    def _on_scanner_changed(self, sid: str) -> None:
+        """When scanner selection changes, sync model combo to that scanner's model."""
+        if self._recording:
+            return
+        model_internal = self._system.io.scanner_config(sid).get("model", "")
+        if model_internal:
+            self._model_combo.blockSignals(True)
+            self._model_combo.setCurrentText(to_display(model_internal))
+            self._model_combo.blockSignals(False)
+
+    def _on_load_recording(self) -> None:
+        """Open an existing recording folder and load its frames for analysis."""
+        base = str(Path("data/recordings").resolve())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Seleccionar grabación", base,
+            QFileDialog.Option.ShowDirsOnly,
+        )
+        if not folder:
+            return
+        folder_path = Path(folder)
+        frames = sorted(
+            list(folder_path.glob("frame_*.png")) + list(folder_path.glob("frame_*.jpg"))
+        )
+        if not frames:
+            self._status_lbl.setText("La carpeta no contiene frames (frame_*.png/jpg)")
+            return
+
+        self._rec_dir = folder_path
+        self._frame_paths = frames
+        self._results.clear()
+        self._current_idx = 0
+        self._summary_lbl.setText("")
+        self._stats_lbl.setText("")
+        self._ana_progress.setText("")
+
+        # Load meta.json if present and sync model combo
+        meta_path = folder_path / "meta.json"
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                model_display = meta.get("model_display", "")
+                if model_display:
+                    self._model_combo.setCurrentText(model_display)
+                fps_saved = meta.get("fps")
+                if fps_saved:
+                    self._fps_spin.setValue(fps_saved)
+                logger.info(f"[Grabación] meta cargada: {meta}")
+            except Exception as exc:
+                logger.warning(f"[Grabación] no se pudo leer meta.json: {exc}")
+
+        self._btn_analyze.setEnabled(True)
+        self._show_frame(0)
+        self._status_lbl.setText(f"Cargado — {len(frames)} frames de {folder_path.name}")
+        logger.info(f"[Grabación] cargada carpeta {folder_path.name} con {len(frames)} frames")
 
     def _grp_style(self) -> str:
         return (
