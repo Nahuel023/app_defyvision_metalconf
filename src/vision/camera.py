@@ -36,7 +36,10 @@ _PROP_MAP: dict[str, int] = {
     "sharpness":              cv2.CAP_PROP_SHARPNESS,
     "gamma":                  cv2.CAP_PROP_GAMMA,
     "backlight_compensation": getattr(cv2, "CAP_PROP_BACKLIGHT", 32),
+    "fps":                    cv2.CAP_PROP_FPS,
 }
+
+_FOURCC_MJPEG = cv2.VideoWriter.fourcc('M', 'J', 'P', 'G')
 
 
 class Camera:
@@ -164,9 +167,28 @@ class Camera:
             logger.error(f"Camera {self._index}: no se pudo abrir")
             cap.release()
             return False
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+        width  = int(self._settings.get("width",  1920))
+        height = int(self._settings.get("height", 1080))
+        fps    = int(self._settings.get("fps",    5))
+
+        # MJPEG must be requested before width/height/fps so DSHOW negotiates
+        # the right format. Without it the C920 falls back to YUY2 which caps
+        # at 5fps at 1920×1080 due to USB 2.0 bandwidth.
+        cap.set(cv2.CAP_PROP_FOURCC, _FOURCC_MJPEG)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        cap.set(cv2.CAP_PROP_FPS,          fps)
         cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
+
+        actual_fps = cap.get(cv2.CAP_PROP_FPS)
+        actual_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        logger.info(
+            f"Camera {self._index}: {actual_w}x{actual_h} @ {actual_fps:.0f}fps "
+            f"(requested {width}x{height} @ {fps}fps)"
+        )
+
         self._apply_settings(cap)
         self._cap = cap
         return True
