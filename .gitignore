@@ -19,7 +19,6 @@ data/output/
 data/videos/
 data/input/IMG_*.jpg
 data/input/WIN_*.jpg
-data/recordings/
 
 # Claude Code internal files
 .claude/
