@@ -23,7 +23,19 @@ class Pattern:
                 and self.cells is not None and len(self.cells) > 0)
 
 
-def pattern_path(model: str) -> Path:
+def pattern_path(model: str, scanner_id: str | None = None) -> Path:
+    """Return the canonical write path for a pattern (does not check existence)."""
+    if scanner_id:
+        return Path("data") / "patterns" / scanner_id / model / "holes.json"
+    return Path("data") / "patterns" / model / "holes.json"
+
+
+def find_pattern_path(model: str, scanner_id: str | None = None) -> Path:
+    """Resolve pattern path with fallback: scanner-specific → model-only."""
+    if scanner_id:
+        p = Path("data") / "patterns" / scanner_id / model / "holes.json"
+        if p.exists():
+            return p
     return Path("data") / "patterns" / model / "holes.json"
 
 

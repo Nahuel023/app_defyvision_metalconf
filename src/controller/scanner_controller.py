@@ -286,7 +286,8 @@ class ScannerController:
             frame_counter += 1
             fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
                    f"_{frame_counter:04d}")
-            res = self._inspector.inspect(model, frame, frame_id=fid)
+            res = self._inspector.inspect(model, frame, frame_id=fid,
+                                          scanner_id=self._id)
             if res is not None:
                 last_gray = gray   # referencia actualizada solo con inspecciones exitosas
                 self._handle_result(res, model)

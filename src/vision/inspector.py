@@ -20,15 +20,17 @@ class Inspector:
         frame: np.ndarray,
         frame_id: str = "live",
         save: bool = False,
+        scanner_id: str | None = None,
     ) -> Optional[InspectionResult]:
         """
         Ejecuta la inspección sobre un frame BGR.
         Devuelve None si el modelo no existe o el pipeline falla.
         """
         try:
-            return inspect_frame(model, frame, frame_id=frame_id, save=save)
+            return inspect_frame(model, frame, frame_id=frame_id, save=save,
+                                 scanner_id=scanner_id)
         except FileNotFoundError:
-            logger.error(f"Modelo '{model}' no encontrado en data/patterns/")
+            logger.error(f"Patrón no encontrado: scanner={scanner_id} modelo={model}")
             return None
         except Exception as exc:
             logger.error(f"Error en inspección ({model}): {exc}")
