@@ -4,7 +4,8 @@ from typing import Any
 
 import yaml
 
-_PATH = Path("config/camera.yaml")
+_PATH          = Path("config/camera.yaml")
+_PROFILES_PATH = Path("config/camera_profiles.yaml")
 
 DEFAULTS: dict[str, Any] = {
     "autofocus": True,
@@ -42,4 +43,30 @@ def save_camera_settings(scanner_id: str, settings: dict[str, Any]) -> None:
     existing[scanner_id] = settings
     with _PATH.open("w", encoding="utf-8") as f:
         yaml.dump(existing, f, default_flow_style=False,
+                  allow_unicode=True, sort_keys=False)
+
+
+def load_camera_profiles() -> dict[str, dict[str, Any]]:
+    """Return all profiles (built-in + user) keyed by slug."""
+    if not _PROFILES_PATH.exists():
+        return {}
+    with _PROFILES_PATH.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+    result: dict[str, dict[str, Any]] = {}
+    for section in ("profiles", "user_profiles"):
+        block = data.get(section) or {}
+        if isinstance(block, dict):
+            result.update(block)
+    return result
+
+
+def save_user_profile(slug: str, profile: dict[str, Any]) -> None:
+    """Persist a user-defined profile to camera_profiles.yaml."""
+    data: dict[str, Any] = {}
+    if _PROFILES_PATH.exists():
+        with _PROFILES_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    data.setdefault("user_profiles", {})[slug] = profile
+    with _PROFILES_PATH.open("w", encoding="utf-8") as f:
+        yaml.dump(data, f, default_flow_style=False,
                   allow_unicode=True, sort_keys=False)
