@@ -18,10 +18,6 @@ use_clahe: true
 clahe_clip: 3.0
 clahe_tile: 8
 use_otsu: true
-burst_frames: 5
-burst_delay_ms: 50
-# Modo de inspección activo: continuous (único modo soportado)
-inspection_mode: continuous
 # Umbral de diferencia media de píxeles entre el frame actual y el último
 # inspeccionado para considerar que hay suficiente material nuevo y disparar
 # una inspección. Más alto = menos inspecciones (secciones más separadas).

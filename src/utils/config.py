@@ -22,8 +22,6 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "clahe_clip": 2.0,
     "clahe_tile": 8,
     "use_otsu": False,
-    "burst_frames": 3,
-    "burst_delay_ms": 80,
 }
 
 

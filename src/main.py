@@ -128,12 +128,6 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_operator_ui(_: argparse.Namespace) -> int:
-    from src.qt_operator_app import launch_operator_ui
-
-    launch_operator_ui()
-    return 0
-
 
 def cmd_run(_: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
@@ -212,9 +206,6 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--fps", type=float, default=None, help="FPS efectivo de la secuencia para decision temporal.")
     sp.add_argument("--save", action="store_true", help="Guardar resultados en data/output.")
     sp.set_defaults(func=cmd_run_folder)
-
-    sp = sub.add_parser("operator-ui", help="Abrir interfaz de operador en PyQt (batch).")
-    sp.set_defaults(func=cmd_operator_ui)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.set_defaults(func=cmd_run)
