@@ -7,6 +7,9 @@ definido en config/io_map.yaml. La conexión Modbus es compartida.
 
 import logging
 from pathlib import Path
+from typing import Callable
+
+import numpy as np
 
 from src.plc.client import PLCClient
 from src.plc.io_map import IOMap
@@ -41,12 +44,17 @@ class InspectionSystem:
             cam_settings.update(cfg.get("camera_settings") or {})
             camera = Camera(
                 cfg["camera_index"],
-                retry_interval_s=cam_cfg.get("retry_interval_s", 3.0),
+                retry_interval_s=cam_cfg.get("retry_interval_s", 1.0),
                 settings=cam_settings,
             )
             scanner = ScannerController(scanner_id, self._io, camera)
             self._cameras[scanner_id] = camera
             self._scanners[scanner_id] = scanner
+
+        # Anti-bleed: each camera rejects frames identical to another camera's feed.
+        # This prevents DSHOW index drift from making two scanners show the same image.
+        for scanner_id, camera in self._cameras.items():
+            camera.set_frame_validator(self._make_bleed_validator(scanner_id))
 
         self._recorder = MetricsRecorder()
         self._recorder.start(self)
@@ -107,6 +115,39 @@ class InspectionSystem:
         return self._recorder
 
     # ------------------------------------------------------------------
+
+    def _make_bleed_validator(self, scanner_id: str) -> Callable:
+        """Return a frame validator that rejects frames identical to any other camera.
+
+        DSHOW can re-enumerate device indices when a camera disconnects, causing
+        a reconnecting camera to open the still-connected sibling device instead
+        of its own. The validator detects this by comparing a sample of pixels;
+        two distinct real-world views will never be near-identical.
+        """
+        cameras = self._cameras  # capture reference, not copy
+
+        def validator(frame: np.ndarray) -> bool:
+            for sid, cam in cameras.items():
+                if sid == scanner_id:
+                    continue
+                other = cam.get_frame()
+                if other is None or other.shape != frame.shape:
+                    continue
+                # Sample the center 200×200 patch for speed (avoid full-frame diff)
+                cy, cx = frame.shape[0] // 2, frame.shape[1] // 2
+                patch_a = frame [cy-100:cy+100, cx-100:cx+100].astype(np.float32)
+                patch_b = other[cy-100:cy+100, cx-100:cx+100].astype(np.float32)
+                diff = float(np.mean(np.abs(patch_a - patch_b)))
+                if diff < 8.0:
+                    logger.warning(
+                        f"[{scanner_id}] Camera validation FAILED: frame "
+                        f"near-identical to {sid} (diff={diff:.1f}px) — "
+                        f"DSHOW bleed, liberando"
+                    )
+                    return False
+            return True
+
+        return validator
 
     @staticmethod
     def _load_plc_config(path: Path) -> dict:

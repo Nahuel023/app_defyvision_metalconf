@@ -50,7 +50,7 @@ class Camera:
         settings: dict | None = None,
     ) -> None:
         self._index          = index
-        self._retry_interval = retry_interval_s
+        self._retry_max      = max(0.5, retry_interval_s)  # caps backoff ceiling
         self._settings: dict = settings or {}
 
         self._cap: Optional[cv2.VideoCapture] = None
@@ -60,6 +60,8 @@ class Camera:
         self._thread: Optional[threading.Thread] = None
         # FPS real: timestamps de los últimos 60 frames capturados exitosamente
         self._frame_times: deque = deque(maxlen=60)
+        # Optional callable(frame) -> bool: called after open to reject bleed
+        self._frame_validator = None
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -68,18 +70,19 @@ class Camera:
     def start(self) -> bool:
         if self._running:
             return True
-        if not self._open_capture():
-            return False
-
         self._running = True
+        opened = self._open_capture()   # attempt immediate open
         self._thread = threading.Thread(
             target=self._capture_loop,
             daemon=True,
             name=f"camera-{self._index}",
         )
         self._thread.start()
-        logger.info(f"Camera {self._index}: iniciada")
-        return True
+        if opened:
+            logger.info(f"Camera {self._index}: iniciada")
+        else:
+            logger.warning(f"Camera {self._index}: no disponible al inicio, reintentando en background")
+        return opened
 
     def stop(self) -> None:
         self._running = False
@@ -122,6 +125,16 @@ class Camera:
     # ------------------------------------------------------------------
     # Ajuste en vivo de parámetros
     # ------------------------------------------------------------------
+
+    def set_frame_validator(self, validator) -> None:
+        """Set a callable(frame) -> bool called after reconnect to reject bleed."""
+        self._frame_validator = validator
+
+    @property
+    def is_connected(self) -> bool:
+        """True when the capture device is open and delivering frames."""
+        with self._lock:
+            return self._cap is not None and self._frame is not None
 
     def apply_setting(self, name: str, value: float) -> bool:
         """Apply a single camera property live. Returns True if accepted."""
@@ -190,6 +203,24 @@ class Camera:
         )
 
         self._apply_settings(cap)
+
+        # Warm-up: drain 3 frames so the driver stabilises before validation.
+        test_frame = None
+        for _ in range(3):
+            ok, f = cap.read()
+            if ok:
+                test_frame = f
+
+        # Bleed guard: reject if the frame is identical to another camera's feed.
+        if self._frame_validator is not None and test_frame is not None:
+            if not self._frame_validator(test_frame):
+                logger.warning(
+                    f"Camera {self._index}: frame duplicado detectado "
+                    f"(bleed DSHOW) — liberando"
+                )
+                cap.release()
+                return False
+
         self._cap = cap
         return True
 
@@ -248,31 +279,40 @@ class Camera:
             self._cap = None
 
     def _capture_loop(self) -> None:
+        # retry_wait=0 → intento inmediato; sube exponencialmente hasta _retry_max
+        retry_wait = 0.0
+
         while self._running:
 
             # ── sin captura activa: esperar y reconectar ───────────
             if self._cap is None:
-                deadline = time.monotonic() + self._retry_interval
-                while self._running and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                if not self._running:
-                    break
+                if retry_wait > 0:
+                    deadline = time.monotonic() + retry_wait
+                    while self._running and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    if not self._running:
+                        break
+
                 if self._open_capture():
                     logger.info(f"Camera {self._index}: reconectada")
+                    retry_wait = 0.0   # reset backoff on success
                 else:
-                    logger.debug(f"Camera {self._index}: dispositivo no disponible, reintentando…")
+                    # exponential backoff: 0.5 → 1 → 2 → 4 → max
+                    retry_wait = min(self._retry_max, 0.5 if retry_wait == 0 else retry_wait * 2)
+                    logger.debug(
+                        f"Camera {self._index}: no disponible, "
+                        f"reintentando en {retry_wait:.1f}s…"
+                    )
                 continue
 
             # ── captura normal ─────────────────────────────────────
             ok, frame = self._cap.read()
             if not ok:
-                logger.warning(
-                    f"Camera {self._index}: pérdida de señal — "
-                    f"reconectando en {self._retry_interval:.0f}s…"
-                )
+                logger.warning(f"Camera {self._index}: pérdida de señal — reconectando…")
                 self._release_capture()
                 with self._lock:
                     self._frame = None   # evitar frame congelado en la UI
+                retry_wait = 0.0         # primer reintento inmediato
                 continue
 
             with self._lock:
