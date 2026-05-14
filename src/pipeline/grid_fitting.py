@@ -44,6 +44,7 @@ def assign_cells(
     ]
 
 
+
 def grid_compare_points(
     detected_xy: np.ndarray,
     cells: list[tuple[int, int]],
@@ -84,10 +85,19 @@ def grid_compare_points(
     origin_x = phase_x_det + k_x * dx
     origin_y = phase_y_det + k_y * dy
 
-    result = []
+    # Deduplicate: multiple stored cells can map to the same (ex,ey) on staggered
+    # grids where adjacent holes round to the same (ci,cj). Keeping duplicates
+    # causes compare_missing_only to claim the same detected hole twice, turning
+    # every second occurrence into a spurious miss.
+    result: list[tuple[float, float]] = []
+    seen: set[tuple[int, int]] = set()
     for ci, cj in cells:
         ex = origin_x + ci * dx
         ey = origin_y + cj * dy
+        key = (round(ex), round(ey))
+        if key in seen:
+            continue
         if margin <= ex <= img_w - margin and margin <= ey <= img_h - margin:
+            seen.add(key)
             result.append((float(ex), float(ey)))
     return result

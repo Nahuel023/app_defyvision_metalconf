@@ -3,18 +3,29 @@ FSM de un scanner individual.
 
 Estados:
   IDLE    → azul encendida, esperando START del operador
-  RUNNING → verde/amarillo según racha NOK, electroválvula activa, backlight ON
-  FAULT   → roja encendida, electroválvula detenida, esperando reset
+  RUNNING → verde/amarillo; electroválvula activa
+             MANUAL: solo electroválvula (sin backlight ni inspección)
+             AUTO:   inspección continua + electroválvula + backlight
+  FAULT   → roja+amarilla parpadeando; electroválvula detenida; espera DETENER
+  STOPPED → todas las luces apagadas; espera RESET para volver a IDLE
   ERROR   → fallo de hardware (cámara o PLC)
 
+Transiciones:
+  IDLE    --[INICIAR MANUAL]--> RUNNING (solo solenoide)
+  IDLE    --[INICIAR AUTO]---> RUNNING (completo)
+  RUNNING --[DETENER MANUAL]--> IDLE
+  RUNNING --[DETENER AUTO]---> STOPPED
+  RUNNING --[streak NOK >= umbral]--> FAULT
+  FAULT   --[DETENER]--> STOPPED
+  STOPPED --[RESET]--> IDLE
+
 Threads:
-  _poller_thread   — lee PLC cada poll_interval_ms (selector de modo)
-  _inspector_thread — modo continuo: inspecciona por diferencia de posición
+  _poller_thread    — lee PLC cada poll_interval_ms; gestiona blink en FAULT
+  _inspector_thread — modo AUTO: inspecciona por diferencia de posición
 """
 
 import logging
 import threading
-import time
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -33,9 +44,9 @@ logger = logging.getLogger(__name__)
 
 class ScannerController:
     def __init__(self, scanner_id: str, io: IOMap, camera: Camera) -> None:
-        self._id       = scanner_id
-        self._io       = io
-        self._camera   = camera
+        self._id        = scanner_id
+        self._io        = io
+        self._camera    = camera
         self._inspector = Inspector()
 
         cfg        = io.scanner_config(scanner_id)
@@ -45,18 +56,16 @@ class ScannerController:
             insp_cfg.get("consecutive_nok_frames",
                          tolerances["consecutive_nok_frames"])
         )
-        self._save_nok    = bool(insp_cfg.get("save_nok_frames", True))
-        self._save_ok     = bool(insp_cfg.get("save_ok_frames",  False))
+        self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
+        self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
-        # Umbral de diferencia media de píxeles entre el frame actual y el último
-        # inspeccionado para considerar que hay suficiente material nuevo.
-        self._cont_pos_thr = float(
+        self._cont_pos_thr  = float(
             tolerances.get("continuous_position_threshold", 8.0)
         )
 
-        self._state       = ScannerState.IDLE
-        self._mode        = OperationMode.MANUAL
-        self._nok_streak  = 0
+        self._state      = ScannerState.IDLE
+        self._mode       = OperationMode.MANUAL
+        self._nok_streak = 0
         self._last_result: Optional[InspectionResult] = None
 
         # Métricas de sesión (resetean en start())
@@ -66,13 +75,13 @@ class ScannerController:
         self._session_start: Optional[datetime] = None
         self._max_nok_streak:    int       = 0
         self._fault_count:       int       = 0
-        self._total_missing:     int       = 0   # suma de agujeros faltantes en NOKs
-        self._nok_with_missing:  int       = 0   # NOKs con datos de missing
-        self._last_position_diff: float    = 0.0  # última diff detectada en continuous_loop
+        self._total_missing:     int       = 0
+        self._nok_with_missing:  int       = 0
+        self._last_position_diff: float    = 0.0
 
-        self._lock           = threading.Lock()
-        self._force_inspect  = threading.Event()   # forzar inspección inmediata
-        self._stop_event     = threading.Event()
+        self._lock          = threading.Lock()
+        self._force_inspect = threading.Event()
+        self._stop_event    = threading.Event()
 
         self._poller_thread:   Optional[threading.Thread] = None
         self._inspector_thread: Optional[threading.Thread] = None
@@ -86,16 +95,22 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def start(self) -> bool:
-        """IDLE → RUNNING. Arranca cámara, activa electroválvula y backlight."""
+        """IDLE → RUNNING.
+
+        MANUAL: activa solo la electroválvula. Sin backlight ni inspección.
+        AUTO:   activa electroválvula + backlight + hilo de inspección continua.
+        """
         with self._lock:
             if self._state != ScannerState.IDLE:
                 logger.warning(f"[{self._id}] start() ignorado, estado={self._state.value}")
                 return False
+            mode = self._mode
 
-        if not self._camera.is_running:
-            if not self._camera.start():
-                self._transition(ScannerState.ERROR)
-                return False
+        if mode == OperationMode.AUTO:
+            if not self._camera.is_running:
+                if not self._camera.start():
+                    self._transition(ScannerState.ERROR)
+                    return False
 
         with self._lock:
             self._nok_streak         = 0
@@ -111,54 +126,67 @@ class ScannerController:
             self._stop_event.clear()
             self._force_inspect.clear()
 
-        self._start_threads()
+        if mode == OperationMode.AUTO:
+            self._start_all_threads()
+            self._io.write(f"{self._id}.solenoid",  True)
+            self._io.write(f"{self._id}.backlight", True)
+        else:
+            self._start_poller_thread()
+            self._io.write(f"{self._id}.solenoid", True)
+            # No backlight, no inspección
+
         self._transition(ScannerState.RUNNING)
-
-        # Luces: verde ON, backlight ON, azul/amarillo/rojo OFF
         self._set_lights(green=True)
-        self._io.write(f"{self._id}.solenoid",  True)
-        self._io.write(f"{self._id}.backlight", True)
-
-        logger.info(f"[{self._id}] iniciado")
+        logger.info(f"[{self._id}] iniciado ({mode.value})")
         return True
 
     def stop(self) -> None:
-        """Detiene el scanner → IDLE. Apaga electroválvula y backlight."""
+        """Detiene el scanner.
+
+        MANUAL RUNNING → IDLE  (azul; listo para INICIAR de nuevo).
+        AUTO RUNNING   → STOPPED (luces apagadas; espera RESET → IDLE).
+        FAULT          → STOPPED (ídem).
+        """
         with self._lock:
-            if self._state == ScannerState.IDLE:
+            if self._state in (ScannerState.IDLE, ScannerState.STOPPED):
                 return
+            state = self._state
+            mode  = self._mode
 
-        self._transition(ScannerState.IDLE)
+        # FAULT siempre → STOPPED; AUTO RUNNING → STOPPED; MANUAL RUNNING → IDLE
+        if state == ScannerState.FAULT or mode == OperationMode.AUTO:
+            new_state = ScannerState.STOPPED
+        else:
+            new_state = ScannerState.IDLE
 
+        self._transition(new_state)
         self._io.write(f"{self._id}.solenoid",  False)
         self._io.write(f"{self._id}.backlight", False)
-        self._set_lights(blue=True)   # IDLE = azul
+
+        if new_state == ScannerState.IDLE:
+            self._set_lights(blue=True)
+        else:
+            self._set_lights()   # todas apagadas en STOPPED
 
         self._stop_event.set()
         self._join_threads()
-        logger.info(f"[{self._id}] detenido")
+        logger.info(f"[{self._id}] detenido → {new_state.value}")
 
     def reset(self) -> bool:
-        """FAULT → RUNNING. Reactiva electroválvula y reanuda inspección."""
+        """STOPPED → IDLE + azul. Requiere INICIAR para reanudar."""
         with self._lock:
-            if self._state != ScannerState.FAULT:
+            if self._state != ScannerState.STOPPED:
                 return False
-            self._nok_streak = 0
 
-        self._io.write(f"{self._id}.solenoid",  True)
-        self._io.write(f"{self._id}.backlight", True)
-        self._set_lights(green=True)
-        self._transition(ScannerState.RUNNING)
-        logger.info(f"[{self._id}] reset, reanudando")
+        self._transition(ScannerState.IDLE)
+        self._set_lights(blue=True)
+        logger.info(f"[{self._id}] reset → IDLE")
         return True
 
     def force_inspect(self) -> bool:
-        """Fuerza una inspección inmediata ignorando el umbral de posición.
-
-        Requiere estado RUNNING. Útil para diagnóstico desde la UI de servicio.
-        """
+        """Fuerza una inspección inmediata (solo en AUTO RUNNING)."""
         with self._lock:
-            if self._state != ScannerState.RUNNING:
+            if self._state != ScannerState.RUNNING or self._mode != OperationMode.AUTO:
                 logger.warning(
                     f"[{self._id}] force_inspect ignorado, estado={self._state.value}"
                 )
@@ -166,6 +194,18 @@ class ScannerController:
         self._force_inspect.set()
         logger.info(f"[{self._id}] inspección forzada")
         return True
+
+    def initialize_lights(self) -> None:
+        """Enciende la luz correspondiente al estado actual.
+        Llamar una vez tras conectar el PLC."""
+        with self._lock:
+            state = self._state
+        if state == ScannerState.IDLE:
+            self._set_lights(blue=True)
+        elif state == ScannerState.RUNNING:
+            self._set_lights(green=True)
+        elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
+            self._set_lights()  # todas apagadas hasta que el operador actúe
 
     def set_model(self, model: str) -> None:
         cfg = self._io.scanner_config(self._id)
@@ -197,6 +237,12 @@ class ScannerController:
             return self._last_result
 
     def get_status(self) -> dict:
+        # Lee el switch directamente del PLC para reflejar cambios en cualquier estado
+        mode_raw = self._io.read(f"{self._id}.mode_switch")
+        if mode_raw is not None:
+            with self._lock:
+                self._mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
+
         with self._lock:
             avg_missing = (
                 self._total_missing / self._nok_with_missing
@@ -222,28 +268,41 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def _poll_loop(self) -> None:
+        _tick = 0
+        _prev_blink: Optional[bool] = None
         while not self._stop_event.is_set():
+            # Leer switch de modo
             mode_raw = self._io.read(f"{self._id}.mode_switch")
             if mode_raw is not None:
                 new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
                 with self._lock:
                     self._mode = new_mode
+
+            # Blink en FAULT: rojo + amarillo ~1 Hz (500 ms ON / 500 ms OFF)
+            with self._lock:
+                state = self._state
+
+            _tick += 1
+            if state == ScannerState.FAULT:
+                blink_on = (_tick % 20) < 10   # a 50 ms/tick → 10 ticks = 500 ms
+                if blink_on != _prev_blink:
+                    self._set_lights(red=blink_on, yellow=blink_on)
+                    _prev_blink = blink_on
+            else:
+                _prev_blink = None
+
             self._stop_event.wait(timeout=self._poll_interval)
 
     # ------------------------------------------------------------------
-    # Thread: inspector
+    # Thread: inspector (solo AUTO)
     # ------------------------------------------------------------------
 
     def _continuous_loop(self) -> None:
-        """Modo continuo: inspecciona siempre que el material avanzó lo suficiente.
+        """Modo continuo AUTO: inspecciona cuando el material avanzó lo suficiente.
 
         Compara cada frame con el ÚLTIMO FRAME INSPECCIONADO (no con el anterior).
         Si la diferencia media supera continuous_position_threshold → nueva sección
-        de material → inspeccionar → actualizar referencia.
-
-        Maneja sin distinción: máquina parada (inspecciona una vez, luego bloquea),
-        avance lento (inspecciona por sección) y avance rápido (inspecciona tan
-        rápido como el pipeline lo permite).
+        → inspeccionar → actualizar referencia.
         """
         last_gray: Optional[np.ndarray] = None
         frame_counter = 0
@@ -262,13 +321,11 @@ class ScannerController:
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # Reload position threshold — may have per-model override
             pos_thr = float(
                 load_tolerances(model).get("continuous_position_threshold",
                                            self._cont_pos_thr)
             )
 
-            # Comparar con el último frame inspeccionado — no con el anterior
             forced = self._force_inspect.is_set()
             if forced:
                 self._force_inspect.clear()
@@ -277,25 +334,23 @@ class ScannerController:
                 with self._lock:
                     self._last_position_diff = diff
                 if diff < pos_thr:
-                    # Misma posición que la última inspección — esperar
                     self._stop_event.wait(timeout=0.033)
                     continue
                 logger.debug(f"[{self._id}] nueva sección detectada (diff={diff:.1f})")
 
-            # Nueva posición (o primer frame) → inspeccionar
             frame_counter += 1
             fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
                    f"_{frame_counter:04d}")
             res = self._inspector.inspect(model, frame, frame_id=fid,
                                           scanner_id=self._id)
             if res is not None:
-                last_gray = gray   # referencia actualizada solo con inspecciones exitosas
+                last_gray = gray
                 self._handle_result(res, model)
 
             self._stop_event.wait(timeout=0.033)
 
     def _handle_result(self, result: InspectionResult, model: str = "") -> None:
-        """Update state machine and fire callbacks after any inspection result."""
+        """Actualiza la FSM y dispara callbacks tras un resultado de inspección."""
         if (result.status == "NOK" and self._save_nok) or \
            (result.status == "OK"  and self._save_ok):
             try:
@@ -303,7 +358,6 @@ class ScannerController:
             except Exception as exc:
                 logger.error(f"[{self._id}] error guardando imagen: {exc}")
 
-        # Reload consecutive_nok threshold — may differ per model
         tols = load_tolerances(model) if model else load_tolerances()
         consecutive_nok = int(tols.get("consecutive_nok_frames", self._consecutive_nok))
 
@@ -317,13 +371,13 @@ class ScannerController:
                 self._total_missing    += result.report.missing
                 self._nok_with_missing += 1
             else:
-                self._nok_streak  = 0
-                self._ok_count   += 1
+                self._nok_streak = 0
+                self._ok_count  += 1
             streak = self._nok_streak
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
-                self._state   = ScannerState.FAULT
+                self._state     = ScannerState.FAULT
                 fault_triggered = True
                 self._fault_count += 1
 
@@ -331,7 +385,7 @@ class ScannerController:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
             self._io.write(f"{self._id}.solenoid",  False)
             self._io.write(f"{self._id}.backlight", False)
-            self._set_lights(red=True)
+            self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
             self._fire_state_changed()
         elif streak > 0:
             self._set_lights(yellow=True)
@@ -349,7 +403,6 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def _set_lights(self, *, blue=False, green=False, yellow=False, red=False) -> None:
-        """Escribe los 4 colores de una sola vez. Errores PLC ignorados."""
         for signal, value in (
             (f"{self._id}.light_blue",   blue),
             (f"{self._id}.light_green",  green),
@@ -358,14 +411,17 @@ class ScannerController:
         ):
             self._io.write(signal, value)
 
-    def _start_threads(self) -> None:
+    def _start_poller_thread(self) -> None:
         self._poller_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name=f"{self._id}-poller"
         )
+        self._poller_thread.start()
+
+    def _start_all_threads(self) -> None:
+        self._start_poller_thread()
         self._inspector_thread = threading.Thread(
             target=self._continuous_loop, daemon=True, name=f"{self._id}-inspector"
         )
-        self._poller_thread.start()
         self._inspector_thread.start()
 
     def _join_threads(self) -> None:

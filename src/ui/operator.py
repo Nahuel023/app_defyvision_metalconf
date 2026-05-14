@@ -54,7 +54,15 @@ _COLOR = {
     ScannerState.IDLE:    ("#64748b", "#ffffff"),
     ScannerState.RUNNING: ("#15803d", "#ffffff"),
     ScannerState.FAULT:   ("#b91c1c", "#ffffff"),
+    ScannerState.STOPPED: ("#1e293b", "#94a3b8"),
     ScannerState.ERROR:   ("#92400e", "#ffffff"),
+}
+_STATE_LABEL = {
+    ScannerState.IDLE:    "IDLE",
+    ScannerState.RUNNING: "RUNNING",
+    ScannerState.FAULT:   "FAULT",
+    ScannerState.STOPPED: "PARADO",
+    ScannerState.ERROR:   "ERROR",
 }
 _MODE_COLOR = {
     OperationMode.AUTO:   "#1d4ed8",
@@ -88,6 +96,8 @@ class ScannerPanel(QWidget):
 
         self._last_overlay: Optional[np.ndarray] = None
         self._overlay_until_ms: int = 0
+        self._nok_threshold: int = 5   # actualizado en refresh_status
+        self._manual_mode_display: bool = False  # True cuando se muestra aviso MODO MANUAL
 
         self._build_ui()
         self._populate_models()
@@ -151,12 +161,12 @@ class ScannerPanel(QWidget):
         grid.setContentsMargins(8, 8, 8, 8)
         grid.setSpacing(5)
 
-        self._mode_val   = self._metric_card("MODO",      "MANUAL", _MODE_COLOR[OperationMode.MANUAL])
-        self._total_val  = self._metric_card("TOTAL",     "0",      "#94a3b8")
-        self._result_val = self._metric_card("ÚLTIMO",    "—",      "#94a3b8")
-        self._streak_val = self._metric_card("RACHA NOK", "0",      "#94a3b8")
-        self._ok_val     = self._metric_card("✓ OK",      "0",      "#94a3b8")
-        self._nok_val    = self._metric_card("✗ NOK",     "0",      "#94a3b8")
+        self._mode_val   = self._metric_card("MODO",       "MANUAL", _MODE_COLOR[OperationMode.MANUAL])
+        self._total_val  = self._metric_card("TOTAL",      "0",      "#94a3b8")
+        self._result_val = self._metric_card("ÚLTIMO",     "—",      "#94a3b8")
+        self._streak_val = self._metric_card("RACHA NOK",  "0",      "#94a3b8")
+        self._ok_val     = self._metric_card("✓ OK frames","0",      "#94a3b8")
+        self._nok_val    = self._metric_card("✗ ALARMAS",  "0",      "#94a3b8")
 
         for col, mv in enumerate([self._mode_val, self._total_val, self._result_val]):
             grid.addWidget(mv[0], 0, col)
@@ -241,6 +251,30 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def refresh_camera(self) -> None:
+        state = self._scanner.state
+        mode  = self._scanner.mode
+        is_manual_running = (state == ScannerState.RUNNING
+                             and mode == OperationMode.MANUAL)
+
+        if is_manual_running:
+            if not self._manual_mode_display:
+                self._manual_mode_display = True
+                self.camera_label.setPixmap(QPixmap())
+                self.camera_label.setText("MODO MANUAL\nInspección inactiva")
+                self.camera_label.setStyleSheet(
+                    "background:#0a0f1a;color:#475569;border-radius:8px;"
+                    "border:1px solid #cbd5e1;font-size:14px;font-weight:600;"
+                    "letter-spacing:1px;"
+                )
+            return
+
+        if self._manual_mode_display:
+            self._manual_mode_display = False
+            self.camera_label.clear()
+            self.camera_label.setStyleSheet(
+                "background:#0a0f1a;border-radius:8px;border:1px solid #cbd5e1;"
+            )
+
         now_ms = int(time.monotonic() * 1000)
         if self._last_overlay is not None and now_ms < self._overlay_until_ms:
             frame = self._last_overlay
@@ -255,17 +289,24 @@ class ScannerPanel(QWidget):
         self.camera_label.setPixmap(_bgr_to_pixmap(frame, w, h))
 
     def refresh_status(self) -> None:
-        s       = self._scanner.get_status()
-        state   = s["state"]
-        mode    = s["mode"]
-        streak  = s["nok_streak"]
-        result  = s["last_result"]
-        total   = s["total_inspections"]
-        ok_cnt  = s["ok_count"]
-        nok_cnt = s["nok_count"]
+        s           = self._scanner.get_status()
+        state       = s["state"]
+        mode        = s["mode"]
+        streak      = s["nok_streak"]
+        result      = s["last_result"]
+        total       = s["total_inspections"]
+        ok_cnt      = s["ok_count"]
+        fault_cnt   = s["fault_count"]
 
-        bg, fg = _COLOR[state]
-        self.state_badge.setText(f"● {state.value.upper()}")
+        from src.utils.config import load_tolerances
+        _model = self._system.io.scanner_config(self._id).get("model", "")
+        _tols  = load_tolerances(_model) if _model else load_tolerances()
+        _threshold = int(_tols.get("consecutive_nok_frames", 5))
+        self._nok_threshold = _threshold
+
+        bg, fg = _COLOR.get(state, ("#64748b", "#ffffff"))
+        label = _STATE_LABEL.get(state, state.value.upper())
+        self.state_badge.setText(f"● {label}")
         self.state_badge.setStyleSheet(
             f"background:{bg};color:{fg};border-radius:7px;"
             "padding:8px 14px;font-size:14px;font-weight:700;"
@@ -275,8 +316,17 @@ class ScannerPanel(QWidget):
         self._mode_val[1].setText(mode.value.upper())
         self._mode_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{mc};")
 
-        sc = "#b91c1c" if streak > 0 else "#94a3b8"
-        self._streak_val[1].setText(str(streak))
+        # Racha: verde→amarillo→rojo según proporción del umbral
+        ratio = streak / _threshold if _threshold > 0 else 0
+        if ratio == 0:
+            sc = "#94a3b8"
+        elif ratio < 0.5:
+            sc = "#15803d"
+        elif ratio < 0.8:
+            sc = "#d97706"
+        else:
+            sc = "#b91c1c"
+        self._streak_val[1].setText(f"{streak} / {_threshold}")
         self._streak_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{sc};")
 
         self._total_val[1].setText(str(total))
@@ -285,15 +335,30 @@ class ScannerPanel(QWidget):
         self._ok_val[1].setText(str(ok_cnt))
         self._ok_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{ok_c};")
 
-        nok_c = "#b91c1c" if nok_cnt > 0 else "#94a3b8"
-        self._nok_val[1].setText(str(nok_cnt))
-        self._nok_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{nok_c};")
+        fault_c = "#b91c1c" if fault_cnt > 0 else "#15803d"
+        self._nok_val[1].setText(str(fault_cnt))
+        self._nok_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{fault_c};")
 
-        if result:
-            rc = "#15803d" if result.status == "OK" else "#b91c1c"
-            missing_txt = f" ({result.report.missing}✗)" if result.report.missing else ""
-            self._result_val[1].setText(f"{result.status}{missing_txt}")
-            self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{rc};")
+        # ÚLTIMO: salud temporal del sistema
+        if state == ScannerState.STOPPED:
+            health_txt, health_c = "PARADO", "#475569"
+            self._result_val[1].setText(health_txt)
+            self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
+        elif state == ScannerState.RUNNING and mode == OperationMode.MANUAL:
+            health_txt, health_c = "MANUAL", "#64748b"
+            self._result_val[1].setText(health_txt)
+            self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
+        elif result is not None:
+            if state == ScannerState.FAULT:
+                health_txt, health_c = "FAULT", "#b91c1c"
+            elif ratio >= 0.8:
+                health_txt, health_c = f"ALERTA {streak}/{_threshold}", "#b91c1c"
+            elif ratio >= 0.5:
+                health_txt, health_c = f"ATENCIÓN {streak}/{_threshold}", "#d97706"
+            else:
+                health_txt, health_c = "OK", "#15803d"
+            self._result_val[1].setText(health_txt)
+            self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
 
         self._refresh_buttons(state)
 
@@ -305,7 +370,8 @@ class ScannerPanel(QWidget):
         if not self._scanner.start():
             QMessageBox.warning(self, "Iniciar", f"No se pudo iniciar {self._id}.")
         else:
-            self._log("INICIADO")
+            mode = self._scanner.mode
+            self._log(f"INICIADO ({mode.value.upper()})")
 
     def _on_stop(self) -> None:
         self._scanner.stop()
@@ -313,9 +379,9 @@ class ScannerPanel(QWidget):
 
     def _on_reset(self) -> None:
         if self._scanner.reset():
-            self._log("RESET — reanudando inspección")
+            self._log("RESET → IDLE")
         else:
-            QMessageBox.information(self, "Reset", "Solo disponible en estado FAULT.")
+            QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
 
     def _on_model_changed(self, display_name: str) -> None:
         from src.utils.model_names import to_internal
@@ -329,13 +395,25 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_state_changed(self, state: ScannerState, mode: OperationMode) -> None:
-        self._log(f"Estado → {state.value.upper()} / {mode.value.upper()}")
+        label = _STATE_LABEL.get(state, state.value.upper())
+        self._log(f"Estado → {label} / {mode.value.upper()}")
 
     def _on_result(self, result: InspectionResult, streak: int) -> None:
-        until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
-        self._sig_overlay.emit(result.overlay.copy(), until_ms)
-        label = "OK" if result.status == "OK" else f"NOK — {result.report.missing} faltante(s)"
-        self._log(f"{label}  |  racha={streak}")
+        threshold = self._nok_threshold
+        warn_level = threshold // 3   # mostrar overlay con marcas rojas a partir de aquí
+
+        # Overlay: solo mostrar marcas de falla cuando la racha es significativa
+        if streak >= warn_level or result.status == "OK":
+            until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
+            self._sig_overlay.emit(result.overlay.copy(), until_ms)
+
+        # Log: solo en hitos relevantes, no en cada frame
+        if streak == 0 and result.status == "OK":
+            pass   # silencioso cuando todo va bien
+        elif streak == 0:
+            self._log("Racha NOK terminada — material OK")
+        elif streak % 10 == 0:
+            self._log(f"Racha NOK: {streak} / {threshold}")
 
     def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
         self._last_overlay     = overlay
@@ -347,17 +425,27 @@ class ScannerPanel(QWidget):
 
     def _refresh_buttons(self, state: ScannerState) -> None:
         self.start_btn.setEnabled(state == ScannerState.IDLE)
-        self.stop_btn.setEnabled(state != ScannerState.IDLE)
-        self.reset_btn.setEnabled(state == ScannerState.FAULT)
+        self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
+        self.reset_btn.setEnabled(state == ScannerState.STOPPED)
 
     def _populate_models(self) -> None:
         from src.utils.model_names import DISPLAY_NAMES, to_display
-        current_internal = self._system.io.scanner_config(self._id).get("model", "")
+        cfg = self._system.io.scanner_config(self._id)
+        current_internal = cfg.get("model", "")
+        allowed_internal = cfg.get("allowed_models", None)
+
+        if allowed_internal:
+            display_list = [to_display(m) for m in allowed_internal]
+        else:
+            display_list = DISPLAY_NAMES
+
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
-        self.model_combo.addItems(DISPLAY_NAMES)
+        self.model_combo.addItems(display_list)
         if current_internal:
-            self.model_combo.setCurrentText(to_display(current_internal))
+            disp = to_display(current_internal)
+            if self.model_combo.findText(disp) >= 0:
+                self.model_combo.setCurrentText(disp)
         self.model_combo.blockSignals(False)
 
     def _log(self, msg: str) -> None:
@@ -593,12 +681,18 @@ class OperatorWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         reply = QMessageBox.question(
             self, "Cerrar",
-            "¿Detener todos los scanners y cerrar?",
+            "¿Apagar el sistema y cerrar?\n\n"
+            "Se detendrán los scanners y se apagarán todas las salidas.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             self._camera_timer.stop()
             self._status_timer.stop()
+            # Cerrar ventanas auxiliares antes de apagar el sistema
+            if self._service_win is not None and self._service_win.isVisible():
+                self._service_win.close()
+            if self._metrics_win is not None and self._metrics_win.isVisible():
+                self._metrics_win.close()
             self._system.shutdown()
             event.accept()
         else:
@@ -665,5 +759,7 @@ def launch_operator_ui(system: InspectionSystem) -> None:
         icon = QIcon(icon_pix)
         app.setWindowIcon(icon)
     win = OperatorWindow(system)
-    win.show()
+    win.showMaximized()
+    win.raise_()
+    win.activateWindow()
     app.exec()

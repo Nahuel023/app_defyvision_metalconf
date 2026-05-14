@@ -133,7 +133,7 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
 
 
 
-def cmd_run(_: argparse.Namespace) -> int:
+def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
     from src.utils.logger import setup_logging
     from src.controller.system import InspectionSystem
@@ -141,7 +141,8 @@ def cmd_run(_: argparse.Namespace) -> int:
 
     setup_logging()
 
-    system = InspectionSystem()
+    disable_outputs = getattr(args, "no_plc_outputs", False)
+    system = InspectionSystem(disable_plc_outputs=disable_outputs)
     system.connect_plc()        # intenta conectar; si falla, la UI lo mostrará
     system.start_cameras()      # intenta abrir cámaras; errores van al log de la UI
 
@@ -216,6 +217,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_run_folder)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
+    sp.add_argument("--no-plc-outputs", action="store_true", dest="no_plc_outputs",
+                    help="Deshabilita escrituras al PLC (luces/solenoide/backlight). Solo analiza.")
     sp.set_defaults(func=cmd_run)
 
     sp = sub.add_parser("service", help="Modo servicio: diagnóstico PLC/cámaras/logs con login.")

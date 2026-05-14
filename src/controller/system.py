@@ -24,7 +24,8 @@ _APP_CONFIG_PATH = Path("config/app.yaml")
 
 
 class InspectionSystem:
-    def __init__(self, io_map_path: Path = Path("config/io_map.yaml")) -> None:
+    def __init__(self, io_map_path: Path = Path("config/io_map.yaml"),
+                 disable_plc_outputs: bool = False) -> None:
         plc_cfg = self._load_plc_config(io_map_path)
         cam_cfg = self._load_camera_config()
 
@@ -33,7 +34,8 @@ class InspectionSystem:
             port=plc_cfg.get("port", 502),
             unit_id=plc_cfg.get("unit_id", 1),
         )
-        self._io = IOMap(self._client, io_map_path)
+        self._io = IOMap(self._client, io_map_path,
+                         disable_outputs=disable_plc_outputs)
         self._cameras: dict[str, Camera] = {}
         self._scanners: dict[str, ScannerController] = {}
 
@@ -67,6 +69,9 @@ class InspectionSystem:
         ok = self._client.connect()
         if not ok:
             logger.error("No se pudo conectar al PLC")
+            return ok
+        for scanner in self._scanners.values():
+            scanner.initialize_lights()
         return ok
 
     def start_cameras(self) -> dict[str, bool]:
@@ -84,6 +89,12 @@ class InspectionSystem:
         self._recorder.stop()
         for scanner in self._scanners.values():
             scanner.stop()
+        # Apagar todas las salidas PLC incondicionalmente (por si el scanner
+        # quedó en IDLE/MANUAL y no apagó las luces en stop())
+        for sid in self._scanners:
+            for sig in ("solenoid", "backlight",
+                        "light_blue", "light_green", "light_yellow", "light_red"):
+                self._io.write(f"{sid}.{sig}", False)
         for camera in self._cameras.values():
             camera.stop()
         self._client.disconnect()

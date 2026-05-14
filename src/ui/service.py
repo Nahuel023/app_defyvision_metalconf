@@ -1139,7 +1139,22 @@ class RecordingTab(QWidget):
         ok  = sum(1 for r in results if r.status == "OK")
         nok = len(results) - ok
         pct = round(100 * ok / len(results)) if results else 0
-        self._summary_lbl.setText(f"OK: {ok} ({pct}%)  NOK: {nok}  Total: {len(results)}")
+
+        # Temporal decision (consecutive NOK rule)
+        from src.inspection import _apply_temporal_rule
+        from src.utils.config import load_tolerances
+        model = self._active_model()
+        tols = load_tolerances(model)
+        consec = int(tols.get("consecutive_nok_frames", 5))
+        temporal = _apply_temporal_rule(results, consec)
+        t_ok  = sum(1 for t in temporal if t.decision_status == "OK")
+        t_nok = len(temporal) - t_ok
+        t_pct = round(100 * t_ok / len(temporal)) if temporal else 0
+        self._summary_lbl.setText(
+            f"Frame OK: {ok} ({pct}%)  NOK: {nok}  Total: {len(results)}"
+            f"    |    Temporal OK: {t_ok} ({t_pct}%)  NOK: {t_nok}"
+            f"  [umbral={consec}]"
+        )
 
         if results:
             missing_counts = [len(r.report.missing_points) for r in results]
