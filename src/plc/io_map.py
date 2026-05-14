@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 class IOMap:
-    def __init__(self, client: PLCClient, config_path: Path) -> None:
+    def __init__(self, client: PLCClient, config_path: Path,
+                 disable_outputs: bool = False) -> None:
         self._client = client
+        self._disable_outputs = disable_outputs
         self._config: dict[str, Any] = self._load(config_path)
         self._index: dict[str, tuple[str, int]] = self._build_index()
 
@@ -43,10 +45,14 @@ class IOMap:
         """
         Escribe una señal de salida por nombre completo.
         Lanza ValueError si el nombre corresponde a una entrada.
+        Retorna True sin escribir si disable_outputs=True.
         """
         sig_type, address = self._resolve(signal)
         if sig_type != "output":
             raise ValueError(f"'{signal}' es una entrada — no se puede escribir")
+        if self._disable_outputs:
+            logger.debug(f"[no-plc-outputs] {signal}={value} (suprimido)")
+            return True
         return self._client.write_coil(address, value)
 
     def scanner_ids(self) -> list[str]:

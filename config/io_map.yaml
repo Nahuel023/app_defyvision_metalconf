@@ -11,12 +11,12 @@ plc:
 scanner_1:
   camera_index: 0
   camera_settings: {}  # overrides sobre config/camera.yaml; vacío = usa camera.yaml
-  model: "modelo_A"
+  model: "modelo_B"
+  allowed_models: ["modelo_B"]   # solo Microperforado
   inspection:
     consecutive_nok_frames: 5
   inputs:
-    # X0 libre — reservado para uso futuro
-    mode_switch:  1   # X1  — maneta (0=MANUAL, 1=AUTO)
+    mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
     light_red:    0   # Y0  — rojo:     FAULT / parada forzada
     light_green:  1   # Y1  — verde:    RUNNING sin advertencias
@@ -27,12 +27,12 @@ scanner_1:
 
 scanner_2:
   camera_index: 1
-  model: "modelo_B"
+  model: "modelo_A"
+  allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   inspection:
     consecutive_nok_frames: 5
   inputs:
-    # X2 libre — reservado para uso futuro
-    mode_switch:  3   # X3  — maneta
+    mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:
     light_red:    4   # Y4  — rojo
     light_green:  5   # Y5  — verde

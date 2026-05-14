@@ -17,6 +17,7 @@ def compare_missing_only(
     expected_points: List[Tuple[float, float]],
     detected_points: List[Tuple[float, float]],
     tol_xy_px: float = 8.0,
+    max_missing: int = 0,
 ) -> CompareReport:
     """
     Matching simple: cada punto esperado busca el detectado más cercano que aún no se usó.
@@ -48,7 +49,7 @@ def compare_missing_only(
             missing_points.append((ex, ey))
 
     missing = len(missing_points)
-    status = "OK" if missing == 0 else "NOK"
+    status = "OK" if missing <= max_missing else "NOK"
 
     return CompareReport(
         expected=len(expected_points),

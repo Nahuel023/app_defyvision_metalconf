@@ -13,6 +13,7 @@ from src.pipeline.align_edge import align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
+from src.pipeline.grid_fitting import grid_compare_points
 from src.pipeline.preprocess import preprocess_for_holes
 from src.utils.config import load_tolerances
 
@@ -117,6 +118,7 @@ def _inspect_bgr(
     use_otsu = bool(tolerances.get("use_otsu", False))
 
     edge_margin_px = float(tolerances.get("edge_margin_px", 0.0))
+    grid_max_missing = int(tolerances.get("grid_max_missing", 0))
 
     pattern = load_pattern(find_pattern_path(model, scanner_id))
 
@@ -142,67 +144,53 @@ def _inspect_bgr(
 
     img_h, img_w = img.shape[:2]
 
-    # Estimate the affine transform that maps detected holes → pattern space.
     shift_xy: tuple[float, float] | None = None
-    transform = _estimate_alignment_transform(
-        pattern.points, holes,
-        match_tol_px=align_match_tol_px, min_match_count=min_match_count,
-    )
 
-    # Project pattern into detected coordinate space via the inverse transform.
-    if transform is not None:
-        shift_xy = (float(transform[0, 2]), float(transform[1, 2]))
-        inv = cv2.invertAffineTransform(transform)
-        pat_arr = np.array(pattern.points, dtype=np.float32).reshape(-1, 1, 2)
-        projected = cv2.transform(pat_arr, inv).reshape(-1, 2)
-        compare_points = [
-            (float(ex), float(ey)) for ex, ey in projected
-            if edge_margin_px <= ex <= img_w - edge_margin_px
-            and edge_margin_px <= ey <= img_h - edge_margin_px
-        ]
-
-        # Alias guard: on periodic patterns the voting can alias by ±dx.
-        # Count how many projected expected points have a nearby detected hole.
-        # If the match rate is <80% and pattern has grid info, try ±dx correction
-        # and adopt whichever gives the best match rate.
-        if pattern.has_grid and compare_points and holes:
-            det_arr = np.array([(h.x, h.y) for h in holes], dtype=np.float32)
-
-            def _match_count(cp: list[tuple[float, float]]) -> int:
-                if not cp:
-                    return 0
-                return sum(
-                    1 for ex, ey in cp
-                    if np.linalg.norm(det_arr - [ex, ey], axis=1).min() < tol_xy_px
-                )
-
-            current_matches = _match_count(compare_points)
-            if current_matches / len(compare_points) < 0.80:
-                for delta_x in (-pattern.dx, +pattern.dx):
-                    t2 = transform.copy()
-                    t2[0, 2] += delta_x
-                    inv2 = cv2.invertAffineTransform(t2)
-                    proj2 = cv2.transform(pat_arr, inv2).reshape(-1, 2)
-                    cp2 = [
-                        (float(ex), float(ey)) for ex, ey in proj2
-                        if edge_margin_px <= ex <= img_w - edge_margin_px
-                        and edge_margin_px <= ey <= img_h - edge_margin_px
-                    ]
-                    m2 = _match_count(cp2)
-                    if m2 > current_matches:
-                        transform = t2
-                        compare_points = cp2
-                        shift_xy = (float(t2[0, 2]), float(t2[1, 2]))
-                        current_matches = m2
-                        break
+    if pattern.has_grid and detected_points:
+        # ── Position-invariant grid inspection ──────────────────────────
+        # The sheet moves continuously; absolute hole coordinates change each
+        # frame. Instead of matching against fixed reference positions, we
+        # estimate the grid's fractional phase from THIS frame's detected holes
+        # and regenerate the expected positions accordingly.
+        # Works correctly at any sheet position — no RANSAC needed.
+        detected_arr = np.array(detected_points, dtype=np.float32)
+        compare_points = grid_compare_points(
+            detected_arr,
+            pattern.cells,
+            pattern.dx,
+            pattern.dy,
+            pattern.phase_x,
+            pattern.phase_y,
+            None,           # no fixed-reference transform
+            img_w, img_h,
+            edge_margin_px,
+        )
     else:
-        compare_points = [
-            (px, py) for px, py in pattern.points
-            if edge_margin_px <= px <= img_w - edge_margin_px
-            and edge_margin_px <= py <= img_h - edge_margin_px
-        ]
+        # ── RANSAC-based alignment for non-periodic patterns ─────────────
+        transform = _estimate_alignment_transform(
+            pattern.points, holes,
+            match_tol_px=align_match_tol_px, min_match_count=min_match_count,
+        )
+        if transform is not None:
+            shift_xy = (float(transform[0, 2]), float(transform[1, 2]))
+            inv = cv2.invertAffineTransform(transform)
+            pat_arr = np.array(pattern.points, dtype=np.float32).reshape(-1, 1, 2)
+            projected = cv2.transform(pat_arr, inv).reshape(-1, 2)
+            compare_points = [
+                (float(ex), float(ey)) for ex, ey in projected
+                if edge_margin_px <= ex <= img_w - edge_margin_px
+                and edge_margin_px <= ey <= img_h - edge_margin_px
+            ]
+        else:
+            compare_points = [
+                (px, py) for px, py in pattern.points
+                if edge_margin_px <= px <= img_w - edge_margin_px
+                and edge_margin_px <= py <= img_h - edge_margin_px
+            ]
 
-    report = compare_missing_only(compare_points, detected_points, tol_xy_px=tol_xy_px)
+    _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
+    report = compare_missing_only(compare_points, detected_points, tol_xy_px=tol_xy_px,
+                                  max_missing=_max_missing)
     overlay = draw_compare_overlay(img, holes, report.missing_points, report.status)
 
     return InspectionResult(
@@ -228,7 +216,7 @@ def inspect_folder(
     max_response_sec: float | None = None,
     scanner_id: str | None = None,
 ) -> FolderInspectionSummary:
-    tolerances = load_tolerances()
+    tolerances = load_tolerances(model)
     frame_rate_hz = float(
         tolerances["frame_rate_hz"] if frame_rate_hz is None else frame_rate_hz
     )
