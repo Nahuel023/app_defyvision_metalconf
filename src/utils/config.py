@@ -9,6 +9,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "use_channel": "r",
     "polarity": "bright",
     "min_area": 80,
+    "max_area": None,       # None = sin límite superior; setear ~5× área esperada por modelo
     "circularity_min": 0.6,
     "tol_xy_px": 12.0,
     "aspect_ratio_max": 2.5,

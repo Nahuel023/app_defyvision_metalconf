@@ -59,7 +59,14 @@ def detect_holes_from_mask(
             if aspect_ratio > aspect_ratio_max:
                 continue
 
-        (x, y), r = cv2.minEnclosingCircle(c)
+        # Centroide por momentos: más estable que minEnclosingCircle ante
+        # pixels outlier en el borde del contorno.
+        M = cv2.moments(c)
+        if M["m00"] < 1.0:
+            continue
+        x = M["m10"] / M["m00"]
+        y = M["m01"] / M["m00"]
+        _, r = cv2.minEnclosingCircle(c)  # radio sigue desde el círculo envolvente
 
         if edge_margin_px > 0.0:
             if (x - r < edge_margin_px or
