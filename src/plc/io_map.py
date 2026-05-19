@@ -53,6 +53,14 @@ class IOMap:
         if self._disable_outputs:
             logger.debug(f"[no-plc-outputs] {signal}={value} (suprimido)")
             return True
+        # Bloqueo de seguridad: los solenoides nunca se activan por software en esta versión.
+        # Se habilitará cuando el control automático de pistones esté implementado.
+        if signal.endswith(".solenoid") and value:
+            logger.warning(
+                f"[SAFETY] Escritura bloqueada: {signal}=True — "
+                "solenoide bloqueado por seguridad"
+            )
+            return False
         return self._client.write_coil(address, value)
 
     def scanner_ids(self) -> list[str]:

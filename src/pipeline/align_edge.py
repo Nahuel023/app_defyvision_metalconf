@@ -101,19 +101,37 @@ def estimate_angle_from_right_edge(
 def align_image_by_right_edge(
     img_bgr: np.ndarray,
     max_abs_angle_deg: float = 20.0,
+    ema_state: Optional[dict] = None,
+    ema_alpha: float = 0.25,
 ) -> Tuple[np.ndarray, EdgeAlignResult]:
     """
     Alinea la imagen rotando para que el borde derecho quede vertical.
+
+    ema_state: dict mutable {'angle': float} propiedad del llamador.
+      Si se provee, el ángulo estimado se suaviza con EMA para absorber
+      estimaciones ruidosas de Hough en frames donde el borde no es nítido.
+      Si Hough no detecta líneas, usa el último ángulo suavizado conocido.
     """
     res = estimate_angle_from_right_edge(img_bgr)
-    angle = float(res.angle_deg)
+    raw_angle = float(res.angle_deg)
+
+    if ema_state is not None:
+        if res.used_lines > 0:
+            prev = ema_state.get("angle", raw_angle)
+            smoothed = ema_alpha * raw_angle + (1.0 - ema_alpha) * prev
+            ema_state["angle"] = smoothed
+            angle = smoothed
+        else:
+            # Sin líneas válidas: conservar el último ángulo suavizado
+            angle = ema_state.get("angle", 0.0)
+    else:
+        angle = raw_angle
 
     if abs(angle) > max_abs_angle_deg:
-        # por seguridad, no corregimos ángulos gigantes
         return img_bgr, EdgeAlignResult(angle_deg=0.0, used_lines=res.used_lines)
 
-    if abs(angle) < 0.2:  # muy pequeño, no vale la pena
+    if abs(angle) < 0.2:
         return img_bgr, EdgeAlignResult(angle_deg=0.0, used_lines=res.used_lines)
 
     aligned = _rotate_keep_size(img_bgr, angle)
-    return aligned, res
+    return aligned, EdgeAlignResult(angle_deg=angle, used_lines=res.used_lines)
