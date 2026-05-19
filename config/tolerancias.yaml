@@ -50,14 +50,15 @@ models:
     min_match_count: 5        # patrón puede estar parcialmente fuera de frame
     # ── Bordes ─────────────────────────────────────────────────────────────
     edge_margin_px: 25.0
-    pattern_edge_margin_px: 80.0
+    pattern_edge_margin_px: 25.0
     # Número máximo de agujeros faltantes permitidos antes de declarar NOK.
-    # Absorbe variaciones menores de detección (iluminación, movimiento).
-    # Un punzón roto elimina ~25 agujeros en un frame → sigue siendo NOK.
-    grid_max_missing: 10
+    # Patrón 233 agujeros; material bueno en movimiento → missing 0-67 (mediana 40).
+    # Max streak NOK con threshold=30 en grabación buena = 27 frames (< 60 umbral).
+    # Punzón roto (+~29 missing) convierte >99% de frames en NOK → FAULT en ~30 s.
+    grid_max_missing: 30
     # Frames consecutivos NOK para declarar FAULT. Max streak en material bueno
-    # (blur de movimiento) = 45; punzón roto → racha sostenida >> 60.
-    consecutive_nok_frames: 60
+    # (blur de movimiento) = 27; punzón roto → racha sostenida >> 40.
+    consecutive_nok_frames: 40
     # ── Modo continuo ──────────────────────────────────────────────────────
     # Grabaciones @ 10fps muestran diff máx 5.21px. Global=8.0 nunca dispara
     # para este material. Con 4.0 se obtienen ~100-140 inspecciones / 321 frames.

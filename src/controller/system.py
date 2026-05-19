@@ -6,6 +6,7 @@ definido en config/io_map.yaml. La conexión Modbus es compartida.
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -41,9 +42,7 @@ class InspectionSystem:
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
-            # Merge: camera.yaml defaults ← io_map camera_settings override
             cam_settings = load_camera_settings(scanner_id)
-            cam_settings.update(cfg.get("camera_settings") or {})
             camera = Camera(
                 cfg["camera_index"],
                 retry_interval_s=cam_cfg.get("retry_interval_s", 1.0),
@@ -75,13 +74,25 @@ class InspectionSystem:
         return ok
 
     def start_cameras(self) -> dict[str, bool]:
-        """Arranca todas las cámaras. Devuelve {scanner_id: ok}."""
-        results = {}
-        for sid, cam in self._cameras.items():
+        """Arranca todas las cámaras en paralelo. Devuelve {scanner_id: ok}."""
+        results: dict[str, bool] = {}
+        lock = threading.Lock()
+
+        def _start_one(sid: str, cam: Camera) -> None:
             ok = cam.start()
-            results[sid] = ok
+            with lock:
+                results[sid] = ok
             if not ok:
                 logger.error(f"[{sid}] cámara {cam.index} no disponible")
+
+        threads = [
+            threading.Thread(target=_start_one, args=(sid, cam), daemon=True)
+            for sid, cam in self._cameras.items()
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
         return results
 
     def shutdown(self) -> None:

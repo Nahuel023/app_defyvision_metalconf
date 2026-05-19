@@ -19,6 +19,7 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
     """Selección interactiva de ROI sobre una imagen o frame de cámara."""
     import json
     import cv2
+    import yaml
 
     if args.img:
         frame = cv2.imread(str(args.img))
@@ -26,17 +27,59 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
             print(f"[define-roi] no se pudo leer: {args.img}")
             return 1
     else:
-        cap = cv2.VideoCapture(args.camera, cv2.CAP_DSHOW)
-        if not cap.isOpened():
-            print(f"[define-roi] no se pudo abrir cámara {args.camera}")
-            return 1
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
-        for _ in range(5):
-            cap.read()
-        ok, frame = cap.read()
-        cap.release()
+        from src.utils.camera_config import load_camera_settings
+        cam_s  = load_camera_settings(args.scanner) if args.scanner else {}
+        width  = int(cam_s.get("width",  1280))
+        height = int(cam_s.get("height",  720))
+        fps    = int(cam_s.get("fps",      30))
+
+        # Encender backlight via PLC si está configurado para el scanner
+        plc_client = None
+        backlight_offset = None
+        if args.scanner:
+            try:
+                io_cfg = yaml.safe_load(Path("config/io_map.yaml").read_text(encoding="utf-8"))
+                plc_cfg = io_cfg.get("plc", {})
+                sc_cfg  = io_cfg.get(args.scanner, {})
+                backlight_offset = sc_cfg.get("outputs", {}).get("backlight")
+                if backlight_offset is not None and plc_cfg.get("ip"):
+                    from src.plc.client import PLCClient
+                    plc_client = PLCClient(
+                        ip=plc_cfg["ip"],
+                        port=plc_cfg.get("port", 502),
+                        unit_id=plc_cfg.get("unit_id", 1),
+                    )
+                    if plc_client.connect():
+                        plc_client.write_coil(backlight_offset, True)
+                        print(f"[define-roi] backlight encendido (Y offset={backlight_offset})")
+                    else:
+                        print("[define-roi] PLC no disponible — backlight no encendido")
+                        plc_client = None
+            except Exception as exc:
+                print(f"[define-roi] backlight: {exc}")
+                plc_client = None
+
+        try:
+            _FOURCC_MJPEG = cv2.VideoWriter.fourcc('M', 'J', 'P', 'G')
+            cap = cv2.VideoCapture(args.camera, cv2.CAP_MSMF)
+            if not cap.isOpened():
+                print(f"[define-roi] no se pudo abrir cámara {args.camera}")
+                return 1
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+            cap.set(cv2.CAP_PROP_FOURCC, _FOURCC_MJPEG)
+            cap.set(cv2.CAP_PROP_FPS,    fps)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            for _ in range(5):
+                cap.read()
+            ok, frame = cap.read()
+            cap.release()
+        finally:
+            if plc_client is not None:
+                plc_client.write_coil(backlight_offset, False)
+                plc_client.disconnect()
+                print("[define-roi] backlight apagado")
+
         if not ok or frame is None:
             print("[define-roi] no se pudo capturar frame")
             return 1

@@ -10,11 +10,9 @@ plc:
 
 scanner_1:
   camera_index: 0
-  camera_settings: {}  # overrides sobre config/camera.yaml; vacío = usa camera.yaml
   model: "modelo_B"
   allowed_models: ["modelo_B"]   # solo Microperforado
-  inspection:
-    consecutive_nok_frames: 5
+  inspection: {}
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -29,8 +27,7 @@ scanner_2:
   camera_index: 1
   model: "modelo_A"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
-  inspection:
-    consecutive_nok_frames: 5
+  inspection: {}
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:
