@@ -175,7 +175,7 @@ class Camera:
     # ------------------------------------------------------------------
 
     def _open_capture(self) -> bool:
-        cap = cv2.VideoCapture(self._index, cv2.CAP_DSHOW)
+        cap = cv2.VideoCapture(self._index, cv2.CAP_MSMF)
         if not cap.isOpened():
             logger.error(f"Camera {self._index}: no se pudo abrir")
             cap.release()
@@ -185,21 +185,23 @@ class Camera:
         height = int(self._settings.get("height", 1080))
         fps    = int(self._settings.get("fps",    5))
 
-        # MJPEG must be requested before width/height/fps so DSHOW negotiates
-        # the right format. Without it the C920 falls back to YUY2 which caps
-        # at 5fps at 1920×1080 due to USB 2.0 bandwidth.
-        cap.set(cv2.CAP_PROP_FOURCC, _FOURCC_MJPEG)
+        # DSHOW format negotiation: dimensions first so the driver resolves
+        # the available format list, then MJPEG, then FPS.  Setting FOURCC
+        # before dimensions is silently ignored on many Logitech drivers.
         cap.set(cv2.CAP_PROP_FRAME_WIDTH,  width)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        cap.set(cv2.CAP_PROP_FOURCC, _FOURCC_MJPEG)
         cap.set(cv2.CAP_PROP_FPS,          fps)
         cap.set(cv2.CAP_PROP_BUFFERSIZE,   1)
 
-        actual_fps = cap.get(cv2.CAP_PROP_FPS)
-        actual_w   = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_h   = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        actual_fps    = cap.get(cv2.CAP_PROP_FPS)
+        actual_w      = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        actual_h      = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        raw_fourcc    = int(cap.get(cv2.CAP_PROP_FOURCC))
+        fourcc_str    = "".join(chr((raw_fourcc >> 8 * i) & 0xFF) for i in range(4))
         logger.info(
             f"Camera {self._index}: {actual_w}x{actual_h} @ {actual_fps:.0f}fps "
-            f"(requested {width}x{height} @ {fps}fps)"
+            f"codec={fourcc_str} (requested {width}x{height} @ {fps}fps MJPG)"
         )
 
         self._apply_settings(cap)

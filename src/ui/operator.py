@@ -402,8 +402,8 @@ class ScannerPanel(QWidget):
         threshold = self._nok_threshold
         warn_level = threshold // 3   # mostrar overlay con marcas rojas a partir de aquí
 
-        # Overlay: solo mostrar marcas de falla cuando la racha es significativa
-        if streak >= warn_level or result.status == "OK":
+        # Overlay: solo mostrar cuando la racha NOK alcanza el nivel de advertencia
+        if streak >= warn_level:
             until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
             self._sig_overlay.emit(result.overlay.copy(), until_ms)
 

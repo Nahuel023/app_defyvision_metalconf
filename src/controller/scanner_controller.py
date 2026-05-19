@@ -49,18 +49,20 @@ class ScannerController:
         self._camera    = camera
         self._inspector = Inspector()
 
-        cfg        = io.scanner_config(scanner_id)
-        tolerances = load_tolerances()
-        insp_cfg   = cfg.get("inspection", {})
+        cfg      = io.scanner_config(scanner_id)
+        insp_cfg = cfg.get("inspection", {})
+        model    = cfg.get("model", "")
+        tols     = load_tolerances(model)
+
         self._consecutive_nok = int(
             insp_cfg.get("consecutive_nok_frames",
-                         tolerances["consecutive_nok_frames"])
+                         tols["consecutive_nok_frames"])
         )
         self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
         self._cont_pos_thr  = float(
-            tolerances.get("continuous_position_threshold", 8.0)
+            tols.get("continuous_position_threshold", 8.0)
         )
 
         self._state      = ScannerState.IDLE
@@ -195,6 +197,90 @@ class ScannerController:
         logger.info(f"[{self._id}] inspección forzada")
         return True
 
+    def start_simulate(self) -> bool:
+        """IDLE → RUNNING en modo AUTO sin requerir cámara. Solo para pruebas en servicio."""
+        with self._lock:
+            if self._state != ScannerState.IDLE:
+                return False
+            self._mode               = OperationMode.AUTO
+            self._nok_streak         = 0
+            self._total_inspections  = 0
+            self._ok_count           = 0
+            self._nok_count          = 0
+            self._session_start      = datetime.now()
+            self._max_nok_streak     = 0
+            self._fault_count        = 0
+            self._total_missing      = 0
+            self._nok_with_missing   = 0
+            self._last_position_diff = 0.0
+            self._stop_event.clear()
+            self._force_inspect.clear()
+
+        self._start_poller_thread()
+        self._io.write(f"{self._id}.solenoid",  True)
+        self._io.write(f"{self._id}.backlight", True)
+        self._transition(ScannerState.RUNNING)
+        self._set_lights(green=True)
+        logger.info(f"[{self._id}] iniciado (simulación AUTO)")
+        return True
+
+    def force_fault(self) -> bool:
+        """Fuerza directamente el estado FAULT sin pasar por la racha NOK. Solo pruebas."""
+        with self._lock:
+            if self._state != ScannerState.RUNNING:
+                return False
+            self._state = ScannerState.FAULT
+            self._fault_count += 1
+
+        logger.warning(f"[{self._id}] FAULT forzado (simulación)")
+        self._io.write(f"{self._id}.solenoid",  False)
+        self._io.write(f"{self._id}.backlight", False)
+        self._set_lights(red=True)   # poll_loop toma el blink
+        self._fire_state_changed()
+        return True
+
+    def inject_result(self, is_ok: bool, count: int = 1) -> None:
+        """Inyecta resultados sintéticos para probar la FSM. Solo actúa en RUNNING."""
+        from pathlib import Path as _Path
+        import numpy as _np
+        from src.inspection import InspectionResult
+        from src.pipeline.compare import CompareReport
+
+        with self._lock:
+            if self._state != ScannerState.RUNNING:
+                return
+            model = self._io.scanner_config(self._id).get("model", "")
+
+        status = "OK" if is_ok else "NOK"
+        _missing = 0 if is_ok else 30
+        report = CompareReport(
+            expected=100,
+            detected=100 - _missing,
+            missing=_missing,
+            status=status,
+            missing_points=[(0.0, 0.0)] * _missing,
+            matched_detected_idx=list(range(100 - _missing)),
+        )
+        blank = _np.zeros((10, 10, 3), dtype=_np.uint8)
+        mask  = _np.zeros((10, 10),    dtype=_np.uint8)
+        for _ in range(count):
+            with self._lock:
+                if self._state != ScannerState.RUNNING:
+                    break
+            result = InspectionResult(
+                model=model,
+                image_path=_Path("_sim"),
+                status=status,
+                report=report,
+                holes=[],
+                mask=mask,
+                overlay=blank,
+                angle_deg=0.0,
+                used_lines=0,
+                shift_xy=None,
+            )
+            self._handle_result(result, model)
+
     def initialize_lights(self) -> None:
         """Enciende la luz correspondiente al estado actual.
         Llamar una vez tras conectar el PLC."""
@@ -208,9 +294,15 @@ class ScannerController:
             self._set_lights()  # todas apagadas hasta que el operador actúe
 
     def set_model(self, model: str) -> None:
-        cfg = self._io.scanner_config(self._id)
+        cfg      = self._io.scanner_config(self._id)
         cfg["model"] = model
-        logger.info(f"[{self._id}] modelo cambiado a '{model}'")
+        insp_cfg = cfg.get("inspection", {})
+        tols     = load_tolerances(model)
+        self._consecutive_nok = int(
+            insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
+        )
+        logger.info(f"[{self._id}] modelo cambiado a '{model}' "
+                    f"(consecutive_nok={self._consecutive_nok})")
 
     # ------------------------------------------------------------------
     # Propiedades de estado (thread-safe)
@@ -278,15 +370,22 @@ class ScannerController:
                 with self._lock:
                     self._mode = new_mode
 
-            # Blink en FAULT: rojo + amarillo ~1 Hz (500 ms ON / 500 ms OFF)
             with self._lock:
-                state = self._state
+                state  = self._state
+                streak = self._nok_streak
 
             _tick += 1
             if state == ScannerState.FAULT:
-                blink_on = (_tick % 20) < 10   # a 50 ms/tick → 10 ticks = 500 ms
+                # Rojo fijo + amarillo parpadea ~1 Hz
+                blink_on = (_tick % 20) < 10   # 50 ms/tick → 10 ticks = 500 ms
                 if blink_on != _prev_blink:
-                    self._set_lights(red=blink_on, yellow=blink_on)
+                    self._set_lights(red=True, yellow=blink_on)
+                    _prev_blink = blink_on
+            elif state == ScannerState.RUNNING and streak >= max(1, self._consecutive_nok // 3):
+                # Verde fijo + amarillo parpadea ~1 Hz
+                blink_on = (_tick % 20) < 10
+                if blink_on != _prev_blink:
+                    self._set_lights(green=True, yellow=blink_on)
                     _prev_blink = blink_on
             else:
                 _prev_blink = None
@@ -358,8 +457,8 @@ class ScannerController:
             except Exception as exc:
                 logger.error(f"[{self._id}] error guardando imagen: {exc}")
 
-        tols = load_tolerances(model) if model else load_tolerances()
-        consecutive_nok = int(tols.get("consecutive_nok_frames", self._consecutive_nok))
+        consecutive_nok = self._consecutive_nok
+        warn_at = max(1, consecutive_nok // 3)
 
         fault_triggered = False
         with self._lock:
@@ -387,8 +486,8 @@ class ScannerController:
             self._io.write(f"{self._id}.backlight", False)
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
             self._fire_state_changed()
-        elif streak > 0:
-            self._set_lights(yellow=True)
+        elif streak >= warn_at:
+            self._set_lights(green=True, yellow=True)   # poll_loop toma el blink
         else:
             self._set_lights(green=True)
 

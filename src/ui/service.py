@@ -345,6 +345,135 @@ class PLCDiagTab(QWidget):
 
 
 # ==================================================================
+# Tab: Prueba de Salidas PLC
+# ==================================================================
+
+class PLCOutputTestTab(QWidget):
+    """Botones de prueba visual para todas las salidas PLC por scanner."""
+
+    _OUTPUTS = [
+        ("light_blue",   "Azul",      "#3b82f6", "#1e3a5f"),
+        ("light_green",  "Verde",     "#22c55e", "#14532d"),
+        ("light_yellow", "Amarillo",  "#fbbf24", "#78350f"),
+        ("light_red",    "Roja",      "#ef4444", "#7f1d1d"),
+        ("solenoid",     "Solenoide", "#a855f7", "#4c1d95"),
+        ("backlight",    "Backlight", "#cbd5e1", "#334155"),
+    ]
+
+    def __init__(self, system: InspectionSystem, parent=None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._btns: dict[str, dict[str, QPushButton]] = {}
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(16)
+
+        title = QLabel("Prueba de salidas PLC — activar cada salida manualmente para verificar")
+        title.setStyleSheet(f"color:{_ACCENT};font-size:13px;font-weight:700;")
+        lay.addWidget(title)
+
+        warn = QLabel(
+            "Precaución: los cambios aquí escriben directamente al PLC "
+            "sin pasar por la FSM del scanner."
+        )
+        warn.setStyleSheet(f"color:{_WARN};font-size:11px;")
+        lay.addWidget(warn)
+
+        for sid in self._system.scanner_ids():
+            grp = QGroupBox(sid.replace("_", " ").upper())
+            grp.setStyleSheet(self._grp_style())
+            grp_lay = QVBoxLayout(grp)
+            grp_lay.setContentsMargins(14, 16, 14, 12)
+            grp_lay.setSpacing(10)
+
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(10)
+
+            btns: dict[str, QPushButton] = {}
+            for sig_key, label, _col_on, col_off in self._OUTPUTS:
+                btn = QPushButton(label)
+                btn.setFixedSize(110, 56)
+                btn.setStyleSheet(
+                    f"background:{col_off};color:#94a3b8;border-radius:8px;"
+                    "font-size:12px;font-weight:700;border:none;"
+                )
+                btn.clicked.connect(lambda _, s=sid, k=sig_key: self._toggle(s, k))
+                btn_row.addWidget(btn)
+                btns[sig_key] = btn
+
+            btn_row.addStretch()
+
+            off_btn = QPushButton("Todo OFF")
+            off_btn.setFixedSize(90, 56)
+            off_btn.setStyleSheet(
+                f"background:#1e293b;color:{_MUTED};border-radius:8px;"
+                "font-size:11px;font-weight:700;border:1px solid #475569;"
+            )
+            off_btn.clicked.connect(lambda _, s=sid: self._all_off(s))
+            btn_row.addWidget(off_btn)
+
+            grp_lay.addLayout(btn_row)
+            lay.addWidget(grp)
+            self._btns[sid] = btns
+
+        lay.addStretch()
+        scroll.setWidget(content)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(scroll)
+
+    def refresh(self) -> None:
+        _col_map = {k: (on, off) for k, _, on, off in self._OUTPUTS}
+        _labels  = {k: lbl for k, lbl, _, _ in self._OUTPUTS}
+        for sid, btns in self._btns.items():
+            for sig_key, btn in btns.items():
+                val = self._system.io.read(f"{sid}.{sig_key}")
+                col_on, col_off = _col_map[sig_key]
+                label = _labels[sig_key]
+                if val:
+                    btn.setStyleSheet(
+                        f"background:{col_on};color:white;border-radius:8px;"
+                        "font-size:12px;font-weight:700;border:none;"
+                    )
+                    btn.setText(f"{label}\nON")
+                else:
+                    btn.setStyleSheet(
+                        f"background:{col_off};color:#94a3b8;border-radius:8px;"
+                        "font-size:12px;font-weight:700;border:none;"
+                    )
+                    btn.setText(label)
+
+    def _toggle(self, scanner_id: str, sig_key: str) -> None:
+        current = self._system.io.read(f"{scanner_id}.{sig_key}")
+        new_val = not bool(current)
+        self._system.io.write(f"{scanner_id}.{sig_key}", new_val)
+        logger.info(f"[PruebaS] {scanner_id}.{sig_key} → {'ON' if new_val else 'OFF'}")
+
+    def _all_off(self, scanner_id: str) -> None:
+        for sig_key in self._btns.get(scanner_id, {}):
+            self._system.io.write(f"{scanner_id}.{sig_key}", False)
+        logger.info(f"[PruebaS] {scanner_id} — Todo OFF")
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+
+# ==================================================================
 # Tab 2: Sistema
 # ==================================================================
 
@@ -520,6 +649,7 @@ class SystemTab(QWidget):
                 ScannerState.IDLE:    _MUTED,
                 ScannerState.RUNNING: _OK,
                 ScannerState.FAULT:   _NOK,
+                ScannerState.STOPPED: "#475569",
                 ScannerState.ERROR:   _WARN,
             }
             wdg["state"].setText(state.value.upper())
@@ -757,11 +887,7 @@ class RecordingTab(QWidget):
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
 
-        self._current_profile_slug: str = ""
-        self._profiles: dict = {}
-
         self._build_ui()
-        self._load_profiles()
 
     # ------------------------------------------------------------------
     # UI
@@ -861,24 +987,6 @@ class RecordingTab(QWidget):
         cam_lay.setSpacing(10)
         cam_lay.setContentsMargins(12, 14, 12, 10)
 
-        lbl_prof = QLabel("Perfil:")
-        lbl_prof.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        cam_lay.addWidget(lbl_prof)
-
-        self._profile_combo = QComboBox()
-        self._profile_combo.setMinimumWidth(220)
-        self._profile_combo.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 6px;font-size:11px;"
-        )
-        cam_lay.addWidget(self._profile_combo)
-
-        self._btn_apply_profile = self._mk_btn("▶  Aplicar", "#065f46")
-        cam_lay.addWidget(self._btn_apply_profile)
-
-        self._btn_save_profile = self._mk_btn("💾  Guardar preset", "#374151")
-        cam_lay.addWidget(self._btn_save_profile)
-
         self._btn_read_cam = self._mk_btn("↻  Leer cámara", "#374151")
         cam_lay.addWidget(self._btn_read_cam)
 
@@ -891,12 +999,6 @@ class RecordingTab(QWidget):
         cam_lay.addWidget(self._cam_info_lbl)
 
         cam_lay.addStretch()
-
-        self._active_profile_lbl = QLabel("")
-        self._active_profile_lbl.setStyleSheet(
-            f"color:{_ACCENT};font-size:11px;font-weight:700;"
-        )
-        cam_lay.addWidget(self._active_profile_lbl)
 
         root.addWidget(cam_grp)
 
@@ -988,8 +1090,6 @@ class RecordingTab(QWidget):
         self._btn_stop.clicked.connect(self._on_stop)
         self._btn_load.clicked.connect(self._on_load_recording)
         self._btn_analyze.clicked.connect(self._on_analyze)
-        self._btn_apply_profile.clicked.connect(self._on_apply_profile)
-        self._btn_save_profile.clicked.connect(self._on_save_profile)
         self._btn_read_cam.clicked.connect(self._refresh_cam_info)
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
@@ -1040,7 +1140,6 @@ class RecordingTab(QWidget):
             "fps": self._fps_spin.value(),
             "scanner": self._scanner_combo.currentText(),
             "timestamp": _dt.now().isoformat(),
-            "camera_profile": self._current_profile_slug or "custom",
             "camera_settings": cam_settings,
             "cam_fps_real": cam.fps if cam.fps > 0 else None,
         }
@@ -1247,63 +1346,6 @@ class RecordingTab(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------
-    # Camera profiles
-    # ------------------------------------------------------------------
-
-    def _load_profiles(self) -> None:
-        from src.utils.camera_config import load_camera_profiles
-        self._profiles = load_camera_profiles()
-        self._profile_combo.clear()
-        for slug, prof in self._profiles.items():
-            self._profile_combo.addItem(
-                prof.get("display_name", slug), userData=slug
-            )
-        self._refresh_cam_info()
-
-    def _on_apply_profile(self) -> None:
-        from src.utils.camera_config import load_camera_profiles
-        slug = self._profile_combo.currentData()
-        if not slug:
-            return
-        # Reload from disk in case user edited the file
-        profiles = load_camera_profiles()
-        profile = profiles.get(slug)
-        if not profile:
-            return
-
-        sid = self._scanner_combo.currentText()
-        cam = self._system.camera(sid)
-
-        _UVC_PARAMS = [
-            "autofocus", "auto_exposure", "auto_white_balance",
-            "focus", "exposure", "white_balance", "gain",
-            "brightness", "contrast", "saturation", "sharpness",
-            "gamma", "backlight_compensation",
-        ]
-        failed = []
-        for param in _UVC_PARAMS:
-            if param not in profile:
-                continue
-            val = profile[param]
-            ok = cam.apply_setting(param, 1.0 if val is True else 0.0 if val is False else float(val))
-            if not ok:
-                failed.append(param)
-
-        if "fps" in profile:
-            fps_val = int(profile["fps"])
-            self._fps_spin.setValue(fps_val)
-            cam.apply_setting("fps", float(fps_val))
-
-        self._current_profile_slug = slug
-        display = profile.get("display_name", slug)
-        self._active_profile_lbl.setText(f"[{display}]")
-        self._refresh_cam_info()
-
-        if failed:
-            logger.warning(f"[Cámara] perfil {slug}: parámetros no aceptados por driver: {failed}")
-        logger.info(f"[Cámara] perfil aplicado: {slug}")
-
     def _refresh_cam_info(self) -> None:
         sid = self._scanner_combo.currentText()
         try:
@@ -1326,56 +1368,6 @@ class RecordingTab(QWidget):
         fps_real = cam.fps
         parts.append(f"real:{fps_real:.1f}" if fps_real > 0 else "real:—")
         self._cam_info_lbl.setText("  ".join(parts))
-
-    def _on_save_profile(self) -> None:
-        from PyQt6.QtWidgets import QInputDialog, QLineEdit
-        from src.utils.camera_config import save_user_profile
-
-        name, ok = QInputDialog.getText(
-            self, "Guardar preset de cámara", "Nombre del perfil:",
-            QLineEdit.EchoMode.Normal,
-            self._active_profile_lbl.text().strip("[]") or "",
-        )
-        if not ok or not name.strip():
-            return
-
-        name = name.strip()
-        slug = "user_" + name.lower().replace(" ", "_").replace("-", "_")[:30]
-
-        sid = self._scanner_combo.currentText()
-        cam = self._system.camera(sid)
-
-        settings: dict = {
-            "display_name": name,
-            "description": "Perfil guardado desde la UI de servicio",
-        }
-        for param in [
-            "focus", "exposure", "white_balance", "gain", "brightness",
-            "contrast", "saturation", "sharpness", "gamma",
-            "backlight_compensation",
-        ]:
-            v = cam.read_setting(param)
-            if v >= 0:
-                settings[param] = int(v) if param not in ("exposure",) else int(v)
-        # Boolean flags: read from driver
-        for flag, prop_name in [
-            ("autofocus", "autofocus"),
-            ("auto_exposure", "auto_exposure"),
-            ("auto_white_balance", "auto_white_balance"),
-        ]:
-            v = cam.read_setting(prop_name)
-            if v >= 0:
-                settings[flag] = bool(v > 0.5)
-        settings["fps"] = self._fps_spin.value()
-
-        save_user_profile(slug, settings)
-        self._load_profiles()
-        # Select the newly saved profile
-        for i in range(self._profile_combo.count()):
-            if self._profile_combo.itemData(i) == slug:
-                self._profile_combo.setCurrentIndex(i)
-                break
-        logger.info(f"[Cámara] preset guardado: {slug}")
 
     def _active_model(self) -> str:
         """Return the internal model ID currently selected in the model combo."""
@@ -1850,6 +1842,187 @@ class CameraCalibTab(QWidget):
         )
 
 
+# ==================================================================
+# Tab: Simulación de FSM de scanner
+# ==================================================================
+
+class ScannerSimTab(QWidget):
+    """
+    Simulación de ciclo completo AUTO sin cámara real.
+
+    Permite probar el recorrido:
+      IDLE → [Iniciar] → RUNNING verde
+           → [Inyectar OK/NOK] → luces amarilla/verde
+           → [1/3 NOK] → streak parcial
+           → [Forzar FAULT] → FAULT rojo parpadeante
+           → [Detener] → STOPPED
+           → [Reset] → IDLE azul
+    """
+
+    _STATE_COLORS = {
+        ScannerState.IDLE:    ("#1e3a5f", "#93c5fd"),
+        ScannerState.RUNNING: ("#14532d", "#86efac"),
+        ScannerState.FAULT:   ("#7f1d1d", "#fca5a5"),
+        ScannerState.STOPPED: ("#1e293b", "#94a3b8"),
+        ScannerState.ERROR:   ("#78350f", "#fcd34d"),
+    }
+    _STATE_LABELS = {
+        ScannerState.IDLE:    "IDLE",
+        ScannerState.RUNNING: "RUNNING",
+        ScannerState.FAULT:   "FAULT",
+        ScannerState.STOPPED: "PARADO",
+        ScannerState.ERROR:   "ERROR",
+    }
+
+    def __init__(self, system: InspectionSystem, parent=None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._state_lbls: dict[str, QLabel] = {}
+        self._streak_lbls: dict[str, QLabel] = {}
+        self._build_ui()
+
+    def _build_ui(self) -> None:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        lay = QVBoxLayout(content)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(16)
+
+        title = QLabel("Simulación de ciclo de producción — sin cámara real")
+        title.setStyleSheet(f"color:{_ACCENT};font-size:13px;font-weight:700;")
+        lay.addWidget(title)
+
+        desc = QLabel(
+            "Inicia el scanner en modo AUTO (solenoide + backlight ON, luces PLC activas) "
+            "sin requerir cámara. Usa los botones para simular resultados de inspección "
+            "y verificar la FSM completa: IDLE → RUNNING → FAULT → STOPPED → IDLE."
+        )
+        desc.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        desc.setWordWrap(True)
+        lay.addWidget(desc)
+
+        for sid in self._system.scanner_ids():
+            scanner = self._system.scanner(sid)
+            cfg     = self._system.io.scanner_config(sid)
+            from src.utils.config import load_tolerances
+            tols      = load_tolerances()
+            insp_cfg  = cfg.get("inspection", {})
+            threshold = int(insp_cfg.get(
+                "consecutive_nok_frames",
+                tols.get("consecutive_nok_frames", 5)
+            ))
+            nok_third = max(1, threshold // 3)
+
+            grp = QGroupBox(sid.replace("_", " ").upper())
+            grp.setStyleSheet(self._grp_style())
+            grp_lay = QVBoxLayout(grp)
+            grp_lay.setContentsMargins(14, 16, 14, 14)
+            grp_lay.setSpacing(12)
+
+            # ── Estado actual ───────────────────────────────────────
+            info_row = QHBoxLayout()
+            info_row.setSpacing(16)
+
+            state_lbl = QLabel("IDLE")
+            state_lbl.setFixedSize(110, 34)
+            state_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            state_lbl.setStyleSheet(
+                f"background:#1e3a5f;color:#93c5fd;border-radius:6px;"
+                "font-size:13px;font-weight:700;"
+            )
+            self._state_lbls[sid] = state_lbl
+            info_row.addWidget(state_lbl)
+
+            streak_lbl = QLabel("Racha NOK: 0")
+            streak_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+            self._streak_lbls[sid] = streak_lbl
+            info_row.addWidget(streak_lbl)
+
+            thr_lbl = QLabel(f"Umbral FAULT: {threshold}  ·  1/3 = {nok_third}")
+            thr_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+            info_row.addWidget(thr_lbl)
+            info_row.addStretch()
+            grp_lay.addLayout(info_row)
+
+            # ── Botones de acción ────────────────────────────────────
+            btn_row = QHBoxLayout()
+            btn_row.setSpacing(8)
+
+            def _btn(text: str, color: str, w: int = 120) -> QPushButton:
+                b = QPushButton(text)
+                b.setFixedSize(w, 44)
+                b.setStyleSheet(
+                    f"background:{color};color:white;border-radius:7px;"
+                    "font-size:11px;font-weight:700;border:none;"
+                )
+                return b
+
+            b_start  = _btn("▶ Iniciar\n(sim AUTO)", "#166534")
+            b_ok     = _btn("✓ Inyectar OK",         "#1e40af", 110)
+            b_nok1   = _btn("✗ Inyectar NOK\n(×1)",  "#7f1d1d", 110)
+            b_nok3   = _btn(f"✗✗ {nok_third}× NOK\n(1/3 umbral)", "#92400e", 120)
+            b_fault  = _btn("⚡ Forzar FAULT",        "#831843", 120)
+            b_stop   = _btn("■ Detener",              "#374151", 100)
+            b_reset  = _btn("↺ Reset",                "#1e3a5f", 90)
+
+            b_start.clicked.connect(lambda _, s=sid: self._system.scanner(s).start_simulate())
+            b_ok.clicked.connect(   lambda _, s=sid: self._system.scanner(s).inject_result(True))
+            b_nok1.clicked.connect( lambda _, s=sid: self._system.scanner(s).inject_result(False, 1))
+            b_nok3.clicked.connect( lambda _, s=sid, n=nok_third:
+                                        self._system.scanner(s).inject_result(False, n))
+            b_fault.clicked.connect(lambda _, s=sid:
+                                        self._system.scanner(s).force_fault())
+            b_stop.clicked.connect( lambda _, s=sid: self._system.scanner(s).stop())
+            b_reset.clicked.connect(lambda _, s=sid: self._system.scanner(s).reset())
+
+            for b in (b_start, b_ok, b_nok1, b_nok3, b_fault, b_stop, b_reset):
+                btn_row.addWidget(b)
+            btn_row.addStretch()
+            grp_lay.addLayout(btn_row)
+
+            # ── Secuencia sugerida ───────────────────────────────────
+            seq = QLabel(
+                "Secuencia: Iniciar → Inyectar OK → 1/3 NOK → Forzar FAULT → Detener → Reset"
+            )
+            seq.setStyleSheet(f"color:#475569;font-size:10px;font-style:italic;")
+            grp_lay.addWidget(seq)
+
+            lay.addWidget(grp)
+
+        lay.addStretch()
+        scroll.setWidget(content)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(scroll)
+
+    def refresh(self) -> None:
+        for sid, lbl in self._state_lbls.items():
+            s = self._system.scanner(sid).get_status()
+            state: ScannerState = s["state"]
+            bg, fg = self._STATE_COLORS.get(state, ("#1e293b", "#94a3b8"))
+            lbl.setText(self._STATE_LABELS.get(state, state.value.upper()))
+            lbl.setStyleSheet(
+                f"background:{bg};color:{fg};border-radius:6px;"
+                "font-size:13px;font-weight:700;"
+            )
+            streak_lbl = self._streak_lbls.get(sid)
+            if streak_lbl:
+                streak_lbl.setText(f"Racha NOK: {s['nok_streak']}")
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
@@ -1921,21 +2094,21 @@ class ServiceWindow(QMainWindow):
             }}
         """)
 
-        self._plc_tab  = PLCIOTab(self._system)
-        self._diag_tab = PLCDiagTab(self._system)
-        self._sys_tab  = SystemTab(self._system)
-        self._log_tab  = LogsTab(self._log_handler)
-        self._cfg_tab  = ConfigTab()
-        self._rec_tab  = RecordingTab(self._system)
-        self._cam_tab  = CameraCalibTab(self._system)
+        self._plc_tab    = PLCIOTab(self._system)
+        self._diag_tab   = PLCDiagTab(self._system)
+        self._sys_tab    = SystemTab(self._system)
+        self._log_tab    = LogsTab(self._log_handler)
+        self._cfg_tab    = ConfigTab()
+        self._rec_tab    = RecordingTab(self._system)
+        self._cam_tab    = CameraCalibTab(self._system)
 
-        self._tabs.addTab(self._plc_tab,  "PLC I/O")
-        self._tabs.addTab(self._diag_tab, "Diagnóstico HW")
-        self._tabs.addTab(self._sys_tab,  "Sistema")
-        self._tabs.addTab(self._log_tab,  "Logs")
-        self._tabs.addTab(self._cfg_tab,  "Configuración")
-        self._tabs.addTab(self._rec_tab,  "Grabación")
-        self._tabs.addTab(self._cam_tab,  "Cámara")
+        self._tabs.addTab(self._plc_tab,    "PLC I/O")
+        self._tabs.addTab(self._diag_tab,   "Diagnóstico HW")
+        self._tabs.addTab(self._sys_tab,    "Sistema")
+        self._tabs.addTab(self._log_tab,    "Logs")
+        self._tabs.addTab(self._cfg_tab,    "Configuración")
+        self._tabs.addTab(self._rec_tab,    "Grabación")
+        self._tabs.addTab(self._cam_tab,    "Cámara")
 
         root.addWidget(self._tabs, stretch=1)
 
