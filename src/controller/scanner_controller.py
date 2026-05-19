@@ -301,6 +301,7 @@ class ScannerController:
         self._consecutive_nok = int(
             insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
         )
+        self._inspector.invalidate(model=model, scanner_id=self._id)
         logger.info(f"[{self._id}] modelo cambiado a '{model}' "
                     f"(consecutive_nok={self._consecutive_nok})")
 

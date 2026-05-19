@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Tuple
-import math
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -20,40 +21,48 @@ def compare_missing_only(
     max_missing: int = 0,
 ) -> CompareReport:
     """
-    Matching simple: cada punto esperado busca el detectado más cercano que aún no se usó.
-    Si no hay ninguno dentro de tol_xy_px => missing.
+    Matching greedy: cada punto esperado toma el detectado más cercano aún libre.
+    Usa numpy para calcular la matriz de distancias completa de una sola vez,
+    eliminando el loop Python interno O(n*m).
     """
-    used = set()
+    n_exp = len(expected_points)
+    n_det = len(detected_points)
+
+    if n_exp == 0:
+        return CompareReport(0, n_det, 0, "OK", [], [])
+
+    if n_det == 0:
+        status = "OK" if n_exp <= max_missing else "NOK"
+        return CompareReport(n_exp, 0, n_exp, status, list(expected_points), [])
+
+    exp = np.array(expected_points, dtype=np.float32)   # (n_exp, 2)
+    det = np.array(detected_points, dtype=np.float32)   # (n_det, 2)
+
+    # Matriz de distancias al cuadrado (n_exp, n_det) — una sola operación numpy
+    diff  = exp[:, None, :] - det[None, :, :]           # (n_exp, n_det, 2)
+    dist2 = (diff * diff).sum(axis=2)                   # (n_exp, n_det)
+    tol2  = tol_xy_px * tol_xy_px
+
+    used_det = np.zeros(n_det, dtype=bool)
     matched_detected_idx: List[int] = []
     missing_points: List[Tuple[float, float]] = []
 
-    for (ex, ey) in expected_points:
-        best_i = -1
-        best_d = 1e18
-        for i, (dx, dy) in enumerate(detected_points):
-            if i in used:
-                continue
-            d = (dx - ex) * (dx - ex) + (dy - ey) * (dy - ey)
-            if d < best_d:
-                best_d = d
-                best_i = i
-
-        if best_i == -1:
-            missing_points.append((ex, ey))
-            continue
-
-        if math.sqrt(best_d) <= tol_xy_px:
-            used.add(best_i)
-            matched_detected_idx.append(best_i)
+    for i in range(n_exp):
+        row = dist2[i].copy()
+        row[used_det] = np.inf          # enmascarar detectados ya usados
+        best_j = int(np.argmin(row))
+        if row[best_j] <= tol2:
+            used_det[best_j] = True
+            matched_detected_idx.append(best_j)
         else:
-            missing_points.append((ex, ey))
+            missing_points.append(expected_points[i])
 
     missing = len(missing_points)
     status = "OK" if missing <= max_missing else "NOK"
 
     return CompareReport(
-        expected=len(expected_points),
-        detected=len(detected_points),
+        expected=n_exp,
+        detected=n_det,
         missing=missing,
         status=status,
         missing_points=missing_points,
