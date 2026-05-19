@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+## INSTRUCCIÓN OBLIGATORIA
+**Leer `CHANGELOG.md` al inicio de CADA conversación, antes de responder cualquier
+pregunta o tocar cualquier archivo. Contiene el historial completo de cambios,
+decisiones de diseño y el estado actual del sistema.**
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
