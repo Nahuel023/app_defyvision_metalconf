@@ -4,6 +4,9 @@
 > **Al iniciar cualquier sesión de trabajo, leer este archivo completo antes de responder
 > o tocar cualquier código. Contiene el historial de decisiones, cambios aplicados y
 > contexto que no está en el código ni en el git log.**
+>
+> **Al finalizar cada cambio de código, actualizar este archivo** con una entrada en la
+> sesión activa: qué se cambió, en qué archivo, por qué. Sin esto la trazabilidad se rompe.
 
 ---
 
@@ -143,6 +146,36 @@ ya está resuelto en hardware.
 
 ---
 
+---
+
+### Sesión 2026-05-19 (continuación) — Tadeo + Claude
+
+#### Cambio 4 — Visor de imágenes zoomable en modo servicio (RecordingTab)
+
+**Motivación:** La imagen de frame/overlay en la tab "Grabación" se mostraba estática
+en un `QLabel` escalado a tamaño fijo. No era posible hacer zoom ni pan para analizar
+detalles del patrón de agujeros.
+
+**Solución:** Nuevo widget `ZoomableImageView(QWidget)` que reemplaza el `QLabel`.
+
+**Funcionalidades:**
+- Rueda del mouse → zoom hacia el cursor (15% por tick, rango 5%–3000%)
+- Click + drag → pan libre
+- Doble click → fit automático (ajustar a ventana)
+- Badge "ZZ%" en esquina superior derecha indicando zoom actual
+- Botón "Ajustar" en la barra de navegación → equivale al doble click
+
+**Archivos modificados:**
+- `src/ui/service.py`:
+  - Imports: `QPainter`, `QPointF`, `QRectF` agregados
+  - Clase `ZoomableImageView` insertada antes de `RecordingTab`
+  - `RecordingTab._img_label` (QLabel estático) reemplazado por `self._img_view`
+  - `_show_frame()`: llama `self._img_view.set_pixmap(px)` en lugar de `setPixmap(px.scaled(...))`
+  - `_on_start()`: llama `self._img_view.clear("Sin frames")` en lugar de `setText`
+  - Botón "Ajustar" agregado al nav_row, conectado a `self._img_view.fit`
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -150,6 +183,7 @@ ya está resuelto en hardware.
 | Solenoides Y10/Y11 | Bloqueados por software y UI. Re-habilitar cuando se implemente control automático. |
 | Startup | ~300–600ms hasta UI visible (antes 2–4s) |
 | Pipeline de visión | Vectorizado, cacheado, con CLOSE morfológico y centroide estable |
+| Visor modo servicio | ZoomableImageView: zoom (rueda), pan (drag), fit (doble click / botón) |
 | FAULT automático | `consecutive_nok_frames: 9999` (deshabilitado temporalmente para calibración) |
 | Control automático pistones | Planificado, NO implementado |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |

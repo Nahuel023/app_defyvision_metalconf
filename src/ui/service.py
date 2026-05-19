@@ -21,8 +21,8 @@ from typing import Optional
 
 import cv2
 
-from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPixmap, QImage
+from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPixmap, QImage, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -892,6 +892,128 @@ class _AnalysisWorker(QThread):
             self.error.emit(str(exc))
 
 
+class ZoomableImageView(QWidget):
+    """Widget de imagen con zoom (rueda) y pan (drag). API: set_pixmap / clear / fit."""
+
+    def __init__(self, placeholder: str = "Sin imagen", parent=None) -> None:
+        super().__init__(parent)
+        self._pixmap: QPixmap | None = None
+        self._placeholder = placeholder
+        self._scale: float = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self._drag_start: QPointF | None = None
+        self._drag_offset: QPointF | None = None
+        self.setMinimumHeight(360)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:6px;"
+        )
+        self.setMouseTracking(True)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def set_pixmap(self, pixmap: QPixmap) -> None:
+        self._pixmap = pixmap
+        self.fit()
+
+    def clear(self, placeholder: str | None = None) -> None:
+        self._pixmap = None
+        if placeholder is not None:
+            self._placeholder = placeholder
+        self._scale = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self.update()
+
+    def fit(self) -> None:
+        if self._pixmap is None:
+            return
+        w, h = self.width(), self.height()
+        pw, ph = self._pixmap.width(), self._pixmap.height()
+        if pw == 0 or ph == 0:
+            return
+        self._scale = min(w / pw, h / ph)
+        self._offset = QPointF(
+            (w - pw * self._scale) / 2.0,
+            (h - ph * self._scale) / 2.0,
+        )
+        self.update()
+
+    @property
+    def zoom_pct(self) -> int:
+        return int(round(self._scale * 100))
+
+    # ------------------------------------------------------------------
+    # Qt overrides
+    # ------------------------------------------------------------------
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._pixmap is not None:
+            self.fit()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QColor(_DARK))
+
+        if self._pixmap is None:
+            painter.setPen(QColor(_MUTED))
+            painter.setFont(QFont("Segoe UI", 13))
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._placeholder)
+            return
+
+        pw = self._pixmap.width() * self._scale
+        ph = self._pixmap.height() * self._scale
+        target = QRectF(self._offset.x(), self._offset.y(), pw, ph)
+        painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
+
+        # Zoom % badge
+        painter.setPen(QColor(_MUTED))
+        painter.setFont(QFont("Segoe UI", 9))
+        badge = f"{self.zoom_pct}%"
+        painter.drawText(self.rect().adjusted(0, 4, -6, 0),
+                         Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight, badge)
+
+    def wheelEvent(self, event) -> None:
+        if self._pixmap is None:
+            return
+        delta = event.angleDelta().y()
+        factor = 1.15 if delta > 0 else (1.0 / 1.15)
+        new_scale = max(0.05, min(self._scale * factor, 30.0))
+
+        # Zoom toward cursor position
+        cursor = QPointF(event.position())
+        img_x = (cursor.x() - self._offset.x()) / self._scale
+        img_y = (cursor.y() - self._offset.y()) / self._scale
+        self._scale = new_scale
+        self._offset = QPointF(
+            cursor.x() - img_x * self._scale,
+            cursor.y() - img_y * self._scale,
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = QPointF(event.position())
+            self._drag_offset = QPointF(self._offset)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start is not None and self._drag_offset is not None:
+            delta = event.position() - self._drag_start
+            self._offset = self._drag_offset + delta
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = None
+            self._drag_offset = None
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.fit()
+
+
 class RecordingTab(QWidget):
     """Grabación continua de frames, análisis offline y navegador de resultados."""
 
@@ -1081,7 +1203,10 @@ class RecordingTab(QWidget):
         )
         self._overlay_toggle.toggled.connect(lambda _: self._show_frame(self._current_idx))
 
-        for w in (self._btn_prev, self._nav_lbl, self._btn_next, self._overlay_toggle):
+        self._btn_fit = self._mk_btn("Ajustar", "#1e40af")
+
+        for w in (self._btn_prev, self._nav_lbl, self._btn_next,
+                  self._overlay_toggle, self._btn_fit):
             nav_row.addWidget(w)
         nav_row.addStretch()
 
@@ -1091,18 +1216,9 @@ class RecordingTab(QWidget):
         nav_row.addWidget(self._result_lbl)
         brow_lay.addLayout(nav_row)
 
-        # Image display
-        self._img_label = QLabel("Sin frames")
-        self._img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img_label.setStyleSheet(
-            f"background:{_DARK};border:1px solid {_BORDER};border-radius:6px;"
-            f"color:{_MUTED};font-size:13px;"
-        )
-        self._img_label.setMinimumHeight(360)
-        self._img_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
-        )
-        brow_lay.addWidget(self._img_label, stretch=1)
+        # Image display — zoomable/pannable viewer
+        self._img_view = ZoomableImageView("Sin frames")
+        brow_lay.addWidget(self._img_view, stretch=1)
 
         root.addWidget(browser, stretch=1)
 
@@ -1114,6 +1230,7 @@ class RecordingTab(QWidget):
         self._btn_read_cam.clicked.connect(self._refresh_cam_info)
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
+        self._btn_fit.clicked.connect(self._img_view.fit)
 
         self._update_nav_state()
 
@@ -1138,7 +1255,7 @@ class RecordingTab(QWidget):
         self._summary_lbl.setText("")
         self._stats_lbl.setText("")
         self._ana_progress.setText("")
-        self._img_label.setText("Sin frames")
+        self._img_view.clear("Sin frames")
         self._update_nav_state()
 
         # Persist metadata alongside the frames so we can reload this recording later
@@ -1323,15 +1440,10 @@ class RecordingTab(QWidget):
             bgr = cv2.imread(str(self._frame_paths[idx]))
 
         if bgr is not None:
-            rgb   = bgr[:, :, ::-1].copy()
-            h, w  = rgb.shape[:2]
-            qi    = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
-            px    = QPixmap.fromImage(qi)
-            avail = self._img_label.size()
-            self._img_label.setPixmap(
-                px.scaled(avail, Qt.AspectRatioMode.KeepAspectRatio,
-                          Qt.TransformationMode.SmoothTransformation)
-            )
+            rgb = bgr[:, :, ::-1].copy()
+            h, w = rgb.shape[:2]
+            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            self._img_view.set_pixmap(QPixmap.fromImage(qi))
 
         total = len(self._frame_paths)
         self._nav_lbl.setText(f"Frame {idx + 1} / {total}")
