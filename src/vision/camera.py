@@ -71,18 +71,14 @@ class Camera:
         if self._running:
             return True
         self._running = True
-        opened = self._open_capture()   # attempt immediate open
         self._thread = threading.Thread(
             target=self._capture_loop,
             daemon=True,
             name=f"camera-{self._index}",
         )
         self._thread.start()
-        if opened:
-            logger.info(f"Camera {self._index}: iniciada")
-        else:
-            logger.warning(f"Camera {self._index}: no disponible al inicio, reintentando en background")
-        return opened
+        logger.info(f"Camera {self._index}: iniciando en background…")
+        return True
 
     def stop(self) -> None:
         self._running = False
@@ -283,6 +279,7 @@ class Camera:
     def _capture_loop(self) -> None:
         # retry_wait=0 → intento inmediato; sube exponencialmente hasta _retry_max
         retry_wait = 0.0
+        _first_open = True
 
         while self._running:
 
@@ -296,7 +293,11 @@ class Camera:
                         break
 
                 if self._open_capture():
-                    logger.info(f"Camera {self._index}: reconectada")
+                    if _first_open:
+                        logger.info(f"Camera {self._index}: iniciada")
+                        _first_open = False
+                    else:
+                        logger.info(f"Camera {self._index}: reconectada")
                     retry_wait = 0.0   # reset backoff on success
                 else:
                     # exponential backoff: 0.5 → 1 → 2 → 4 → max

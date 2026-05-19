@@ -130,11 +130,11 @@ class ScannerController:
 
         if mode == OperationMode.AUTO:
             self._start_all_threads()
-            self._io.write(f"{self._id}.solenoid",  True)
+            # solenoid deshabilitado por seguridad hasta implementar control automático
             self._io.write(f"{self._id}.backlight", True)
         else:
             self._start_poller_thread()
-            self._io.write(f"{self._id}.solenoid", True)
+            # solenoid deshabilitado por seguridad hasta implementar control automático
             # No backlight, no inspección
 
         self._transition(ScannerState.RUNNING)
@@ -217,7 +217,7 @@ class ScannerController:
             self._force_inspect.clear()
 
         self._start_poller_thread()
-        self._io.write(f"{self._id}.solenoid",  True)
+        # solenoid deshabilitado por seguridad hasta implementar control automático
         self._io.write(f"{self._id}.backlight", True)
         self._transition(ScannerState.RUNNING)
         self._set_lights(green=True)

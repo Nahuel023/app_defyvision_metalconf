@@ -276,11 +276,20 @@ class PLCDiagTab(QWidget):
             self._y_leds.append(led)
             btn = QPushButton("OFF")
             btn.setFixedSize(54, 22)
-            btn.setStyleSheet(
-                "background:#374151;color:white;border-radius:4px;"
-                "font-size:10px;font-weight:700;border:none;"
-            )
-            btn.clicked.connect(lambda _, idx=i: self._toggle(idx))
+            if self._y_name.get(i) == "solenoid":
+                btn.setEnabled(False)
+                btn.setText("LOCK")
+                btn.setToolTip("Solenoide bloqueado por seguridad")
+                btn.setStyleSheet(
+                    "background:#111827;color:#4b5563;border-radius:4px;"
+                    "font-size:10px;font-weight:700;border:1px solid #1f2937;"
+                )
+            else:
+                btn.setStyleSheet(
+                    "background:#374151;color:white;border-radius:4px;"
+                    "font-size:10px;font-weight:700;border:none;"
+                )
+                btn.clicked.connect(lambda _, idx=i: self._toggle(idx))
             self._y_btns.append(btn)
             lay.addLayout(self._sig_row(led, f"Y{oct(i)[2:]}", self._y_name.get(i, ""), btn))
         lay.addStretch()
@@ -333,6 +342,8 @@ class PLCDiagTab(QWidget):
                 self._y_vals[i] = v
                 c = "#f97316" if v else _BORDER
                 self._y_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
+                if self._y_name.get(i) == "solenoid":
+                    continue  # botón bloqueado, no actualizar estilo
                 self._y_btns[i].setText("ON" if v else "OFF")
                 self._y_btns[i].setStyleSheet(
                     f"background:{'#c2410c' if v else '#374151'};"
@@ -402,11 +413,19 @@ class PLCOutputTestTab(QWidget):
             for sig_key, label, _col_on, col_off in self._OUTPUTS:
                 btn = QPushButton(label)
                 btn.setFixedSize(110, 56)
-                btn.setStyleSheet(
-                    f"background:{col_off};color:#94a3b8;border-radius:8px;"
-                    "font-size:12px;font-weight:700;border:none;"
-                )
-                btn.clicked.connect(lambda _, s=sid, k=sig_key: self._toggle(s, k))
+                if sig_key == "solenoid":
+                    btn.setEnabled(False)
+                    btn.setToolTip("Solenoide bloqueado por seguridad\n(activación por software deshabilitada)")
+                    btn.setStyleSheet(
+                        "background:#111827;color:#4b5563;border-radius:8px;"
+                        "font-size:12px;font-weight:700;border:1px solid #1f2937;"
+                    )
+                else:
+                    btn.setStyleSheet(
+                        f"background:{col_off};color:#94a3b8;border-radius:8px;"
+                        "font-size:12px;font-weight:700;border:none;"
+                    )
+                    btn.clicked.connect(lambda _, s=sid, k=sig_key: self._toggle(s, k))
                 btn_row.addWidget(btn)
                 btns[sig_key] = btn
 
@@ -437,6 +456,8 @@ class PLCOutputTestTab(QWidget):
         _labels  = {k: lbl for k, lbl, _, _ in self._OUTPUTS}
         for sid, btns in self._btns.items():
             for sig_key, btn in btns.items():
+                if sig_key == "solenoid":
+                    continue  # bloqueado por seguridad, no actualizar estilo
                 val = self._system.io.read(f"{sid}.{sig_key}")
                 col_on, col_off = _col_map[sig_key]
                 label = _labels[sig_key]
