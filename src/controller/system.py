@@ -6,7 +6,6 @@ definido en config/io_map.yaml. La conexión Modbus es compartida.
 """
 
 import logging
-import threading
 from pathlib import Path
 from typing import Callable
 
@@ -74,26 +73,8 @@ class InspectionSystem:
         return ok
 
     def start_cameras(self) -> dict[str, bool]:
-        """Arranca todas las cámaras en paralelo. Devuelve {scanner_id: ok}."""
-        results: dict[str, bool] = {}
-        lock = threading.Lock()
-
-        def _start_one(sid: str, cam: Camera) -> None:
-            ok = cam.start()
-            with lock:
-                results[sid] = ok
-            if not ok:
-                logger.error(f"[{sid}] cámara {cam.index} no disponible")
-
-        threads = [
-            threading.Thread(target=_start_one, args=(sid, cam), daemon=True)
-            for sid, cam in self._cameras.items()
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-        return results
+        """Arranca todas las cámaras en background. Devuelve {scanner_id: True}."""
+        return {sid: cam.start() for sid, cam in self._cameras.items()}
 
     def shutdown(self) -> None:
         """Detiene todos los scanners, cámaras, recorder y cierra el PLC."""

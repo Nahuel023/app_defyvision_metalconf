@@ -53,7 +53,14 @@ def preprocess_for_holes(
     else:
         _, th = cv2.threshold(blur, threshold, 255, thresh_mode)
 
-    kernel = np.ones((3, 3), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel, iterations=1)
+    # OPEN: elimina ruido pequeño fuera de los agujeros
+    kernel_open = np.ones((3, 3), np.uint8)
+    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel_open, iterations=1)
+
+    # CLOSE: rellena micro-gaps dentro de la máscara de cada agujero.
+    # Hace la detección robusta ante desgaste leve del punzón o micro-reflejos
+    # en el borde. Kernel 5×5 llena gaps de hasta 2px sin fundir agujeros adyacentes.
+    kernel_close = np.ones((5, 5), np.uint8)
+    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel_close, iterations=1)
 
     return th

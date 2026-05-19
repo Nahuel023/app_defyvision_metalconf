@@ -1,14 +1,14 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 import cv2
 import numpy as np
 
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
-from src.patterns.pattern_io import load_pattern, find_pattern_path
-from src.patterns.roi import apply_roi, load_roi
+from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
+from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay
 from src.pipeline.compare import CompareReport, compare_missing_only
@@ -87,9 +87,11 @@ def inspect_frame(
     frame_id: str = "live",
     save: bool = False,
     scanner_id: str | None = None,
+    _preloaded: Optional[dict] = None,
 ) -> InspectionResult:
     """Inspect a BGR frame captured from a live camera (no disk read)."""
-    result = _inspect_bgr(model, frame, image_path=Path(frame_id), scanner_id=scanner_id)
+    result = _inspect_bgr(model, frame, image_path=Path(frame_id),
+                          scanner_id=scanner_id, _preloaded=_preloaded)
     if save:
         _save_result_images(result)
     return result
@@ -100,31 +102,42 @@ def _inspect_bgr(
     img_full: np.ndarray,
     image_path: Path,
     scanner_id: str | None = None,
+    _preloaded: Optional[dict] = None,
 ) -> InspectionResult:
-    """Core inspection logic on a pre-loaded BGR frame."""
-    tolerances = load_tolerances(model)
-    threshold = int(tolerances["threshold"])
-    use_channel = str(tolerances["use_channel"])
-    polarity = str(tolerances["polarity"])
-    min_area = float(tolerances["min_area"])
-    circularity_min = float(tolerances["circularity_min"])
-    tol_xy_px = float(tolerances["tol_xy_px"])
+    """Core inspection logic on a pre-loaded BGR frame.
+
+    _preloaded: optional dict with pre-cached keys 'tolerances', 'pattern', 'roi',
+    'ema_state'. Provided by Inspector to avoid per-frame disk I/O.
+    """
+    pre = _preloaded or {}
+
+    tolerances = pre.get("tolerances") or load_tolerances(model)
+    pattern: Pattern = pre.get("pattern") or load_pattern(find_pattern_path(model, scanner_id))
+    roi: Optional[ROI] = pre.get("roi", _SENTINEL)
+    if roi is _SENTINEL:
+        roi = load_roi(model, scanner_id)
+    ema_state: Optional[dict] = pre.get("ema_state")
+
+    threshold        = int(tolerances["threshold"])
+    use_channel      = str(tolerances["use_channel"])
+    polarity         = str(tolerances["polarity"])
+    min_area         = float(tolerances["min_area"])
+    max_area_raw     = tolerances.get("max_area")
+    max_area         = float(max_area_raw) if max_area_raw is not None else None
+    circularity_min  = float(tolerances["circularity_min"])
+    tol_xy_px        = float(tolerances["tol_xy_px"])
     aspect_ratio_max = float(tolerances["aspect_ratio_max"])
     align_match_tol_px = float(tolerances["align_match_tol_px"])
-    min_match_count = int(tolerances["min_match_count"])
-    use_clahe = bool(tolerances.get("use_clahe", False))
-    clahe_clip = float(tolerances.get("clahe_clip", 2.0))
-    clahe_tile = int(tolerances.get("clahe_tile", 8))
-    use_otsu = bool(tolerances.get("use_otsu", False))
-
-    edge_margin_px = float(tolerances.get("edge_margin_px", 0.0))
+    min_match_count  = int(tolerances["min_match_count"])
+    use_clahe        = bool(tolerances.get("use_clahe", False))
+    clahe_clip       = float(tolerances.get("clahe_clip", 2.0))
+    clahe_tile       = int(tolerances.get("clahe_tile", 8))
+    use_otsu         = bool(tolerances.get("use_otsu", False))
+    edge_margin_px   = float(tolerances.get("edge_margin_px", 0.0))
     grid_max_missing = int(tolerances.get("grid_max_missing", 0))
 
-    pattern = load_pattern(find_pattern_path(model, scanner_id))
+    img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
-    img_aligned, align_res = align_image_by_right_edge(img_full)
-
-    roi = load_roi(model, scanner_id)
     img = apply_roi(img_aligned, roi) if roi is not None else img_aligned
 
     preprocess_kw = dict(
@@ -133,12 +146,13 @@ def _inspect_bgr(
         use_otsu=use_otsu,
     )
     detect_kw = dict(
-        min_area=min_area, circularity_min=circularity_min,
-        aspect_ratio_max=aspect_ratio_max, edge_margin_px=edge_margin_px,
+        min_area=min_area, max_area=max_area,
+        circularity_min=circularity_min,
+        aspect_ratio_max=aspect_ratio_max,
+        edge_margin_px=edge_margin_px,
     )
 
-    # Single detection pass on the aligned+ROI image.
-    mask = preprocess_for_holes(img, **preprocess_kw)
+    mask  = preprocess_for_holes(img, **preprocess_kw)
     holes = detect_holes_from_mask(mask, **detect_kw)
     detected_points = [(h.x, h.y) for h in holes]
 
@@ -147,12 +161,6 @@ def _inspect_bgr(
     shift_xy: tuple[float, float] | None = None
 
     if pattern.has_grid and detected_points:
-        # ── Position-invariant grid inspection ──────────────────────────
-        # The sheet moves continuously; absolute hole coordinates change each
-        # frame. Instead of matching against fixed reference positions, we
-        # estimate the grid's fractional phase from THIS frame's detected holes
-        # and regenerate the expected positions accordingly.
-        # Works correctly at any sheet position — no RANSAC needed.
         detected_arr = np.array(detected_points, dtype=np.float32)
         compare_points = grid_compare_points(
             detected_arr,
@@ -161,12 +169,11 @@ def _inspect_bgr(
             pattern.dy,
             pattern.phase_x,
             pattern.phase_y,
-            None,           # no fixed-reference transform
+            None,
             img_w, img_h,
             edge_margin_px,
         )
     else:
-        # ── RANSAC-based alignment for non-periodic patterns ─────────────
         transform = _estimate_alignment_transform(
             pattern.points, holes,
             match_tol_px=align_match_tol_px, min_match_count=min_match_count,
@@ -189,8 +196,8 @@ def _inspect_bgr(
             ]
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
-    report = compare_missing_only(compare_points, detected_points, tol_xy_px=tol_xy_px,
-                                  max_missing=_max_missing)
+    report  = compare_missing_only(compare_points, detected_points,
+                                   tol_xy_px=tol_xy_px, max_missing=_max_missing)
     overlay = draw_compare_overlay(img, holes, report.missing_points, report.status)
 
     return InspectionResult(
@@ -205,6 +212,10 @@ def _inspect_bgr(
         used_lines=int(align_res.used_lines),
         shift_xy=shift_xy,
     )
+
+
+# Sentinel para distinguir roi=None (no hay ROI) de roi no provisto en _preloaded
+_SENTINEL = object()
 
 
 def inspect_folder(
@@ -280,13 +291,10 @@ def _estimate_alignment_transform(
     det_np = np.array([(h.x, h.y) for h in detected_holes], dtype=np.float32)
     pat_np = np.array(pattern_points, dtype=np.float32)
 
-    # Build candidate pre-shifts: voting histogram (top-8) + centroid.
-    # Each candidate is verified by tight inlier count; best wins.
-    # Voting is robust when centroid fails (large shifts in symmetric patterns).
-    # Centroid is added as fallback when voting aliases on regular grids.
+    # Voting histogram para estimar pre-shift dominante
     _bin = 12.0
-    _verify_tol = 20.0  # tight: << grid spacing (~97px), ensures alias rejection
-    diffs = pat_np[:, None, :] - det_np[None, :, :]  # (n_pat, n_det, 2)
+    _verify_tol = 20.0
+    diffs = pat_np[:, None, :] - det_np[None, :, :]   # (n_pat, n_det, 2)
     bx = np.round(diffs[:, :, 0] / _bin).astype(np.int32).ravel()
     by = np.round(diffs[:, :, 1] / _bin).astype(np.int32).ravel()
     votes: dict[tuple[int, int], int] = {}
@@ -298,14 +306,16 @@ def _estimate_alignment_transform(
         for (kx, ky), _ in sorted(votes.items(), key=lambda x: -x[1])[:8]
     ]
     candidates.append((pat_np.mean(axis=0) - det_np.mean(axis=0)).astype(np.float32))
+
+    # Verificación vectorizada de inliers — una matriz por candidato en lugar de loop Python
     best_inliers = -1
     pre_shift = np.zeros(2, dtype=np.float32)
+    _verify_tol2 = _verify_tol * _verify_tol
     for cand in candidates:
-        shifted = det_np + cand
-        inliers = sum(
-            1 for ds in shifted
-            if np.linalg.norm(pat_np - ds, axis=1).min() < _verify_tol
-        )
+        shifted = det_np + cand                                    # (n_det, 2)
+        diff_v  = shifted[:, None, :] - pat_np[None, :, :]        # (n_det, n_pat, 2)
+        min_d2  = (diff_v * diff_v).sum(axis=2).min(axis=1)       # (n_det,)
+        inliers = int((min_d2 < _verify_tol2).sum())
         if inliers > best_inliers:
             best_inliers = inliers
             pre_shift = cand
@@ -332,7 +342,7 @@ def _estimate_alignment_transform(
         np.array(dst_points, dtype=np.float32),
         method=cv2.RANSAC,
         ransacReprojThreshold=max(3.0, match_tol_px * 0.25),
-        maxIters=2000,
+        maxIters=500,       # 2000 → 500: suficiente con 99% confianza para puntos bien matcheados
         confidence=0.99,
     )
     return affine
