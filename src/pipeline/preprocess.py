@@ -13,6 +13,9 @@ def preprocess_for_holes(
     clahe_clip: float = 2.0,
     clahe_tile: int = 8,
     use_otsu: bool = False,
+    blur_ksize: int = 5,
+    open_ksize: int = 3,
+    close_ksize: int = 5,
 ) -> np.ndarray:
     """
     Devuelve una máscara binaria donde los agujeros quedan en blanco (255).
@@ -46,21 +49,20 @@ def preprocess_for_holes(
         )
         channel = clahe.apply(channel)
 
-    blur = cv2.GaussianBlur(channel, (5, 5), 0)
+    ksize = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
+    blur = cv2.GaussianBlur(channel, (ksize, ksize), 0)
     thresh_mode = cv2.THRESH_BINARY if polarity == "bright" else cv2.THRESH_BINARY_INV
     if use_otsu:
         _, th = cv2.threshold(blur, 0, 255, thresh_mode | cv2.THRESH_OTSU)
     else:
         _, th = cv2.threshold(blur, threshold, 255, thresh_mode)
 
-    # OPEN: elimina ruido pequeño fuera de los agujeros
-    kernel_open = np.ones((3, 3), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel_open, iterations=1)
+    if open_ksize > 0:
+        kernel_open = np.ones((open_ksize, open_ksize), np.uint8)
+        th = cv2.morphologyEx(th, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
-    # CLOSE: rellena micro-gaps dentro de la máscara de cada agujero.
-    # Hace la detección robusta ante desgaste leve del punzón o micro-reflejos
-    # en el borde. Kernel 5×5 llena gaps de hasta 2px sin fundir agujeros adyacentes.
-    kernel_close = np.ones((5, 5), np.uint8)
-    th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+    if close_ksize > 0:
+        kernel_close = np.ones((close_ksize, close_ksize), np.uint8)
+        th = cv2.morphologyEx(th, cv2.MORPH_CLOSE, kernel_close, iterations=1)
 
     return th

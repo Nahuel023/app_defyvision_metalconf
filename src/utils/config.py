@@ -23,6 +23,13 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "clahe_clip": 2.0,
     "clahe_tile": 8,
     "use_otsu": False,
+    "blur_ksize": 5,
+    "open_ksize": 3,
+    "close_ksize": 5,
+    "min_detection_ratio": 0.30,
+    "max_extra": -1,
+    "startup_selftest_enabled": True,
+    "selftest_timeout_s": 10.0,
 }
 
 

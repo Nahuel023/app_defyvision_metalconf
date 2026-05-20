@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Tuple
 
 import numpy as np
@@ -12,6 +12,8 @@ class CompareReport:
     status: str  # "OK" o "NOK"
     missing_points: List[Tuple[float, float]]
     matched_detected_idx: List[int]  # índices de detectados que matchearon (para overlay)
+    extra: int = 0
+    extra_points: List[Tuple[float, float]] = field(default_factory=list)
 
 
 def compare_missing_only(
@@ -19,21 +21,27 @@ def compare_missing_only(
     detected_points: List[Tuple[float, float]],
     tol_xy_px: float = 8.0,
     max_missing: int = 0,
+    max_extra: int = -1,
 ) -> CompareReport:
     """
     Matching greedy: cada punto esperado toma el detectado más cercano aún libre.
     Usa numpy para calcular la matriz de distancias completa de una sola vez,
     eliminando el loop Python interno O(n*m).
+
+    extra = detectados sin match (contornos espurios / reflejos).
+    max_extra=-1 deshabilita el criterio de extra.
     """
     n_exp = len(expected_points)
     n_det = len(detected_points)
 
     if n_exp == 0:
-        return CompareReport(0, n_det, 0, "OK", [], [])
+        return CompareReport(0, n_det, 0, "OK", [], [], extra=n_det,
+                             extra_points=list(detected_points))
 
     if n_det == 0:
         status = "OK" if n_exp <= max_missing else "NOK"
-        return CompareReport(n_exp, 0, n_exp, status, list(expected_points), [])
+        return CompareReport(n_exp, 0, n_exp, status, list(expected_points), [],
+                             extra=0, extra_points=[])
 
     exp = np.array(expected_points, dtype=np.float32)   # (n_exp, 2)
     det = np.array(detected_points, dtype=np.float32)   # (n_det, 2)
@@ -58,7 +66,11 @@ def compare_missing_only(
             missing_points.append(expected_points[i])
 
     missing = len(missing_points)
-    status = "OK" if missing <= max_missing else "NOK"
+    extra_points = [detected_points[j] for j in range(n_det) if not used_det[j]]
+    extra = len(extra_points)
+
+    nok = missing > max_missing or (max_extra >= 0 and extra > max_extra)
+    status = "NOK" if nok else "OK"
 
     return CompareReport(
         expected=n_exp,
@@ -67,4 +79,6 @@ def compare_missing_only(
         status=status,
         missing_points=missing_points,
         matched_detected_idx=matched_detected_idx,
+        extra=extra,
+        extra_points=extra_points,
     )

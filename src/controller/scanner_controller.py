@@ -26,6 +26,7 @@ Threads:
 
 import logging
 import threading
+import time
 from datetime import datetime
 from typing import Callable, Optional
 
@@ -80,6 +81,8 @@ class ScannerController:
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
         self._last_position_diff: float    = 0.0
+        self._total_detection_ratio: float = 0.0
+        self._align_fail_count:  int       = 0
 
         self._lock          = threading.Lock()
         self._force_inspect = threading.Event()
@@ -115,16 +118,18 @@ class ScannerController:
                     return False
 
         with self._lock:
-            self._nok_streak         = 0
-            self._total_inspections  = 0
-            self._ok_count           = 0
-            self._nok_count          = 0
-            self._session_start      = datetime.now()
-            self._max_nok_streak     = 0
-            self._fault_count        = 0
-            self._total_missing      = 0
-            self._nok_with_missing   = 0
-            self._last_position_diff = 0.0
+            self._nok_streak              = 0
+            self._total_inspections       = 0
+            self._ok_count                = 0
+            self._nok_count               = 0
+            self._session_start           = datetime.now()
+            self._max_nok_streak          = 0
+            self._fault_count             = 0
+            self._total_missing           = 0
+            self._nok_with_missing        = 0
+            self._last_position_diff      = 0.0
+            self._total_detection_ratio   = 0.0
+            self._align_fail_count        = 0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -202,17 +207,19 @@ class ScannerController:
         with self._lock:
             if self._state != ScannerState.IDLE:
                 return False
-            self._mode               = OperationMode.AUTO
-            self._nok_streak         = 0
-            self._total_inspections  = 0
-            self._ok_count           = 0
-            self._nok_count          = 0
-            self._session_start      = datetime.now()
-            self._max_nok_streak     = 0
-            self._fault_count        = 0
-            self._total_missing      = 0
-            self._nok_with_missing   = 0
-            self._last_position_diff = 0.0
+            self._mode                    = OperationMode.AUTO
+            self._nok_streak              = 0
+            self._total_inspections       = 0
+            self._ok_count                = 0
+            self._nok_count               = 0
+            self._session_start           = datetime.now()
+            self._max_nok_streak          = 0
+            self._fault_count             = 0
+            self._total_missing           = 0
+            self._nok_with_missing        = 0
+            self._last_position_diff      = 0.0
+            self._total_detection_ratio   = 0.0
+            self._align_fail_count        = 0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -278,6 +285,8 @@ class ScannerController:
                 angle_deg=0.0,
                 used_lines=0,
                 shift_xy=None,
+                detection_ratio=1.0,
+                alignment_ok=True,
             )
             self._handle_result(result, model)
 
@@ -341,19 +350,25 @@ class ScannerController:
                 self._total_missing / self._nok_with_missing
                 if self._nok_with_missing > 0 else 0.0
             )
+            avg_detection_ratio = (
+                self._total_detection_ratio / self._total_inspections
+                if self._total_inspections > 0 else 0.0
+            )
             return {
-                "state":              self._state,
-                "mode":               self._mode,
-                "nok_streak":         self._nok_streak,
-                "last_result":        self._last_result,
-                "total_inspections":  self._total_inspections,
-                "ok_count":           self._ok_count,
-                "nok_count":          self._nok_count,
-                "session_start":      self._session_start,
-                "max_nok_streak":     self._max_nok_streak,
-                "fault_count":        self._fault_count,
-                "avg_missing_holes":  avg_missing,
-                "last_position_diff": self._last_position_diff,
+                "state":                self._state,
+                "mode":                 self._mode,
+                "nok_streak":           self._nok_streak,
+                "last_result":          self._last_result,
+                "total_inspections":    self._total_inspections,
+                "ok_count":             self._ok_count,
+                "nok_count":            self._nok_count,
+                "session_start":        self._session_start,
+                "max_nok_streak":       self._max_nok_streak,
+                "fault_count":          self._fault_count,
+                "avg_missing_holes":    avg_missing,
+                "last_position_diff":   self._last_position_diff,
+                "avg_detection_ratio":  avg_detection_ratio,
+                "align_fail_count":     self._align_fail_count,
             }
 
     # ------------------------------------------------------------------
@@ -397,6 +412,40 @@ class ScannerController:
     # Thread: inspector (solo AUTO)
     # ------------------------------------------------------------------
 
+    def _run_startup_selftest(self, model: str) -> bool:
+        """Captura un frame de la cámara y verifica que la detección funciona.
+
+        Retorna True si el test pasa (o si está deshabilitado), False si falla.
+        """
+        tols = load_tolerances(model)
+        if not tols.get("startup_selftest_enabled", True):
+            return True
+        timeout_s   = float(tols.get("selftest_timeout_s", 10.0))
+        min_ratio   = float(tols.get("min_detection_ratio", 0.30))
+        deadline    = time.monotonic() + timeout_s
+        frame = None
+        while time.monotonic() < deadline:
+            frame = self._camera.get_frame()
+            if frame is not None:
+                break
+            time.sleep(0.1)
+        if frame is None:
+            logger.error(f"[{self._id}] selftest: no se obtuvo frame en {timeout_s}s")
+            return False
+        result = self._inspector.inspect(model, frame, frame_id="selftest",
+                                         scanner_id=self._id)
+        if result is None:
+            logger.error(f"[{self._id}] selftest: inspector no retornó resultado")
+            return False
+        ratio = getattr(result, "detection_ratio", 1.0)
+        if ratio < min_ratio:
+            logger.error(
+                f"[{self._id}] selftest FALLO: detection_ratio={ratio:.0%} < {min_ratio:.0%}"
+            )
+            return False
+        logger.info(f"[{self._id}] selftest OK: detection_ratio={ratio:.0%}")
+        return True
+
     def _continuous_loop(self) -> None:
         """Modo continuo AUTO: inspecciona cuando el material avanzó lo suficiente.
 
@@ -406,6 +455,12 @@ class ScannerController:
         """
         last_gray: Optional[np.ndarray] = None
         frame_counter = 0
+
+        with self._lock:
+            model_init = self._io.scanner_config(self._id)["model"]
+        if not self._run_startup_selftest(model_init):
+            self._transition(ScannerState.ERROR)
+            return
 
         while not self._stop_event.is_set():
             with self._lock:
@@ -421,10 +476,7 @@ class ScannerController:
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            pos_thr = float(
-                load_tolerances(model).get("continuous_position_threshold",
-                                           self._cont_pos_thr)
-            )
+            pos_thr = self._cont_pos_thr
 
             forced = self._force_inspect.is_set()
             if forced:
@@ -465,6 +517,9 @@ class ScannerController:
         with self._lock:
             self._last_result = result
             self._total_inspections += 1
+            self._total_detection_ratio += getattr(result, "detection_ratio", 1.0)
+            if not getattr(result, "alignment_ok", True):
+                self._align_fail_count += 1
             if result.status == "NOK":
                 self._nok_streak += 1
                 self._nok_count  += 1

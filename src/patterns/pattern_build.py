@@ -47,6 +47,9 @@ def build_pattern_from_image(
         clahe_clip=float(tolerances.get("clahe_clip", 2.0)),
         clahe_tile=int(tolerances.get("clahe_tile", 8)),
         use_otsu=bool(tolerances.get("use_otsu", False)),
+        blur_ksize=int(tolerances.get("blur_ksize", 5)),
+        open_ksize=int(tolerances.get("open_ksize", 3)),
+        close_ksize=int(tolerances.get("close_ksize", 5)),
     )
     # Use pattern_edge_margin_px if set; falls back to edge_margin_px.
     # A larger build margin excludes edge-zone holes that only appear at the
