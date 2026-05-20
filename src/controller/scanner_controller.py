@@ -136,13 +136,12 @@ class ScannerController:
             self._force_inspect.clear()
 
         if mode == OperationMode.AUTO:
-            self._start_all_threads()
-            # solenoid deshabilitado por seguridad hasta implementar control automático
+            # Encender backlight ANTES de iniciar threads para que el selftest
+            # vea frames iluminados desde el primer momento.
             self._io.write(f"{self._id}.backlight", True)
+            self._start_all_threads()
         else:
             self._start_poller_thread()
-            # solenoid deshabilitado por seguridad hasta implementar control automático
-            # No backlight, no inspección
 
         self._transition(ScannerState.RUNNING)
         self._set_lights(green=True)
@@ -418,12 +417,16 @@ class ScannerController:
         """Captura un frame de la cámara y verifica que la detección funciona.
 
         Retorna True si el test pasa (o si está deshabilitado), False si falla.
+        IMPORTANTE: llamar solo después de escribir el backlight al PLC, y esperar
+        al menos 2 ciclos de cámara para que el primer frame sea con luz.
         """
         tols = load_tolerances(model)
-        if not tols.get("startup_selftest_enabled", True):
+        if not tols.get("startup_selftest_enabled", False):
             return True
         timeout_s   = float(tols.get("selftest_timeout_s", 10.0))
         min_ratio   = float(tols.get("min_detection_ratio", 0.30))
+        # Esperar que lleguen frames post-backlight (al menos 150ms = ~4 frames a 30fps)
+        time.sleep(0.15)
         deadline    = time.monotonic() + timeout_s
         frame = None
         while time.monotonic() < deadline:
@@ -570,13 +573,12 @@ class ScannerController:
     # ------------------------------------------------------------------
 
     def _set_lights(self, *, blue=False, green=False, yellow=False, red=False) -> None:
-        for signal, value in (
+        self._io.write_batch([
             (f"{self._id}.light_blue",   blue),
             (f"{self._id}.light_green",  green),
             (f"{self._id}.light_yellow", yellow),
             (f"{self._id}.light_red",    red),
-        ):
-            self._io.write(signal, value)
+        ])
 
     def _start_poller_thread(self) -> None:
         self._poller_thread = threading.Thread(

@@ -160,6 +160,23 @@ class PLCClient:
                 self._on_error(f"write_coil Y{offset}={value}: {exc}")
                 return False
 
+    def write_coils_batch(self, offset: int, values: list[bool]) -> bool:
+        """Escribe varios bits de salida contiguos en una sola transacción Modbus."""
+        with self._lock:
+            if not self._ensure_connected():
+                return False
+            try:
+                r = self._client.write_coils(
+                    _Y_BASE + offset, values, device_id=self._unit_id
+                )
+                if r.isError():
+                    self._on_error(f"write_coils_batch Y{offset}+{len(values)}: {r}")
+                    return False
+                return True
+            except Exception as exc:
+                self._on_error(f"write_coils_batch Y{offset}+{len(values)}: {exc}")
+                return False
+
     # ------------------------------------------------------------------
     # Internos
     # ------------------------------------------------------------------
