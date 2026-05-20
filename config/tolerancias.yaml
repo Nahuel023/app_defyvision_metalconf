@@ -21,8 +21,14 @@ use_otsu: true
 # Umbral de diferencia media de píxeles entre el frame actual y el último
 # inspeccionado para considerar que hay suficiente material nuevo y disparar
 # una inspección. Más alto = menos inspecciones (secciones más separadas).
+# Poner en 0.0 para inspeccionar CADA frame (ignorar avance del material).
 # Ajustar en planta según velocidad de avance y tamaño del patrón.
-continuous_position_threshold: 8.0
+continuous_position_threshold: 0.0
+
+# Límite máximo de inspecciones por segundo (0 = sin límite, usa toda la CPU).
+# Ejemplos: 10 = máximo 10 fps de inspección, 30 = hasta 30 fps.
+# La velocidad real queda limitada por la velocidad de procesamiento (~10-20 fps típico).
+max_inspection_hz: 15
 
 # ── Overrides por modelo ──────────────────────────────────────────────────────
 # Solo especificar los parámetros que difieren del global.

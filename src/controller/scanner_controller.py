@@ -65,6 +65,8 @@ class ScannerController:
         self._cont_pos_thr  = float(
             tols.get("continuous_position_threshold", 8.0)
         )
+        _max_hz = float(tols.get("max_inspection_hz", 0))
+        self._min_insp_interval = (1.0 / _max_hz) if _max_hz > 0 else 0.0
 
         self._state      = ScannerState.IDLE
         self._mode       = OperationMode.MANUAL
@@ -455,6 +457,7 @@ class ScannerController:
         """
         last_gray: Optional[np.ndarray] = None
         frame_counter = 0
+        last_insp_time: float = 0.0
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
@@ -477,15 +480,23 @@ class ScannerController:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             pos_thr = self._cont_pos_thr
+            min_interval = self._min_insp_interval
 
             forced = self._force_inspect.is_set()
             if forced:
                 self._force_inspect.clear()
+
+            now = time.monotonic()
+            # Límite de tasa: si no ha pasado el intervalo mínimo, saltar
+            if not forced and min_interval > 0 and (now - last_insp_time) < min_interval:
+                self._stop_event.wait(timeout=0.005)
+                continue
+
             if last_gray is not None and not forced:
                 diff = float(np.mean(cv2.absdiff(gray, last_gray)))
                 with self._lock:
                     self._last_position_diff = diff
-                if diff < pos_thr:
+                if pos_thr > 0 and diff < pos_thr:
                     self._stop_event.wait(timeout=0.033)
                     continue
                 logger.debug(f"[{self._id}] nueva sección detectada (diff={diff:.1f})")
@@ -497,9 +508,10 @@ class ScannerController:
                                           scanner_id=self._id)
             if res is not None:
                 last_gray = gray
+                last_insp_time = time.monotonic()
                 self._handle_result(res, model)
 
-            self._stop_event.wait(timeout=0.033)
+            self._stop_event.wait(timeout=0.005)
 
     def _handle_result(self, result: InspectionResult, model: str = "") -> None:
         """Actualiza la FSM y dispara callbacks tras un resultado de inspección."""

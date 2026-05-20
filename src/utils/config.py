@@ -30,6 +30,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "max_extra": -1,
     "startup_selftest_enabled": True,
     "selftest_timeout_s": 10.0,
+    "max_inspection_hz": 0,
 }
 
 
