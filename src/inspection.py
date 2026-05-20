@@ -33,6 +33,8 @@ class InspectionResult:
     angle_deg: float
     used_lines: int
     shift_xy: tuple[float, float] | None
+    detection_ratio: float = 1.0
+    alignment_ok: bool = True
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,7 @@ class FolderInspectionSummary:
     total: int
     ok: int
     nok: int
+    uncertain: int
     results: list[InspectionResult]
     temporal_ok: int
     temporal_nok: int
@@ -129,12 +132,17 @@ def _inspect_bgr(
     aspect_ratio_max = float(tolerances["aspect_ratio_max"])
     align_match_tol_px = float(tolerances["align_match_tol_px"])
     min_match_count  = int(tolerances["min_match_count"])
-    use_clahe        = bool(tolerances.get("use_clahe", False))
-    clahe_clip       = float(tolerances.get("clahe_clip", 2.0))
-    clahe_tile       = int(tolerances.get("clahe_tile", 8))
-    use_otsu         = bool(tolerances.get("use_otsu", False))
-    edge_margin_px   = float(tolerances.get("edge_margin_px", 0.0))
-    grid_max_missing = int(tolerances.get("grid_max_missing", 0))
+    use_clahe           = bool(tolerances.get("use_clahe", False))
+    clahe_clip          = float(tolerances.get("clahe_clip", 2.0))
+    clahe_tile          = int(tolerances.get("clahe_tile", 8))
+    use_otsu            = bool(tolerances.get("use_otsu", False))
+    blur_ksize          = int(tolerances.get("blur_ksize", 5))
+    open_ksize          = int(tolerances.get("open_ksize", 3))
+    close_ksize         = int(tolerances.get("close_ksize", 5))
+    edge_margin_px      = float(tolerances.get("edge_margin_px", 0.0))
+    grid_max_missing    = int(tolerances.get("grid_max_missing", 0))
+    min_detection_ratio = float(tolerances.get("min_detection_ratio", 0.30))
+    max_extra           = int(tolerances.get("max_extra", -1))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -144,6 +152,7 @@ def _inspect_bgr(
         threshold=threshold, use_channel=use_channel, polarity=polarity,
         use_clahe=use_clahe, clahe_clip=clahe_clip, clahe_tile=clahe_tile,
         use_otsu=use_otsu,
+        blur_ksize=blur_ksize, open_ksize=open_ksize, close_ksize=close_ksize,
     )
     detect_kw = dict(
         min_area=min_area, max_area=max_area,
@@ -159,6 +168,9 @@ def _inspect_bgr(
     img_h, img_w = img.shape[:2]
 
     shift_xy: tuple[float, float] | None = None
+    alignment_ok = True
+
+    n_expected_total = len(pattern.points)
 
     if pattern.has_grid and detected_points:
         detected_arr = np.array(detected_points, dtype=np.float32)
@@ -189,6 +201,7 @@ def _inspect_bgr(
                 and edge_margin_px <= ey <= img_h - edge_margin_px
             ]
         else:
+            alignment_ok = False
             compare_points = [
                 (px, py) for px, py in pattern.points
                 if edge_margin_px <= px <= img_w - edge_margin_px
@@ -197,8 +210,14 @@ def _inspect_bgr(
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
     report  = compare_missing_only(compare_points, detected_points,
-                                   tol_xy_px=tol_xy_px, max_missing=_max_missing)
-    overlay = draw_compare_overlay(img, holes, report.missing_points, report.status)
+                                   tol_xy_px=tol_xy_px, max_missing=_max_missing,
+                                   max_extra=max_extra)
+
+    detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
+
+    overlay = draw_compare_overlay(img, holes, report.missing_points, report.status,
+                                   extra_points=report.extra_points)
+    overlay = _draw_warnings(overlay, detection_ratio, alignment_ok, min_detection_ratio)
 
     return InspectionResult(
         model=model,
@@ -211,7 +230,31 @@ def _inspect_bgr(
         angle_deg=float(align_res.angle_deg),
         used_lines=int(align_res.used_lines),
         shift_xy=shift_xy,
+        detection_ratio=detection_ratio,
+        alignment_ok=alignment_ok,
     )
+
+
+def _draw_warnings(
+    overlay: np.ndarray,
+    detection_ratio: float,
+    alignment_ok: bool,
+    min_detection_ratio: float,
+) -> np.ndarray:
+    warnings = []
+    if detection_ratio < min_detection_ratio:
+        warnings.append(f"DETECCION BAJA ({detection_ratio:.0%})")
+    if not alignment_ok:
+        warnings.append("ALIGN FALLBACK")
+    if not warnings:
+        return overlay
+    out = overlay.copy()
+    h = out.shape[0]
+    for i, msg in enumerate(warnings):
+        y = h - 15 - i * 35
+        cv2.putText(out, msg, (10, y), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.9, (0, 200, 255), 2, cv2.LINE_AA)
+    return out
 
 
 # Sentinel para distinguir roi=None (no hay ROI) de roi no provisto en _preloaded
@@ -255,6 +298,7 @@ def inspect_folder(
         total=len(results),
         ok=ok_count,
         nok=len(results) - ok_count,
+        uncertain=0,
         results=results,
         temporal_ok=temporal_ok,
         temporal_nok=len(temporal_results) - temporal_ok,

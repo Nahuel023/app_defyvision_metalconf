@@ -128,8 +128,10 @@ def cmd_run_image(args: argparse.Namespace) -> int:
         print(f"[shift] dx={result.shift_xy[0]:.2f} dy={result.shift_xy[1]:.2f}")
 
     print(
-        f"[run-image] model={args.model} expected={result.report.expected} "
-        f"detected={result.report.detected} missing={result.report.missing} status={result.status}"
+        f"[run-image] model={args.model}  status={result.status}\n"
+        f"  expected={result.report.expected}  detected={result.report.detected}  "
+        f"missing={result.report.missing}  extra={result.report.extra}\n"
+        f"  detection_ratio={result.detection_ratio:.0%}  alignment_ok={result.alignment_ok}"
     )
 
     if args.show:
@@ -166,11 +168,24 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
         f"max_response_sec={summary.max_response_sec:.2f} "
         f"meets_target={summary.meets_response_target}"
     )
+    align_fails = sum(1 for t in summary.temporal_results if not t.result.alignment_ok)
+    avg_ratio   = sum(t.result.detection_ratio for t in summary.temporal_results) / max(1, summary.total)
+    print(
+        f"[quality]  avg_detection_ratio={avg_ratio:.0%}  "
+        f"align_failures={align_fails}/{summary.total}"
+    )
     for temporal in summary.temporal_results:
         result = temporal.result
+        warn = ""
+        if result.detection_ratio < 0.50:
+            warn += " DETECCION_BAJA"
+        if not result.alignment_ok:
+            warn += " ALIGN_FALLBACK"
         print(
-            f"  - {result.image_path.name}: raw={result.status} temporal={temporal.decision_status} "
-            f"streak={temporal.nok_streak} missing={result.report.missing} detected={result.report.detected}"
+            f"  {result.image_path.name}: {result.status}/{temporal.decision_status}"
+            f"  streak={temporal.nok_streak}"
+            f"  missing={result.report.missing}  extra={result.report.extra}"
+            f"  ratio={result.detection_ratio:.0%}{warn}"
         )
     return 0
 
