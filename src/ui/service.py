@@ -1037,7 +1037,20 @@ class RecordingTab(QWidget):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        root = QVBoxLayout(self)
+        # Contenedor scrollable: permite bajar para ver la imagen más grande
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+        outer.addWidget(scroll_area)
+
+        container = QWidget()
+        scroll_area.setWidget(container)
+
+        root = QVBoxLayout(container)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
 
@@ -1218,6 +1231,7 @@ class RecordingTab(QWidget):
 
         # Image display — zoomable/pannable viewer
         self._img_view = ZoomableImageView("Sin frames")
+        self._img_view.setMinimumHeight(640)
         brow_lay.addWidget(self._img_view, stretch=1)
 
         root.addWidget(browser, stretch=1)
