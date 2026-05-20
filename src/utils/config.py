@@ -28,7 +28,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "close_ksize": 5,
     "min_detection_ratio": 0.30,
     "max_extra": -1,
-    "startup_selftest_enabled": True,
+    "startup_selftest_enabled": False,
     "selftest_timeout_s": 10.0,
     "max_inspection_hz": 0,
 }

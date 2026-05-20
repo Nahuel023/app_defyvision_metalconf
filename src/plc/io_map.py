@@ -41,6 +41,41 @@ class IOMap:
             return self._client.read_input(address)
         return self._client.read_coil(address)
 
+    def write_batch(self, signals: list[tuple[str, bool]]) -> bool:
+        """Escribe varios outputs en una sola transacción si son contiguos.
+
+        Hace fallback a escrituras individuales si los offsets no son contiguos
+        o si alguna señal es una entrada.
+        """
+        if not signals:
+            return True
+        if self._disable_outputs:
+            for sig, val in signals:
+                logger.debug(f"[no-plc-outputs] {sig}={val} (suprimido)")
+            return True
+        resolved = []
+        for sig, val in signals:
+            sig_type, addr = self._resolve(sig)
+            if sig_type != "output":
+                raise ValueError(f"'{sig}' es una entrada — no se puede escribir")
+            if sig.endswith(".solenoid") and val:
+                logger.warning(f"[SAFETY] Escritura bloqueada: {sig}=True")
+                continue
+            resolved.append((addr, val))
+        if not resolved:
+            return True
+        resolved.sort(key=lambda x: x[0])
+        # Verificar si son contiguos
+        addrs = [a for a, _ in resolved]
+        if addrs == list(range(addrs[0], addrs[0] + len(addrs))):
+            values = [v for _, v in resolved]
+            return self._client.write_coils_batch(addrs[0], values)
+        # Fallback: individuales
+        ok = True
+        for addr, val in resolved:
+            ok &= self._client.write_coil(addr, val)
+        return ok
+
     def write(self, signal: str, value: bool) -> bool:
         """
         Escribe una señal de salida por nombre completo.
