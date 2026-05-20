@@ -41,9 +41,9 @@ _INSERT = """
 INSERT INTO metrics
     (ts, scanner_id, total_inspections, ok_count, nok_count,
      ok_pct, nok_streak, max_nok_streak, fault_count,
-     avg_missing_holes, last_position_diff,
-     insp_per_min, camera_fps, session_duration_s)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+     avg_missing_holes, avg_detection_ratio, align_fail_count,
+     last_position_diff, insp_per_min, camera_fps, session_duration_s)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -123,6 +123,16 @@ class MetricsRecorder:
         try:
             con = sqlite3.connect(self._db_path)
             con.executescript(_SCHEMA)
+            # Migración: agregar columnas nuevas si la tabla ya existía sin ellas
+            existing = {row[1] for row in con.execute("PRAGMA table_info(metrics)")}
+            migrations = [
+                ("avg_detection_ratio", "REAL DEFAULT 0"),
+                ("align_fail_count",    "INTEGER DEFAULT 0"),
+            ]
+            for col, typedef in migrations:
+                if col not in existing:
+                    con.execute(f"ALTER TABLE metrics ADD COLUMN {col} {typedef}")
+                    logger.info(f"MetricsRecorder: columna '{col}' agregada a metrics.db")
             con.commit()
             con.close()
         except Exception as exc:
@@ -170,6 +180,8 @@ class MetricsRecorder:
                 s.get("max_nok_streak", 0),
                 s.get("fault_count", 0),
                 s.get("avg_missing_holes", 0.0),
+                s.get("avg_detection_ratio", 0.0),
+                s.get("align_fail_count", 0),
                 s.get("last_position_diff", 0.0),
                 ipm,
                 cam.fps,
