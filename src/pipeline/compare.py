@@ -55,7 +55,10 @@ def compare_missing_only(
     matched_detected_idx: List[int] = []
     missing_points: List[Tuple[float, float]] = []
 
-    for i in range(n_exp):
+    # Process expected points closest-first so a near pair is never stolen by a farther one
+    order = np.argsort(dist2.min(axis=1))
+
+    for i in order:
         row = dist2[i].copy()
         row[used_det] = np.inf          # enmascarar detectados ya usados
         best_j = int(np.argmin(row))

@@ -31,6 +31,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "startup_selftest_enabled": False,
     "selftest_timeout_s": 10.0,
     "max_inspection_hz": 0,
+    "grid_min_spacing": 30.0,
 }
 
 

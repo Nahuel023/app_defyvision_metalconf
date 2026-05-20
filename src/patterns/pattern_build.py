@@ -72,8 +72,9 @@ def build_pattern_from_image(
     import numpy as np
     xs = np.array([p[0] for p in points])
     ys = np.array([p[1] for p in points])
-    dx = estimate_spacing(xs)
-    dy = estimate_spacing(ys)
+    grid_min_sp = float(tolerances.get("grid_min_spacing", 30.0))
+    dx = estimate_spacing(xs, min_spacing=grid_min_sp)
+    dy = estimate_spacing(ys, min_spacing=grid_min_sp)
     phase_x = estimate_phase(xs, dx)
     phase_y = estimate_phase(ys, dy)
     cells = assign_cells(points, dx, dy, phase_x, phase_y)
