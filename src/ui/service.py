@@ -1412,18 +1412,17 @@ class RecordingTab(QWidget):
             avg_m = sum(missing_counts) / len(missing_counts)
             min_m, max_m = min(missing_counts), max(missing_counts)
             shifts = [r.shift_xy for r in results if r.shift_xy is not None]
+            offsets = [r.centering.offset_px for r in results if r.centering is not None]
+            parts = [f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"]
             if shifts:
                 import math
                 shift_mags = [math.hypot(s[0], s[1]) for s in shifts]
-                avg_shift = sum(shift_mags) / len(shift_mags)
-                self._stats_lbl.setText(
-                    f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"
-                    f"    shift avg={avg_shift:.1f}px  max={max(shift_mags):.1f}px"
-                )
-            else:
-                self._stats_lbl.setText(
-                    f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"
-                )
+                parts.append(f"shift avg={sum(shift_mags)/len(shift_mags):.1f}px  max={max(shift_mags):.1f}px")
+            if offsets:
+                avg_off = sum(offsets) / len(offsets)
+                max_off = max(abs(o) for o in offsets)
+                parts.append(f"centro avg={avg_off:+.1f}px  max={max_off:.1f}px")
+            self._stats_lbl.setText("    ".join(parts))
 
         self._ana_progress.setText("Análisis completo")
         self._btn_analyze.setEnabled(True)
@@ -1466,7 +1465,11 @@ class RecordingTab(QWidget):
             r = self._results[idx]
             color = _OK if r.status == "OK" else _NOK
             missing = len(r.report.missing_points)
-            self._result_lbl.setText(f"{r.status}  missing={missing}")
+            center_txt = ""
+            if r.centering is not None:
+                sign = "+" if r.centering.offset_px >= 0 else ""
+                center_txt = f"  centro={sign}{r.centering.offset_px:.1f}px"
+            self._result_lbl.setText(f"{r.status}  missing={missing}{center_txt}")
             self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
         else:
             self._result_lbl.setText("")

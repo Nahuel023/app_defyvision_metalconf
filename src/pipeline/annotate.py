@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import cv2
 import numpy as np
-from typing import Sequence, Tuple, List
+from typing import TYPE_CHECKING, Sequence, Tuple, List
 
 from .detect_holes import Hole
+
+if TYPE_CHECKING:
+    from .edge_centering import CenteringResult
 
 
 def draw_holes(img_bgr: np.ndarray, holes: Sequence[Hole]) -> np.ndarray:
@@ -63,4 +68,42 @@ def draw_compare_overlay(
         cv2.putText(out, f"Extra: {len(extra_points)}", (10, 100),
                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 2, cv2.LINE_AA)
 
+    return out
+
+
+def draw_centering_overlay(img_bgr: np.ndarray, centering: "CenteringResult") -> np.ndarray:
+    """Draw metal edge lines, center lines, and offset annotation."""
+    out = img_bgr.copy()
+    h, w = out.shape[:2]
+
+    lx = int(round(centering.left_x))
+    rx = int(round(centering.right_x))
+    cx = int(round(centering.sheet_center_x))
+    hx = int(round(centering.holes_center_x))
+
+    # Metal edges: cyan vertical lines
+    cv2.line(out, (lx, 0), (lx, h - 1), (255, 220, 0), 2)
+    cv2.line(out, (rx, 0), (rx, h - 1), (255, 220, 0), 2)
+
+    # Sheet center: orange dashed line
+    for y in range(0, h, 20):
+        cv2.line(out, (cx, y), (cx, min(y + 10, h - 1)), (0, 165, 255), 2)
+
+    # Holes center: white line
+    cv2.line(out, (hx, 0), (hx, h - 1), (255, 255, 255), 2)
+
+    # Offset arrow from sheet center to holes center
+    offset = centering.offset_px
+    color = (0, 200, 0) if centering.within_tol else (0, 0, 255)
+    mid_y = h // 2
+    if abs(hx - cx) >= 3:
+        cv2.arrowedLine(out, (cx, mid_y), (hx, mid_y), color, 3, tipLength=0.3)
+    else:
+        cv2.circle(out, (cx, mid_y), 6, (0, 200, 0), -1)
+
+    sign = "+" if offset >= 0 else ""
+    cv2.putText(out, f"Centro: {sign}{offset:.1f}px", (10, h - 45),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
+    cv2.putText(out, f"Ancho: {centering.sheet_width_px:.0f}px", (10, h - 15),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
     return out
