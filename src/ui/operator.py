@@ -366,9 +366,14 @@ class ScannerPanel(QWidget):
         if result is not None and result.centering is not None:
             c = result.centering
             sign = "+" if c.offset_px >= 0 else ""
-            c_color = "#15803d" if c.within_tol else "#b91c1c"
-            self._center_val[1].setText(f"{sign}{c.offset_px:.1f} px")
-            self._center_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{c_color};")
+            if c.within_tol:
+                c_text  = f"{sign}{c.offset_px:.1f} px"
+                c_color = "#15803d"
+            else:
+                c_text  = f"FUERA  {sign}{c.offset_px:.1f}px"
+                c_color = "#ea580c"   # naranja para distinguir de rojo (agujeros)
+            self._center_val[1].setText(c_text)
+            self._center_val[1].setStyleSheet(f"font-size:13px;font-weight:700;color:{c_color};")
         elif result is None:
             self._center_val[1].setText("—")
             self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")

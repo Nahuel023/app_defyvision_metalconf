@@ -71,8 +71,15 @@ def draw_compare_overlay(
     return out
 
 
-def draw_centering_overlay(img_bgr: np.ndarray, centering: "CenteringResult") -> np.ndarray:
-    """Draw metal edge lines, center lines, and offset annotation."""
+def draw_centering_overlay(
+    img_bgr: np.ndarray,
+    centering: "CenteringResult",
+    tag_nok: bool = False,
+) -> np.ndarray:
+    """Draw metal edge lines, center lines, and offset annotation.
+
+    tag_nok: when True, draws a prominent DESCENTRADO badge on the frame.
+    """
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
@@ -106,4 +113,19 @@ def draw_centering_overlay(img_bgr: np.ndarray, centering: "CenteringResult") ->
                 cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
     cv2.putText(out, f"Ancho: {centering.sheet_width_px:.0f}px", (10, h - 15),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
+
+    # Prominent DESCENTRADO badge when centering triggered NOK
+    if tag_nok:
+        label = "NOK CENTRADO"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale, thick = 1.1, 3
+        (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
+        # Badge background: semi-transparent red rectangle
+        bx1, by1 = w // 2 - tw // 2 - 8, 105
+        bx2, by2 = w // 2 + tw // 2 + 8, 105 + th + baseline + 10
+        cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 180), -1)
+        cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 255), 2)
+        cv2.putText(out, label, (bx1 + 8, by2 - baseline - 4),
+                    font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+
     return out

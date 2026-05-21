@@ -1463,13 +1463,23 @@ class RecordingTab(QWidget):
 
         if idx < len(self._results):
             r = self._results[idx]
-            color = _OK if r.status == "OK" else _NOK
             missing = len(r.report.missing_points)
             center_txt = ""
             if r.centering is not None:
                 sign = "+" if r.centering.offset_px >= 0 else ""
                 center_txt = f"  centro={sign}{r.centering.offset_px:.1f}px"
-            self._result_lbl.setText(f"{r.status}  missing={missing}{center_txt}")
+
+            holes_nok = r.report.status == "NOK"
+            if r.status == "OK":
+                label, color = "OK", _OK
+            elif getattr(r, "centering_nok", False) and holes_nok:
+                label, color = "NOK  AGUJEROS + CENTRADO", _NOK
+            elif getattr(r, "centering_nok", False):
+                label, color = "NOK  CENTRADO", "#f97316"   # naranja — solo centrado
+            else:
+                label, color = "NOK  AGUJEROS", _NOK
+
+            self._result_lbl.setText(f"{label}  missing={missing}{center_txt}")
             self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
         else:
             self._result_lbl.setText("")
