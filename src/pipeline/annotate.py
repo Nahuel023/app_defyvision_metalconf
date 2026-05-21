@@ -10,6 +10,24 @@ if TYPE_CHECKING:
     from .edge_centering import CenteringResult
 
 
+def _draw_transparent_line(
+    img: np.ndarray,
+    pt1: tuple,
+    pt2: tuple,
+    color: tuple,
+    thickness: int = 2,
+    alpha: float = 0.45,
+) -> None:
+    """Draw a line onto img in-place with the given opacity (alpha 0=invisible, 1=solid)."""
+    layer = np.zeros_like(img)
+    cv2.line(layer, pt1, pt2, color, thickness)
+    mask = layer.any(axis=2)
+    img[mask] = np.clip(
+        img[mask].astype(np.float32) * (1.0 - alpha) + layer[mask].astype(np.float32) * alpha,
+        0, 255,
+    ).astype(np.uint8)
+
+
 def draw_holes(img_bgr: np.ndarray, holes: Sequence[Hole]) -> np.ndarray:
     out = img_bgr.copy()
     for h in holes:
@@ -88,9 +106,9 @@ def draw_centering_overlay(
     cx = int(round(centering.sheet_center_x))
     hx = int(round(centering.holes_center_x))
 
-    # Metal edges: cyan vertical lines
-    cv2.line(out, (lx, 0), (lx, h - 1), (255, 220, 0), 2)
-    cv2.line(out, (rx, 0), (rx, h - 1), (255, 220, 0), 2)
+    # Metal edges: light gray semi-transparent vertical lines
+    _draw_transparent_line(out, (lx, 0), (lx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
+    _draw_transparent_line(out, (rx, 0), (rx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
 
     # Sheet center: orange dashed line
     for y in range(0, h, 20):
