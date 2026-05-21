@@ -47,7 +47,7 @@ models:
     # IMPORTANTE: si se reconstruye el patrón con Fotos/1.jpeg (sin backlight),
     # cambiar temporalmente a polarity: dark, luego volver a bright.
     polarity: bright
-    min_area: 300.0           # agujeros grandes (área mediana ~1100 px² en ref.)
+    min_area: 250.0           # blur reduce area aparente; rango real 250-500px² (gap en 200-250)
     circularity_min: 0.75     # ligeramente más permisivo que global 0.8
     aspect_ratio_max: 2.0
     # ── Matching ───────────────────────────────────────────────────────────
