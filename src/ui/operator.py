@@ -161,17 +161,19 @@ class ScannerPanel(QWidget):
         grid.setContentsMargins(8, 8, 8, 8)
         grid.setSpacing(5)
 
-        self._mode_val   = self._metric_card("MODO",       "MANUAL", _MODE_COLOR[OperationMode.MANUAL])
-        self._total_val  = self._metric_card("TOTAL",      "0",      "#94a3b8")
-        self._result_val = self._metric_card("ÚLTIMO",     "—",      "#94a3b8")
-        self._streak_val = self._metric_card("RACHA NOK",  "0",      "#94a3b8")
-        self._ok_val     = self._metric_card("✓ OK frames","0",      "#94a3b8")
-        self._nok_val    = self._metric_card("✗ ALARMAS",  "0",      "#94a3b8")
+        self._mode_val    = self._metric_card("MODO",       "MANUAL", _MODE_COLOR[OperationMode.MANUAL])
+        self._total_val   = self._metric_card("TOTAL",      "0",      "#94a3b8")
+        self._result_val  = self._metric_card("ÚLTIMO",     "—",      "#94a3b8")
+        self._streak_val  = self._metric_card("RACHA NOK",  "0",      "#94a3b8")
+        self._ok_val      = self._metric_card("✓ OK frames","0",      "#94a3b8")
+        self._nok_val     = self._metric_card("✗ ALARMAS",  "0",      "#94a3b8")
+        self._center_val  = self._metric_card("CENTRADO",   "—",      "#94a3b8")
 
         for col, mv in enumerate([self._mode_val, self._total_val, self._result_val]):
             grid.addWidget(mv[0], 0, col)
         for col, mv in enumerate([self._streak_val, self._ok_val, self._nok_val]):
             grid.addWidget(mv[0], 1, col)
+        grid.addWidget(self._center_val[0], 2, 0, 1, 3)
 
         root.addWidget(metrics_frame)
 
@@ -359,6 +361,17 @@ class ScannerPanel(QWidget):
                 health_txt, health_c = "OK", "#15803d"
             self._result_val[1].setText(health_txt)
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
+
+        # CENTRADO: offset lateral del patrón respecto a los bordes de la chapa
+        if result is not None and result.centering is not None:
+            c = result.centering
+            sign = "+" if c.offset_px >= 0 else ""
+            c_color = "#15803d" if c.within_tol else "#b91c1c"
+            self._center_val[1].setText(f"{sign}{c.offset_px:.1f} px")
+            self._center_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{c_color};")
+        elif result is None:
+            self._center_val[1].setText("—")
+            self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")
 
         self._refresh_buttons(state)
 

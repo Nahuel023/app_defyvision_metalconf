@@ -32,6 +32,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "selftest_timeout_s": 10.0,
     "max_inspection_hz": 0,
     "grid_min_spacing": 30.0,
+    "center_offset_tol_px": 0.0,   # 0 = medir y mostrar, nunca NOK; >0 = tolerancia activa
 }
 
 

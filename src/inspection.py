@@ -10,9 +10,10 @@ from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
 from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
+from src.pipeline.edge_centering import CenteringResult, compute_centering
 from src.pipeline.grid_fitting import grid_compare_points
 from src.pipeline.preprocess import preprocess_for_holes
 from src.utils.config import load_tolerances
@@ -35,6 +36,7 @@ class InspectionResult:
     shift_xy: tuple[float, float] | None
     detection_ratio: float = 1.0
     alignment_ok: bool = True
+    centering: CenteringResult | None = None
 
 
 @dataclass(frozen=True)
@@ -215,14 +217,26 @@ def _inspect_bgr(
 
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
 
-    overlay = draw_compare_overlay(img, holes, report.missing_points, report.status,
+    # Centering check: measure lateral offset of holes relative to sheet edges
+    center_offset_tol_px = float(tolerances.get("center_offset_tol_px", 0.0))
+    centering = compute_centering(img, [h.x for h in holes], tol_px=center_offset_tol_px)
+    centering_nok = (
+        centering is not None
+        and not centering.within_tol
+        and center_offset_tol_px > 0
+    )
+    final_status = "NOK" if (report.status == "NOK" or centering_nok) else report.status
+
+    overlay = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                    extra_points=report.extra_points)
+    if centering is not None:
+        overlay = draw_centering_overlay(overlay, centering)
     overlay = _draw_warnings(overlay, detection_ratio, alignment_ok, min_detection_ratio)
 
     return InspectionResult(
         model=model,
         image_path=image_path,
-        status=report.status,
+        status=final_status,
         report=report,
         holes=holes,
         mask=mask,
@@ -232,6 +246,7 @@ def _inspect_bgr(
         shift_xy=shift_xy,
         detection_ratio=detection_ratio,
         alignment_ok=alignment_ok,
+        centering=centering,
     )
 
 
