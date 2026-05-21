@@ -37,6 +37,7 @@ class InspectionResult:
     detection_ratio: float = 1.0
     alignment_ok: bool = True
     centering: CenteringResult | None = None
+    centering_nok: bool = False   # True cuando el NOK fue causado (o agravado) por descentrado
 
 
 @dataclass(frozen=True)
@@ -230,7 +231,7 @@ def _inspect_bgr(
     overlay = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                    extra_points=report.extra_points)
     if centering is not None:
-        overlay = draw_centering_overlay(overlay, centering)
+        overlay = draw_centering_overlay(overlay, centering, tag_nok=centering_nok)
     overlay = _draw_warnings(overlay, detection_ratio, alignment_ok, min_detection_ratio)
 
     return InspectionResult(
@@ -247,6 +248,7 @@ def _inspect_bgr(
         detection_ratio=detection_ratio,
         alignment_ok=alignment_ok,
         centering=centering,
+        centering_nok=centering_nok,
     )
 
 
