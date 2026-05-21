@@ -51,7 +51,7 @@ models:
     circularity_min: 0.75     # ligeramente más permisivo que global 0.8
     aspect_ratio_max: 2.0
     # ── Matching ───────────────────────────────────────────────────────────
-    tol_xy_px: 18.0           # < dx=28; error real de centroide <5px → sin ambigüedad de matching
+    tol_xy_px: 22.0           # < dx=28; cubre drift de borde y blur residual sin ambigüedad
     align_match_tol_px: 120.0
     min_match_count: 5        # patrón puede estar parcialmente fuera de frame
     # ── Bordes ─────────────────────────────────────────────────────────────

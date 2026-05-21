@@ -214,6 +214,19 @@ def _inspect_bgr(
                 and edge_margin_px <= py <= img_h - edge_margin_px
             ]
 
+    # Recortar posiciones esperadas al rango Y de agujeros detectados + margen dy.
+    # Evita contar como "missing" las filas del patrón que salen de cuadro cuando
+    # el borde de la zona perforada cruza el encuadre (corte de patrón).
+    if compare_points and detected_points and pattern.has_grid:
+        det_ys = [y for _x, y in detected_points]
+        dy_clip = float(pattern.dy) * 1.5
+        y_clip_min = min(det_ys) - dy_clip
+        y_clip_max = max(det_ys) + dy_clip
+        compare_points = [
+            (x, y) for x, y in compare_points
+            if y_clip_min <= y <= y_clip_max
+        ]
+
     # Filtrar detecciones al bounding box del patrón esperado para eliminar agujeros
     # reales del material fuera de la ventana del patrón (reducen extra y costo de matching).
     # Los holes originales se mantienen intactos para el cálculo de centrado.
