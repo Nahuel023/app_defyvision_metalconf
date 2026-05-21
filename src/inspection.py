@@ -38,6 +38,7 @@ class InspectionResult:
     alignment_ok: bool = True
     centering: CenteringResult | None = None
     centering_nok: bool = False   # True cuando el NOK fue causado (o agravado) por descentrado
+    capture_quality_degraded: bool = False  # True cuando ratio cae bajo quality_ratio_min (no afecta NOK)
 
 
 @dataclass(frozen=True)
@@ -145,7 +146,9 @@ def _inspect_bgr(
     edge_margin_px      = float(tolerances.get("edge_margin_px", 0.0))
     grid_max_missing    = int(tolerances.get("grid_max_missing", 0))
     min_detection_ratio = float(tolerances.get("min_detection_ratio", 0.30))
+    quality_ratio_min   = float(tolerances.get("quality_ratio_min", 0.0))
     max_extra           = int(tolerances.get("max_extra", -1))
+    bbox_filter_margin_px = float(tolerances.get("bbox_filter_margin_px", 0.0))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -211,12 +214,31 @@ def _inspect_bgr(
                 and edge_margin_px <= py <= img_h - edge_margin_px
             ]
 
+    # Filtrar detecciones al bounding box del patrón esperado para eliminar agujeros
+    # reales del material fuera de la ventana del patrón (reducen extra y costo de matching).
+    # Los holes originales se mantienen intactos para el cálculo de centrado.
+    if compare_points and bbox_filter_margin_px >= 0:
+        xs = [p[0] for p in compare_points]
+        ys = [p[1] for p in compare_points]
+        m = bbox_filter_margin_px
+        bx1, bx2 = min(xs) - m, max(xs) + m
+        by1, by2 = min(ys) - m, max(ys) + m
+        detected_in_bbox = [(x, y) for x, y in detected_points
+                            if bx1 <= x <= bx2 and by1 <= y <= by2]
+    else:
+        detected_in_bbox = detected_points
+
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
-    report  = compare_missing_only(compare_points, detected_points,
+    report  = compare_missing_only(compare_points, detected_in_bbox,
                                    tol_xy_px=tol_xy_px, max_missing=_max_missing,
                                    max_extra=max_extra)
 
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
+    capture_quality_degraded = (
+        quality_ratio_min > 0.0
+        and detection_ratio < quality_ratio_min
+        and detection_ratio >= min_detection_ratio
+    )
 
     # Centering check: measure lateral offset of holes relative to sheet edges
     center_offset_tol_px = float(tolerances.get("center_offset_tol_px", 0.0))
@@ -233,7 +255,8 @@ def _inspect_bgr(
                                        extra_points=report.extra_points)
     if centering is not None:
         overlay_roi = draw_centering_overlay(overlay_roi, centering, tag_nok=centering_nok)
-    overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok, min_detection_ratio)
+    overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
+                                 min_detection_ratio, capture_quality_degraded)
 
     # Composite annotated ROI onto the full aligned frame so the overlay shows
     # the complete image without any crop
@@ -258,6 +281,7 @@ def _inspect_bgr(
         alignment_ok=alignment_ok,
         centering=centering,
         centering_nok=centering_nok,
+        capture_quality_degraded=capture_quality_degraded,
     )
 
 
@@ -266,10 +290,13 @@ def _draw_warnings(
     detection_ratio: float,
     alignment_ok: bool,
     min_detection_ratio: float,
+    capture_quality_degraded: bool = False,
 ) -> np.ndarray:
     warnings = []
     if detection_ratio < min_detection_ratio:
         warnings.append(f"DETECCION BAJA ({detection_ratio:.0%})")
+    elif capture_quality_degraded:
+        warnings.append(f"CALIDAD DEGRADADA ({detection_ratio:.0%})")
     if not alignment_ok:
         warnings.append("ALIGN FALLBACK")
     if not warnings:
