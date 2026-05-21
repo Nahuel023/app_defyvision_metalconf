@@ -296,6 +296,8 @@ class ScannerController:
         Llamar una vez tras conectar el PLC."""
         with self._lock:
             state = self._state
+        # Backlight siempre ON al iniciar para que la cámara sea visible
+        self._io.write(f"{self._id}.backlight", True)
         if state == ScannerState.IDLE:
             self._set_lights(blue=True)
         elif state == ScannerState.RUNNING:
