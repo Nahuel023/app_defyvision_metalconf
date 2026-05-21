@@ -58,10 +58,17 @@ models:
     edge_margin_px: 25.0
     pattern_edge_margin_px: 25.0
     # Número máximo de agujeros faltantes permitidos antes de declarar NOK.
-    # Patrón 233 agujeros; material bueno en movimiento → missing 0-67 (mediana 40).
-    # Max streak NOK con threshold=30 en grabación buena = 27 frames (< 60 umbral).
-    # Punzón roto (+~29 missing) convierte >99% de frames en NOK → FAULT en ~30 s.
-    grid_max_missing: 30
+    # Patrón 258 agujeros; frames buenos (tol=12) → missing 16-29, blur → 30-38.
+    # Con 35 se absorben picos de blur sin comprometer detección de punzón roto.
+    grid_max_missing: 35
+    # Filtro bbox: descartar detecciones fuera del bounding box del patrón esperado
+    # antes del matching. Elimina agujeros reales del material fuera de la ventana
+    # del patrón y reduce el conteo de 'extra'. Margen en px alrededor del bbox.
+    bbox_filter_margin_px: 20.0
+    # Umbral de calidad de captura (0.0 = deshabilitado). Si detection_ratio cae
+    # por debajo de este valor sin llegar a DETECCION_BAJA, se marca CALIDAD_DEGRADADA
+    # en el overlay y en el log (no fuerza NOK). Útil para detectar blur de movimiento.
+    quality_ratio_min: 0.0
     # Frames consecutivos NOK para declarar FAULT. Max streak en material bueno
     # (blur de movimiento) = 27; punzón roto → racha sostenida >> 40.
     consecutive_nok_frames: 40

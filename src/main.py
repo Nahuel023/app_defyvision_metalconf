@@ -181,6 +181,8 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
             warn += " DETECCION_BAJA"
         if not result.alignment_ok:
             warn += " ALIGN_FALLBACK"
+        if result.capture_quality_degraded:
+            warn += " CALIDAD_DEGRADADA"
         print(
             f"  {result.image_path.name}: {result.status}/{temporal.decision_status}"
             f"  streak={temporal.nok_streak}"
