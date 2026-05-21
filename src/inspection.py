@@ -228,11 +228,20 @@ def _inspect_bgr(
     )
     final_status = "NOK" if (report.status == "NOK" or centering_nok) else report.status
 
-    overlay = draw_compare_overlay(img, holes, report.missing_points, final_status,
-                                   extra_points=report.extra_points)
+    # Draw annotations on the ROI image (hole coords are in ROI space)
+    overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
+                                       extra_points=report.extra_points)
     if centering is not None:
-        overlay = draw_centering_overlay(overlay, centering, tag_nok=centering_nok)
-    overlay = _draw_warnings(overlay, detection_ratio, alignment_ok, min_detection_ratio)
+        overlay_roi = draw_centering_overlay(overlay_roi, centering, tag_nok=centering_nok)
+    overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok, min_detection_ratio)
+
+    # Composite annotated ROI onto the full aligned frame so the overlay shows
+    # the complete image without any crop
+    overlay = img_aligned.copy()
+    if roi is not None:
+        overlay[roi.y:roi.y + roi.h, roi.x:roi.x + roi.w] = overlay_roi
+    else:
+        overlay = overlay_roi
 
     return InspectionResult(
         model=model,
