@@ -59,6 +59,7 @@ class ScannerController:
             insp_cfg.get("consecutive_nok_frames",
                          tols["consecutive_nok_frames"])
         )
+        self._low_quality_max_streak = int(tols.get("low_quality_max_streak", 10))
         self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
@@ -71,6 +72,7 @@ class ScannerController:
         self._state      = ScannerState.IDLE
         self._mode       = OperationMode.MANUAL
         self._nok_streak = 0
+        self._lq_streak  = 0
         self._last_result: Optional[InspectionResult] = None
 
         # Métricas de sesión (resetean en start())
@@ -121,6 +123,7 @@ class ScannerController:
 
         with self._lock:
             self._nok_streak              = 0
+            self._lq_streak               = 0
             self._total_inspections       = 0
             self._ok_count                = 0
             self._nok_count               = 0
@@ -210,6 +213,7 @@ class ScannerController:
                 return False
             self._mode                    = OperationMode.AUTO
             self._nok_streak              = 0
+            self._lq_streak               = 0
             self._total_inspections       = 0
             self._ok_count                = 0
             self._nok_count               = 0
@@ -537,14 +541,27 @@ class ScannerController:
             self._total_detection_ratio += getattr(result, "detection_ratio", 1.0)
             if not getattr(result, "alignment_ok", True):
                 self._align_fail_count += 1
-            if result.status == "NOK":
-                self._nok_streak += 1
-                self._nok_count  += 1
-                self._total_missing    += result.report.missing
-                self._nok_with_missing += 1
+
+            frame_quality = getattr(result, "frame_quality", "GOOD")
+            if frame_quality == "LOW_QUALITY":
+                # Hold: frame borroso/degradado no incrementa ni resetea la racha NOK.
+                self._lq_streak += 1
+                if self._low_quality_max_streak > 0 and self._lq_streak >= self._low_quality_max_streak:
+                    # Demasiados frames de baja calidad seguidos → resetear racha
+                    self._nok_streak = 0
+                    self._lq_streak  = 0
+                # Los contadores de ok/nok no se actualizan para frames de baja calidad
             else:
-                self._nok_streak = 0
-                self._ok_count  += 1
+                self._lq_streak = 0
+                if result.status == "NOK":
+                    self._nok_streak += 1
+                    self._nok_count  += 1
+                    self._total_missing    += result.report.missing
+                    self._nok_with_missing += 1
+                else:
+                    self._nok_streak = 0
+                    self._ok_count  += 1
+
             streak = self._nok_streak
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak

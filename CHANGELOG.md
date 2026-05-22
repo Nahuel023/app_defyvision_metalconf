@@ -649,6 +649,9 @@ Análisis de falsos missing en modelo_B/scanner_1. Grabación `20260519_121741` 
 Síntoma: cruces rojas en agujeros físicamente presentes, concentradas en borde derecho/inferior.
 Causa raíz: fase global X/Y no compensa tilt/perspectiva/curvatura local del material.
 
+Segunda parte: implementación del sistema de calidad de frame (blur/degradación) con política
+"hold" en la decisión temporal — frames de baja calidad no incrementan ni resetean la racha NOK.
+
 **Commits de esta sesión:**
 - (este commit)
 
@@ -736,6 +739,68 @@ los frames buenos tienen missing≈0-5, no 16-29 (que era con tol=12 sin affine)
 
 ---
 
+#### Cambio 23 — Sistema de calidad de frame: blur_score + política "hold" temporal
+
+**Motivación:** Frames con imagen degradada (blur de movimiento, inestabilidad óptica)
+producían falsas alarmas NOK. Estos frames tienen evidencia visual débil y no deberían
+tener el mismo peso que frames nítidos en la decisión temporal de FAULT.
+
+**Principio:** Si el frame es LOW_QUALITY → "hold": no incrementar NI resetear la racha NOK.
+Si hay demasiados frames LOW_QUALITY consecutivos (≥`low_quality_max_streak`) → resetear
+racha para evitar que un sensor degradado bloquee permanentemente la detección de FAULT.
+
+**Implementación:**
+
+**`src/inspection.py`:**
+- `InspectionResult` agrega:
+  - `blur_score: float = 0.0` — varianza del Laplaciano sobre la ROI (mayor = más nítido)
+  - `frame_quality: str = "GOOD"` — `"GOOD"` | `"LOW_QUALITY"`
+- `_inspect_bgr()`:
+  - Calcula `blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()` sobre el frame post-ROI
+  - Clasifica `frame_quality = "LOW_QUALITY"` si `blur_score_min > 0` y `blur_score < blur_score_min`
+  - Lee nuevo param `blur_score_min` (por defecto 0.0 = deshabilitado)
+  - Pasa `frame_quality` a `_draw_warnings()` → badge "CALIDAD BAJA" en overlay
+- `_draw_warnings()` agrega param `frame_quality: str = "GOOD"` → muestra "CALIDAD BAJA"
+- `_apply_temporal_rule()`:
+  - Nuevo param `low_quality_max_streak: int = 10`
+  - Frames LOW_QUALITY: incrementa `lq_streak`, no toca `streak` (hold)
+  - Si `lq_streak >= low_quality_max_streak`: resetea ambos streaks
+  - `TemporalFrameResult` agrega campo `low_quality_streak: int = 0`
+- `FolderInspectionSummary` agrega `low_quality: int = 0`, `max_low_quality_streak: int = 0`
+- `inspect_folder()` pasa `low_quality_max_streak` a `_apply_temporal_rule()` y actualiza el summary
+
+**`src/controller/scanner_controller.py`:**
+- `__init__()`: carga `low_quality_max_streak` desde tolerancias; inicializa `_lq_streak = 0`
+- `start()` y `start_simulate()`: resetean `_lq_streak = 0` junto con `_nok_streak`
+- `_handle_result()`: aplica política "hold" en tiempo real:
+  - Si `frame_quality == "LOW_QUALITY"`: incrementa `_lq_streak`, no modifica `_nok_streak`
+    - Si `_lq_streak >= _low_quality_max_streak`: resetea ambos streaks
+    - No actualiza contadores `ok_count` / `nok_count` para estos frames
+  - Si `"GOOD"`: resetea `_lq_streak`, aplica lógica normal (NOK+=1 o reset)
+
+**`src/utils/config.py`:**
+- `DEFAULT_TOLERANCES` agrega:
+  - `"blur_score_min": 0.0` — 0 = deshabilitado; >0 = umbral de varianza del Laplaciano
+  - `"low_quality_max_streak": 10` — frames LOW_QUALITY consecutivos antes de resetear racha
+
+**`scripts/_debug_blur_score.py`** (nuevo):
+- Diagnóstico de calibración: muestra distribución del `blur_score` por frame en una carpeta.
+- Incluye histograma y los 10 frames más borrosos. Ayuda a elegir `blur_score_min`.
+
+**Nota sobre calibración del blur_score:**
+- Para la grabación `20260519_121741` con backlight: blur_score en rango 4.1–6.3 en TODOS los frames.
+- La imagen binaria (backlight muy contrastado) reduce la varianza del Laplaciano absoluta.
+- Para esta grabación `blur_score_min = 0.0` (deshabilitado) es la configuración correcta.
+- Calibrar en planta con frames de material en movimiento real (sin backlight temporizado).
+- Valores esperados para material con blur real: < 100. Frames nítidos: >> 200.
+
+**Resultado:**
+- Grabación 20260519_121741: 185/185 OK, 0 temporal NOK, 0 frames LOW_QUALITY ✓
+- Política hold correctamente wired en FSM del scanner y en inspect_folder()
+- `blur_score_min = 0.0` en config global y modelo_B → deshabilitado hasta calibración
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -749,6 +814,7 @@ los frames buenos tienen missing≈0-5, no 16-29 (que era con tol=12 sin affine)
 | Extra detections | Detectadas y visibles (diamantes naranjas) en overlay; filtro bbox activo |
 | Centrado de chapa | Medición de offset lateral siempre activa. `center_offset_tol_px=0` (sin NOK por centrado). |
 | Detection ratio | Por frame y promedio de sesión. Flag `CALIDAD_DEGRADADA` configurable. |
+| Frame quality | `blur_score` (Laplacian var) + `frame_quality` en InspectionResult. `blur_score_min=0.0` (deshabilitado). Política "hold" wired en FSM y inspect_folder(). |
 | modelo_B — ROI | `x=710, w=650, y=3, h=1077` → excluye backlight desnudo en ambos lados |
 | modelo_B — Grid | dx=28, dy=22, 258 células. Fase X+Y 2D + affine local post-fase. |
 | modelo_B — Tolerancia | `tol_xy_px=22`, `min_area=250`, `grid_max_missing=35`, `bbox_filter_margin=20` |
@@ -777,6 +843,11 @@ los frames buenos tienen missing≈0-5, no 16-29 (que era con tol=12 sin affine)
     por el mismo detected cuando el agujero está entre dos filas adyacentes.
   - Greedy closest-first no puede resolver esto. Hungarian matching sí.
   - Impacto estimado: ↓9 missing en frame_0036 (24→15).
+- **Calibrar `blur_score_min`:**
+  - Capturar frames con blur real de movimiento y frames nítidos en producción
+  - Correr `scripts/_debug_blur_score.py <carpeta>` para ver la distribución
+  - Elegir umbral en p10-p25 de los frames borrosos (valor inicial estimado: ~50-100)
+  - Para backlight siempre encendido: medir con material en movimiento a velocidad real
 - **Activar `quality_ratio_min`:**
   - Calibrar en planta: medir el ratio promedio en operación normal vs blur de movimiento
 
