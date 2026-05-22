@@ -47,7 +47,50 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 #### Contexto de la sesión
 Continuación de sesión 2026-05-21. Sistema estable en 185/185 OK con grabación de referencia.
-Trabajo en mejoras visuales del overlay de centrado.
+Trabajo en mejoras visuales del overlay de centrado y rediseño del tab de grabación.
+
+---
+
+#### Cambio 27 — Rediseño tab Grabación: estética industrial + exportación de imágenes
+
+**Motivación:** El tab de Grabación en la UI de Servicio tenía controles apilados en una sola
+fila horizontal, sin jerarquía visual, sin indicador de estado claro y sin forma de guardar
+las imágenes analizadas.
+
+**Decisión:**
+- Rediseño completo de `RecordingTab` en `src/ui/service.py` con layout industrial oscuro
+- Separación clara en 3 secciones: GRABACIÓN / ANÁLISIS / NAVEGADOR DE CAPTURAS
+- Panel de estado de grabación prominente (badge con estado+count+carpeta)
+- Navegación con botones primero/último, contador de frame grande y legible
+- Toggle de overlay con estilo ON/OFF coloreado
+- Nuevo sistema de exportación: guardar frame actual (auto a data/output/export/)
+  y exportar rango de frames (spinbox Desde/Hasta → carpeta con timestamp)
+
+**Archivos modificados:**
+- `src/ui/service.py`:
+  - Añadido `QFrame` a imports (necesario para separadores horizontales/verticales)
+  - `RecordingTab` completamente reescrito:
+    - `_build_recording_section()`: config row + action row con badge de estado
+    - `_build_analysis_section()`: botones + progress + resumen coloreado
+    - `_build_browser_section()`: nav (primero/último), toggle overlay coloreado,
+      fila de exportación (guardar actual + rango con spinboxes)
+    - `_set_rec_badge()`: actualiza badge STANDBY/GRABANDO/LISTO/ANALIZANDO/ANALIZADO
+    - `_save_current_frame()`: auto-save overlay → data/output/export/{ts}.png
+    - `_export_range()`: exporta frames f_from..f_to → data/output/export/rango_{ts}/
+    - `_update_export_range_max()`: sincroniza spinboxes al cargar/grabar frames
+    - `_update_export_label()`: actualiza texto del botón exportar con cantidad
+    - `_on_overlay_toggled()`: toggle ON/OFF con texto dinámico
+    - `_hline()`, `_vline()`, `_lbl()`, `_make_combo()`: helpers de UI
+    - `_mk_btn()` ahora acepta parámetros h/fs/w para mayor flexibilidad
+  - Funcionalidades existentes 100% preservadas (grabación, análisis, carga de carpeta,
+    análisis en vivo, info de cámara, resumen temporal)
+
+**Nuevo flujo de exportación:**
+- Frame actual: botón "Guardar frame actual" (habilitado solo si hay resultado)
+  → guarda `frame_NNNN_STATUS_YYYYMMDDHHMMSS.png` en `data/output/export/`
+- Rango: spinboxes Desde/Hasta + botón "Exportar N frames"
+  → crea `data/output/export/rango_YYYYMMDDHHMMSS/` con todos los overlays del rango
+  → habilitado solo cuando el análisis cubre el rango completo seleccionado
 
 ---
 
