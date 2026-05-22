@@ -273,9 +273,11 @@ def _inspect_bgr(
         and detection_ratio >= min_detection_ratio
     )
 
-    # Centering check: measure lateral offset of holes relative to sheet edges
+    # Centering check: measure lateral offset of holes relative to sheet edges.
+    # Pass the full-frame aligned image so search windows can see the backlights
+    # (which are outside the ROI crop and would be invisible in `img`).
     center_offset_tol_px = float(tolerances.get("center_offset_tol_px", 0.0))
-    centering = compute_centering(img, holes, tol_px=center_offset_tol_px)
+    centering = compute_centering(img_aligned, holes, roi=roi, tol_px=center_offset_tol_px)
     centering_nok = (
         centering is not None
         and not centering.within_tol
