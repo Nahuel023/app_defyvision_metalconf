@@ -108,31 +108,38 @@ def draw_centering_overlay(
     centering: "CenteringResult",
     tag_nok: bool = False,
 ) -> np.ndarray:
-    """Draw metal edge lines, center lines, and offset annotation.
+    """Draw metal edge lines, pattern bound lines, center lines, and margin annotation.
 
     tag_nok: when True, draws a prominent DESCENTRADO badge on the frame.
     """
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
-    lx = int(round(centering.left_x))
-    rx = int(round(centering.right_x))
-    cx = int(round(centering.sheet_center_x))
-    hx = int(round(centering.holes_center_x))
+    lx  = int(round(centering.left_x))
+    rx  = int(round(centering.right_x))
+    cx  = int(round(centering.sheet_center_x))
+    hx  = int(round(centering.holes_center_x))
+    plx = int(round(centering.pattern_left_x))
+    prx = int(round(centering.pattern_right_x))
 
     # Metal edges: light gray semi-transparent vertical lines
     _draw_transparent_line(out, (lx, 0), (lx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
     _draw_transparent_line(out, (rx, 0), (rx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
+
+    # Pattern bounds: thin yellow dashed lines (izquierdo y derecho del patrón detectado)
+    _pat_color = (50, 220, 255)   # amarillo-cyan
+    for y in range(0, h, 20):
+        cv2.line(out, (plx, y), (plx, min(y + 12, h - 1)), _pat_color, 1)
+        cv2.line(out, (prx, y), (prx, min(y + 12, h - 1)), _pat_color, 1)
 
     # Sheet center: orange dashed line
     for y in range(0, h, 20):
         cv2.line(out, (cx, y), (cx, min(y + 10, h - 1)), (0, 165, 255), 2)
 
     # Holes center: white line
-    cv2.line(out, (hx, 0), (hx, h - 1), (255, 255, 255), 2)
+    cv2.line(out, (hx, 0), (hx, h - 1), (255, 255, 255), 1)
 
     # Offset arrow from sheet center to holes center
-    offset = centering.offset_px
     color = (0, 200, 0) if centering.within_tol else (0, 0, 255)
     mid_y = h // 2
     if abs(hx - cx) >= 3:
@@ -140,11 +147,14 @@ def draw_centering_overlay(
     else:
         cv2.circle(out, (cx, mid_y), 6, (0, 200, 0), -1)
 
-    sign = "+" if offset >= 0 else ""
-    cv2.putText(out, f"Centro: {sign}{offset:.1f}px", (10, h - 45),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
-    cv2.putText(out, f"Ancho: {centering.sheet_width_px:.0f}px", (10, h - 15),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
+    # Text: left margin, right margin, offset
+    sign = "+" if centering.offset_px >= 0 else ""
+    lm = centering.left_margin_px
+    rm = centering.right_margin_px
+    cv2.putText(out, f"Izq: {lm:.0f}px  Der: {rm:.0f}px",
+                (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
+    cv2.putText(out, f"Offset: {sign}{centering.offset_px:.1f}px",
+                (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
 
     # Prominent DESCENTRADO badge when centering triggered NOK
     if tag_nok:
@@ -152,7 +162,6 @@ def draw_centering_overlay(
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale, thick = 1.1, 3
         (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
-        # Badge background: semi-transparent red rectangle
         bx1, by1 = w // 2 - tw // 2 - 8, 105
         bx2, by2 = w // 2 + tw // 2 + 8, 105 + th + baseline + 10
         cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 180), -1)

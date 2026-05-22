@@ -654,6 +654,7 @@ Segunda parte: implementación del sistema de calidad de frame (blur/degradació
 
 **Commits de esta sesión:**
 - `142061f` — Calidad de frame: blur_score + política hold temporal
+- `aed010f` — edge_margin_px 25→5 en modelo_B
 - (este commit)
 
 ---
@@ -837,6 +838,53 @@ Frames críticos verificados:
 
 ---
 
+#### Cambio 25 — Márgenes laterales del patrón respecto a la chapa
+
+**Motivación:** La métrica `offset_px` (diferencia de centros) no permitía saber cuánto espacio
+real queda entre el patrón punzonado y cada borde de la chapa. Se quería conocer las dos
+distancias independientes: margen izquierdo y margen derecho, para detectar si el patrón
+está corrido hacia un lado aunque el offset total sea pequeño.
+
+**Nuevas métricas en `CenteringResult`:**
+- `pattern_left_x` — borde físico izquierdo del patrón detectado: `min(hole.x - hole.r)`
+- `pattern_right_x` — borde físico derecho: `max(hole.x + hole.r)`
+- `left_margin_px` — espacio entre borde izquierdo de chapa y borde izquierdo del patrón
+- `right_margin_px` — espacio entre borde derecho del patrón y borde derecho de la chapa
+- `margin_delta_px = left_margin_px - right_margin_px` (>0 = más margen a la izquierda = patrón corrido a la derecha)
+- `offset_px = margin_delta_px / 2` (redefinido; antes era `holes_center_x - sheet_center_x`)
+
+**Cambio de firma en `compute_centering()`:**
+- Antes: `holes_xs: Sequence[float]` (solo coordenadas X)
+- Ahora: `holes: Sequence` (objetos `Hole` con `.x` y `.r`) — permite calcular los extremos físicos del patrón
+
+**Archivos modificados:**
+
+`src/pipeline/edge_centering.py`:
+- `CenteringResult` agrega 5 campos nuevos: `pattern_left_x`, `pattern_right_x`, `left_margin_px`, `right_margin_px`, `margin_delta_px`
+- `compute_centering()` acepta `holes` (Hole objects) en lugar de `holes_xs`
+- `offset_px` ahora es `margin_delta_px / 2` (más significativo físicamente)
+
+`src/inspection.py`:
+- Llamada a `compute_centering()` pasa `holes` directamente (antes `[h.x for h in holes]`)
+
+`src/pipeline/annotate.py` — `draw_centering_overlay()`:
+- Dibuja dos líneas punteadas amarillo-cyan para los extremos físicos del patrón (`pattern_left_x`, `pattern_right_x`)
+- Texto inferior reemplazado: `Izq: XXpx  Der: YYpx` + `Offset: +/-ZZpx`
+- Se eliminó el texto "Ancho: XXXpx" (redundante con la visualización)
+
+`src/ui/operator.py` — card "CENTRADO":
+- Muestra dos líneas: `I: XXpx  D: YYpx` + `Offset: +/-ZZpx`
+- Font reducida a 11px para acomodar el contenido compacto
+
+**Validación (grabación 20260519_121741, 185 frames):**
+- 185/185 OK, 0 temporal NOK ✓
+- Centering disponible en 185/185 frames
+- Izq: mediana=176px (rango 163–188px)
+- Der: mediana=158px (rango 137–163px)
+- Offset: mediana=+9px (patrón levemente corrido a la derecha, consistente en todos los frames)
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -848,7 +896,7 @@ Frames críticos verificados:
 | Visor modo servicio | ZoomableImageView: zoom (rueda), pan (drag), fit (doble click / botón) + scroll |
 | Overlay | Imagen completa del frame. Cruz roja=missing, diamante naranja=extra, línea cyan=near-miss |
 | Extra detections | Detectadas y visibles (diamantes naranjas) en overlay; filtro bbox activo |
-| Centrado de chapa | Medición de offset lateral siempre activa. `center_offset_tol_px=0` (sin NOK por centrado). |
+| Centrado de chapa | Márgenes Izq/Der + offset. `left_margin≈176px`, `right_margin≈158px`, `offset≈+9px` en grabación de referencia. `center_offset_tol_px=0` (sin NOK). |
 | Detection ratio | Por frame y promedio de sesión. Flag `CALIDAD_DEGRADADA` configurable. |
 | Frame quality | `blur_score` (Laplacian var) + `frame_quality` en InspectionResult. `blur_score_min=0.0` (deshabilitado). Política "hold" wired en FSM y inspect_folder(). |
 | modelo_B — ROI | `x=710, w=650, y=3, h=1077` → excluye backlight desnudo en ambos lados |

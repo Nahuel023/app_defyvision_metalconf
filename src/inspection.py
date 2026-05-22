@@ -275,7 +275,7 @@ def _inspect_bgr(
 
     # Centering check: measure lateral offset of holes relative to sheet edges
     center_offset_tol_px = float(tolerances.get("center_offset_tol_px", 0.0))
-    centering = compute_centering(img, [h.x for h in holes], tol_px=center_offset_tol_px)
+    centering = compute_centering(img, holes, tol_px=center_offset_tol_px)
     centering_nok = (
         centering is not None
         and not centering.within_tol
