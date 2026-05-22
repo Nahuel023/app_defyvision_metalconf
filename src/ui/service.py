@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFormLayout,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -1029,224 +1030,338 @@ class RecordingTab(QWidget):
 
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
-
         self._build_ui()
 
     # ------------------------------------------------------------------
-    # UI
+    # UI construction
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # Contenedor scrollable: permite bajar para ver la imagen más grande
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
-        outer.addWidget(scroll_area)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+        outer.addWidget(scroll)
 
         container = QWidget()
-        scroll_area.setWidget(container)
+        scroll.setWidget(container)
 
         root = QVBoxLayout(container)
-        root.setContentsMargins(12, 12, 12, 12)
+        root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
 
-        # ── Control bar ───────────────────────────────────────────────
-        ctrl = QGroupBox("Control de grabación")
-        ctrl.setStyleSheet(self._grp_style())
-        ctrl_lay = QHBoxLayout(ctrl)
-        ctrl_lay.setSpacing(10)
-        ctrl_lay.setContentsMargins(12, 14, 12, 10)
+        root.addWidget(self._build_recording_section())
+        root.addWidget(self._build_analysis_section())
+        root.addWidget(self._build_browser_section(), stretch=1)
 
-        lbl_sc = QLabel("Scanner:")
-        lbl_sc.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        ctrl_lay.addWidget(lbl_sc)
-
-        self._scanner_combo = QComboBox()
-        self._scanner_combo.addItems(self._system.scanner_ids())
-        self._scanner_combo.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 6px;font-size:11px;min-width:90px;"
-        )
-        ctrl_lay.addWidget(self._scanner_combo)
-
-        lbl_model = QLabel("Modelo:")
-        lbl_model.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        ctrl_lay.addWidget(lbl_model)
-
-        self._model_combo = QComboBox()
-        self._model_combo.addItems(DISPLAY_NAMES)
-        self._model_combo.setStyleSheet(
-            f"background:{_DARK};color:{_ACCENT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 6px;font-size:11px;font-weight:700;min-width:130px;"
-        )
-        # Sync default selection with scanner's configured model
-        default_sids = self._system.scanner_ids()
-        if default_sids:
-            _init_model = self._system.io.scanner_config(default_sids[0]).get("model", "")
-            if _init_model:
-                self._model_combo.setCurrentText(to_display(_init_model))
-        ctrl_lay.addWidget(self._model_combo)
-
-        self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
-
-        lbl_fps = QLabel("FPS captura:")
-        lbl_fps.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        ctrl_lay.addWidget(lbl_fps)
-
-        self._fps_spin = QSpinBox()
-        self._fps_spin.setRange(1, 60)
-        self._fps_spin.setValue(10)
-        self._fps_spin.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 6px;font-size:11px;max-width:60px;"
-        )
-        ctrl_lay.addWidget(self._fps_spin)
-
-        ctrl_lay.addSpacing(12)
-
-        self._live_chk = QCheckBox("Análisis en vivo")
-        self._live_chk.setChecked(False)
-        self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:11px;")
-        ctrl_lay.addWidget(self._live_chk)
-
-        ctrl_lay.addSpacing(8)
-
-        self._btn_start = self._mk_btn("▶  Iniciar grabación", "#166534")
-        self._btn_stop  = self._mk_btn("■  Detener",           "#7f1d1d")
-        self._btn_stop.setEnabled(False)
-        ctrl_lay.addWidget(self._btn_start)
-        ctrl_lay.addWidget(self._btn_stop)
-
-        ctrl_lay.addSpacing(16)
-
-        self._frame_lbl = QLabel("0 frames")
-        self._frame_lbl.setStyleSheet(
-            f"color:{_ACCENT};font-size:13px;font-weight:700;"
-        )
-        ctrl_lay.addWidget(self._frame_lbl)
-        ctrl_lay.addStretch()
-
-        self._status_lbl = QLabel("Listo")
-        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        ctrl_lay.addWidget(self._status_lbl)
-
-        root.addWidget(ctrl)
-
-        # ── Camera panel ──────────────────────────────────────────────
-        cam_grp = QGroupBox("Cámara")
-        cam_grp.setStyleSheet(self._grp_style())
-        cam_lay = QHBoxLayout(cam_grp)
-        cam_lay.setSpacing(10)
-        cam_lay.setContentsMargins(12, 14, 12, 10)
-
-        self._btn_read_cam = self._mk_btn("↻  Leer cámara", "#374151")
-        cam_lay.addWidget(self._btn_read_cam)
-
-        cam_lay.addSpacing(16)
-
-        self._cam_info_lbl = QLabel("—")
-        self._cam_info_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
-        )
-        cam_lay.addWidget(self._cam_info_lbl)
-
-        cam_lay.addStretch()
-
-        root.addWidget(cam_grp)
-
-        # ── Analysis bar ──────────────────────────────────────────────
-        ana = QGroupBox("Análisis")
-        ana.setStyleSheet(self._grp_style())
-        ana_lay = QHBoxLayout(ana)
-        ana_lay.setSpacing(10)
-        ana_lay.setContentsMargins(12, 14, 12, 10)
-
-        self._btn_load = self._mk_btn("📂  Abrir grabación", "#374151")
-        ana_lay.addWidget(self._btn_load)
-
-        self._btn_analyze = self._mk_btn("⚙  Analizar grabación", "#0f4c81")
-        self._btn_analyze.setEnabled(False)
-        ana_lay.addWidget(self._btn_analyze)
-
-        ana_lay.addSpacing(16)
-        self._ana_progress = QLabel("")
-        self._ana_progress.setStyleSheet(f"color:{_MUTED};font-size:11px;")
-        ana_lay.addWidget(self._ana_progress)
-
-        ana_lay.addStretch()
-
-        self._stats_lbl = QLabel("")
-        self._stats_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
-        ana_lay.addWidget(self._stats_lbl)
-
-        ana_lay.addSpacing(12)
-
-        self._summary_lbl = QLabel("")
-        self._summary_lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;font-weight:600;")
-        ana_lay.addWidget(self._summary_lbl)
-
-        root.addWidget(ana)
-
-        # ── Browser ───────────────────────────────────────────────────
-        browser = QGroupBox("Navegador de capturas")
-        browser.setStyleSheet(self._grp_style())
-        brow_lay = QVBoxLayout(browser)
-        brow_lay.setContentsMargins(12, 14, 12, 10)
-        brow_lay.setSpacing(8)
-
-        # Nav buttons row
-        nav_row = QHBoxLayout()
-        self._btn_prev = self._mk_btn("◀  Anterior", "#334155")
-        self._btn_next = self._mk_btn("Siguiente  ▶", "#334155")
-        self._nav_lbl  = QLabel("—")
-        self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._nav_lbl.setStyleSheet(f"color:{_TEXT};font-size:11px;min-width:160px;")
-        self._overlay_toggle = QPushButton("Ver overlay")
-        self._overlay_toggle.setCheckable(True)
-        self._overlay_toggle.setChecked(True)
-        self._overlay_toggle.setFixedHeight(28)
-        self._overlay_toggle.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;font-size:11px;padding:0 10px;border:none;"
-            "checked: background:#1e3a5f;"
-        )
-        self._overlay_toggle.toggled.connect(lambda _: self._show_frame(self._current_idx))
-
-        self._btn_fit = self._mk_btn("Ajustar", "#1e40af")
-
-        for w in (self._btn_prev, self._nav_lbl, self._btn_next,
-                  self._overlay_toggle, self._btn_fit):
-            nav_row.addWidget(w)
-        nav_row.addStretch()
-
-        self._result_lbl = QLabel("")
-        self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;")
-        nav_row.addWidget(self._result_lbl)
-        brow_lay.addLayout(nav_row)
-
-        # Image display — zoomable/pannable viewer
-        self._img_view = ZoomableImageView("Sin frames")
-        self._img_view.setMinimumHeight(640)
-        brow_lay.addWidget(self._img_view, stretch=1)
-
-        root.addWidget(browser, stretch=1)
-
-        # ── Signal wiring ─────────────────────────────────────────────
+        # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
         self._btn_stop.clicked.connect(self._on_stop)
         self._btn_load.clicked.connect(self._on_load_recording)
         self._btn_analyze.clicked.connect(self._on_analyze)
         self._btn_read_cam.clicked.connect(self._refresh_cam_info)
+        self._btn_first.clicked.connect(lambda: self._show_frame(0))
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
+        self._btn_last.clicked.connect(lambda: self._show_frame(len(self._frame_paths) - 1))
         self._btn_fit.clicked.connect(self._img_view.fit)
+        self._btn_save_current.clicked.connect(self._save_current_frame)
+        self._btn_export.clicked.connect(self._export_range)
+        self._spin_from.valueChanged.connect(self._update_export_label)
+        self._spin_to.valueChanged.connect(self._update_export_label)
+        self._overlay_toggle.toggled.connect(self._on_overlay_toggled)
 
         self._update_nav_state()
+        self._set_rec_badge("standby", 0, None)
+
+    def _build_recording_section(self) -> QGroupBox:
+        grp = QGroupBox("GRABACIÓN")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(12)
+
+        # ── Config row ────────────────────────────────────────────────
+        cfg = QHBoxLayout()
+        cfg.setSpacing(10)
+
+        cfg.addWidget(self._lbl("Scanner:"))
+        self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=90)
+        self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+        cfg.addWidget(self._scanner_combo)
+
+        cfg.addSpacing(6)
+        cfg.addWidget(self._lbl("Modelo:"))
+        self._model_combo = QComboBox()
+        self._model_combo.addItems(DISPLAY_NAMES)
+        self._model_combo.setStyleSheet(
+            f"background:{_DARK};color:{_ACCENT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 10px;font-size:12px;font-weight:700;min-width:150px;"
+        )
+        sids = self._system.scanner_ids()
+        if sids:
+            _m = self._system.io.scanner_config(sids[0]).get("model", "")
+            if _m:
+                self._model_combo.setCurrentText(to_display(_m))
+        cfg.addWidget(self._model_combo)
+
+        cfg.addSpacing(6)
+        cfg.addWidget(self._lbl("FPS:"))
+        self._fps_spin = QSpinBox()
+        self._fps_spin.setRange(1, 60)
+        self._fps_spin.setValue(10)
+        self._fps_spin.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 6px;font-size:12px;max-width:66px;"
+        )
+        cfg.addWidget(self._fps_spin)
+
+        cfg.addSpacing(14)
+        self._live_chk = QCheckBox("Análisis en vivo")
+        self._live_chk.setChecked(False)
+        self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        cfg.addWidget(self._live_chk)
+
+        cfg.addStretch()
+
+        # Camera info inline (right side)
+        self._btn_read_cam = QPushButton("↻  Cámara")
+        self._btn_read_cam.setFixedHeight(28)
+        self._btn_read_cam.setStyleSheet(
+            f"background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:10px;font-weight:600;padding:0 12px;"
+        )
+        cfg.addWidget(self._btn_read_cam)
+
+        self._cam_info_lbl = QLabel("—")
+        self._cam_info_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
+        )
+        cfg.addWidget(self._cam_info_lbl)
+
+        lay.addLayout(cfg)
+
+        # ── Action row: buttons + state badge ────────────────────────
+        act = QHBoxLayout()
+        act.setSpacing(10)
+
+        self._btn_start = self._mk_btn("▶   INICIAR GRABACIÓN", "#166534", h=40, fs=13)
+        self._btn_stop  = self._mk_btn("■   DETENER",           "#7f1d1d", h=40, fs=13)
+        self._btn_stop.setEnabled(False)
+        act.addWidget(self._btn_start)
+        act.addWidget(self._btn_stop)
+        act.addStretch()
+
+        # State badge — prominent indicator panel
+        badge = QFrame()
+        badge.setStyleSheet(
+            f"QFrame {{ background:{_DARK};border:1px solid {_BORDER};border-radius:10px; }}"
+        )
+        badge_lay = QVBoxLayout(badge)
+        badge_lay.setContentsMargins(20, 10, 20, 10)
+        badge_lay.setSpacing(2)
+        badge_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self._rec_state_lbl = QLabel("● STANDBY")
+        self._rec_state_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rec_state_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:13px;font-weight:700;"
+            "letter-spacing:3px;background:transparent;"
+        )
+        self._rec_count_lbl = QLabel("0 FRAMES")
+        self._rec_count_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rec_count_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:26px;font-weight:700;"
+            "letter-spacing:1px;background:transparent;"
+        )
+        self._rec_folder_lbl = QLabel("—")
+        self._rec_folder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rec_folder_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:9px;font-family:Consolas;background:transparent;"
+        )
+        badge_lay.addWidget(self._rec_state_lbl)
+        badge_lay.addWidget(self._rec_count_lbl)
+        badge_lay.addWidget(self._rec_folder_lbl)
+        act.addWidget(badge)
+
+        lay.addLayout(act)
+        return grp
+
+    def _build_analysis_section(self) -> QGroupBox:
+        grp = QGroupBox("ANÁLISIS")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(8)
+
+        # Row 1: action buttons + progress
+        row1 = QHBoxLayout()
+        row1.setSpacing(10)
+
+        self._btn_load    = self._mk_btn("📂  Abrir grabación", "#374151", h=34)
+        self._btn_analyze = self._mk_btn("⚙   Analizar",        "#0f4c81", h=34, fs=12)
+        self._btn_analyze.setEnabled(False)
+        row1.addWidget(self._btn_load)
+        row1.addWidget(self._btn_analyze)
+        row1.addSpacing(10)
+
+        self._ana_progress = QLabel("")
+        self._ana_progress.setStyleSheet(
+            f"color:{_ACCENT};font-size:12px;font-family:Consolas;font-weight:600;"
+        )
+        row1.addWidget(self._ana_progress)
+        row1.addStretch()
+
+        self._status_lbl = QLabel("Listo")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        row1.addWidget(self._status_lbl)
+
+        lay.addLayout(row1)
+
+        # Row 2: results summary
+        row2 = QHBoxLayout()
+        row2.setSpacing(16)
+
+        self._summary_lbl = QLabel("")
+        self._summary_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:12px;font-weight:700;letter-spacing:0.5px;"
+        )
+        row2.addWidget(self._summary_lbl)
+        row2.addStretch()
+
+        self._stats_lbl = QLabel("")
+        self._stats_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+        )
+        row2.addWidget(self._stats_lbl)
+
+        lay.addLayout(row2)
+        return grp
+
+    def _build_browser_section(self) -> QGroupBox:
+        grp = QGroupBox("NAVEGADOR DE CAPTURAS")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(8)
+
+        # ── Navigation row ────────────────────────────────────────────
+        nav = QHBoxLayout()
+        nav.setSpacing(6)
+
+        self._btn_first = self._mk_btn("⏮", "#1e293b", h=32, w=38)
+        self._btn_prev  = self._mk_btn("◀", "#334155", h=32, w=44)
+
+        self._nav_lbl = QLabel("—")
+        self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._nav_lbl.setMinimumWidth(150)
+        self._nav_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:14px;font-weight:700;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 14px;letter-spacing:1px;"
+        )
+
+        self._btn_next = self._mk_btn("▶", "#334155", h=32, w=44)
+        self._btn_last = self._mk_btn("⏭", "#1e293b", h=32, w=38)
+
+        self._overlay_toggle = QPushButton("● OVERLAY")
+        self._overlay_toggle.setCheckable(True)
+        self._overlay_toggle.setChecked(True)
+        self._overlay_toggle.setFixedHeight(32)
+        self._overlay_toggle.setStyleSheet(
+            f"QPushButton:checked {{ background:{_ACCENT};color:{_DARK};"
+            "border-radius:5px;font-size:11px;font-weight:700;padding:0 14px;border:none; }}"
+            f"QPushButton:!checked {{ background:{_PANEL};color:{_MUTED};"
+            "border-radius:5px;font-size:11px;font-weight:700;padding:0 14px;"
+            f"border:1px solid {_BORDER}; }}"
+        )
+
+        self._btn_fit = self._mk_btn("⊞ Ajustar", "#1e3a5f", h=32)
+
+        for w in (self._btn_first, self._btn_prev, self._nav_lbl,
+                  self._btn_next, self._btn_last):
+            nav.addWidget(w)
+        nav.addSpacing(10)
+        nav.addWidget(self._overlay_toggle)
+        nav.addWidget(self._btn_fit)
+        nav.addStretch()
+
+        self._result_lbl = QLabel("")
+        self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._result_lbl.setMinimumWidth(220)
+        self._result_lbl.setStyleSheet(f"font-size:14px;font-weight:700;color:{_MUTED};")
+        nav.addWidget(self._result_lbl)
+
+        lay.addLayout(nav)
+
+        # ── Separator ─────────────────────────────────────────────────
+        lay.addWidget(self._hline())
+
+        # ── Save / Export row ─────────────────────────────────────────
+        save = QHBoxLayout()
+        save.setSpacing(10)
+
+        self._btn_save_current = self._mk_btn("💾  Guardar frame actual", "#065f46", h=32)
+        self._btn_save_current.setEnabled(False)
+        self._btn_save_current.setToolTip(
+            "Guarda el overlay del frame actual en data/output/export/"
+        )
+        save.addWidget(self._btn_save_current)
+
+        save.addWidget(self._vline())
+
+        save.addWidget(self._lbl("Exportar rango:"))
+
+        save.addWidget(self._lbl("Desde"))
+        self._spin_from = QSpinBox()
+        self._spin_from.setRange(1, 1)
+        self._spin_from.setValue(1)
+        self._spin_from.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:3px 6px;font-size:12px;max-width:72px;"
+        )
+        save.addWidget(self._spin_from)
+
+        save.addWidget(self._lbl("hasta"))
+        self._spin_to = QSpinBox()
+        self._spin_to.setRange(1, 1)
+        self._spin_to.setValue(1)
+        self._spin_to.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:3px 6px;font-size:12px;max-width:72px;"
+        )
+        save.addWidget(self._spin_to)
+
+        save.addSpacing(4)
+        self._btn_export = self._mk_btn("⬇  Exportar 0 frames", "#1e3a5f", h=32)
+        self._btn_export.setEnabled(False)
+        self._btn_export.setToolTip(
+            "Exporta los overlays del rango seleccionado a data/output/export/"
+        )
+        save.addWidget(self._btn_export)
+
+        save.addStretch()
+
+        self._export_status_lbl = QLabel("")
+        self._export_status_lbl.setStyleSheet(
+            f"color:{_OK};font-size:10px;font-family:Consolas;"
+        )
+        save.addWidget(self._export_status_lbl)
+
+        lay.addLayout(save)
+
+        # ── Separator ─────────────────────────────────────────────────
+        lay.addWidget(self._hline())
+
+        # ── Image viewer ──────────────────────────────────────────────
+        self._img_view = ZoomableImageView("Sin frames")
+        self._img_view.setMinimumHeight(600)
+        lay.addWidget(self._img_view, stretch=1)
+
+        return grp
 
     # ------------------------------------------------------------------
     # Recording
@@ -1256,7 +1371,7 @@ class RecordingTab(QWidget):
         sid = self._scanner_combo.currentText()
         cam = self._system.camera(sid)
         if not cam.is_running:
-            self._status_lbl.setText("La cámara no está activa")
+            self._status_lbl.setText("⚠  La cámara no está activa")
             return
 
         from datetime import datetime as _dt
@@ -1269,10 +1384,11 @@ class RecordingTab(QWidget):
         self._summary_lbl.setText("")
         self._stats_lbl.setText("")
         self._ana_progress.setText("")
+        self._export_status_lbl.setText("")
         self._img_view.clear("Sin frames")
         self._update_nav_state()
+        self._update_export_range_max()
 
-        # Persist metadata alongside the frames so we can reload this recording later
         _CAM_PARAMS = [
             "focus", "exposure", "white_balance", "gain", "brightness",
             "contrast", "saturation", "sharpness", "gamma", "backlight_compensation",
@@ -1311,8 +1427,10 @@ class RecordingTab(QWidget):
         self._model_combo.setEnabled(False)
         self._fps_spin.setEnabled(False)
         self._live_chk.setEnabled(False)
+
         mode_txt = " (en vivo)" if self._live_chk.isChecked() else ""
         self._status_lbl.setText(f"Grabando{mode_txt} → {self._rec_dir.name}")
+        self._set_rec_badge("recording", 0, self._rec_dir)
         logger.info(f"[Grabación] inicio en {self._rec_dir}  modelo={meta['model_display']}  fps={meta['fps']}")
 
     def _on_stop(self) -> None:
@@ -1325,33 +1443,34 @@ class RecordingTab(QWidget):
         self._model_combo.setEnabled(True)
         self._fps_spin.setEnabled(True)
         self._live_chk.setEnabled(True)
+
         n = len(self._frame_paths)
         self._status_lbl.setText(f"Detenido — {n} frames en {self._rec_dir.name}")
-        # If live analysis was active, results are already populated; show analyze button
-        # to allow re-analysis if desired (e.g. after changing tolerances).
+        self._set_rec_badge("ready", n, self._rec_dir)
         self._btn_analyze.setEnabled(n > 0)
+        self._update_export_range_max()
         if n > 0 and not self._results:
             self._show_frame(0)
         logger.info(f"[Grabación] detenida — {n} frames")
 
     def _grab_frame(self) -> None:
         import cv2
-        sid = self._scanner_combo.currentText()
-        cam = self._system.camera(sid)
+        sid  = self._scanner_combo.currentText()
+        cam  = self._system.camera(sid)
         frame = cam.get_frame()
         if frame is None:
             return
-        idx = len(self._frame_paths)
+        idx  = len(self._frame_paths)
         path = self._rec_dir / f"frame_{idx:04d}.png"
         cv2.imwrite(str(path), frame)
         self._frame_paths.append(path)
-        self._frame_lbl.setText(f"{idx + 1} frames")
+        self._set_rec_badge("recording", idx + 1, self._rec_dir)
 
         if self._live_chk.isChecked():
             try:
                 from src.inspection import inspect_image
                 result = inspect_image(self._active_model(), path,
-                                      scanner_id=self._scanner_combo.currentText() or None)
+                                       scanner_id=self._scanner_combo.currentText() or None)
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -1370,7 +1489,9 @@ class RecordingTab(QWidget):
         self._btn_analyze.setEnabled(False)
         self._results.clear()
         self._stats_lbl.setText("")
+        self._export_status_lbl.setText("")
         self._ana_progress.setText("Analizando…")
+        self._set_rec_badge("analyzing", len(self._frame_paths), self._rec_dir)
 
         self._worker = _AnalysisWorker(
             self._active_model(), list(self._frame_paths),
@@ -1383,7 +1504,7 @@ class RecordingTab(QWidget):
         self._worker.start()
 
     def _on_ana_progress(self, done: int, total: int) -> None:
-        self._ana_progress.setText(f"Analizando {done}/{total}…")
+        self._ana_progress.setText(f"Analizando  {done} / {total}…")
 
     def _on_ana_done(self, results: list) -> None:
         self._results = results
@@ -1391,47 +1512,51 @@ class RecordingTab(QWidget):
         nok = len(results) - ok
         pct = round(100 * ok / len(results)) if results else 0
 
-        # Temporal decision (consecutive NOK rule)
         from src.inspection import _apply_temporal_rule
         from src.utils.config import load_tolerances
-        model = self._active_model()
-        tols = load_tolerances(model)
+        model  = self._active_model()
+        tols   = load_tolerances(model)
         consec = int(tols.get("consecutive_nok_frames", 5))
         temporal = _apply_temporal_rule(results, consec)
         t_ok  = sum(1 for t in temporal if t.decision_status == "OK")
         t_nok = len(temporal) - t_ok
         t_pct = round(100 * t_ok / len(temporal)) if temporal else 0
+
+        ok_color  = _OK  if ok  > 0 else _MUTED
+        nok_color = _NOK if nok > 0 else _MUTED
         self._summary_lbl.setText(
-            f"Frame OK: {ok} ({pct}%)  NOK: {nok}  Total: {len(results)}"
-            f"    |    Temporal OK: {t_ok} ({t_pct}%)  NOK: {t_nok}"
-            f"  [umbral={consec}]"
+            f"Frame  ✓ OK: {ok} ({pct}%)   ✗ NOK: {nok}   Total: {len(results)}"
+            f"    │    Temporal ✓ {t_ok} ({t_pct}%)  ✗ {t_nok}   [umbral {consec}]"
         )
 
         if results:
             missing_counts = [len(r.report.missing_points) for r in results]
             avg_m = sum(missing_counts) / len(missing_counts)
             min_m, max_m = min(missing_counts), max(missing_counts)
-            shifts = [r.shift_xy for r in results if r.shift_xy is not None]
+            shifts  = [r.shift_xy for r in results if r.shift_xy is not None]
             offsets = [r.centering.offset_px for r in results if r.centering is not None]
-            parts = [f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"]
+            parts   = [f"missing avg={avg_m:.1f}  min={min_m}  max={max_m}"]
             if shifts:
                 import math
-                shift_mags = [math.hypot(s[0], s[1]) for s in shifts]
-                parts.append(f"shift avg={sum(shift_mags)/len(shift_mags):.1f}px  max={max(shift_mags):.1f}px")
+                mags = [math.hypot(s[0], s[1]) for s in shifts]
+                parts.append(f"shift avg={sum(mags)/len(mags):.1f}px  max={max(mags):.1f}px")
             if offsets:
                 avg_off = sum(offsets) / len(offsets)
                 max_off = max(abs(o) for o in offsets)
                 parts.append(f"centro avg={avg_off:+.1f}px  max={max_off:.1f}px")
             self._stats_lbl.setText("    ".join(parts))
 
-        self._ana_progress.setText("Análisis completo")
+        self._ana_progress.setText("✓ Análisis completo")
         self._btn_analyze.setEnabled(True)
+        self._set_rec_badge("analyzed", len(results), self._rec_dir)
+        self._update_export_range_max()
         self._show_frame(0)
         logger.info(f"[Grabación] análisis completo — OK={ok} NOK={nok}")
 
     def _on_ana_error(self, msg: str) -> None:
-        self._ana_progress.setText(f"Error: {msg}")
+        self._ana_progress.setText(f"⚠  Error: {msg}")
         self._btn_analyze.setEnabled(True)
+        self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
         logger.error(f"[Grabación] error de análisis: {msg}")
 
     # ------------------------------------------------------------------
@@ -1444,12 +1569,11 @@ class RecordingTab(QWidget):
         idx = max(0, min(idx, len(self._frame_paths) - 1))
         self._current_idx = idx
 
-        show_overlay = self._overlay_toggle.isChecked() and idx < len(self._results)
-        if show_overlay:
-            import numpy as np
+        show_ov = self._overlay_toggle.isChecked() and idx < len(self._results)
+        if show_ov:
             bgr = self._results[idx].overlay
         else:
-            import cv2, numpy as np
+            import cv2
             bgr = cv2.imread(str(self._frame_paths[idx]))
 
         if bgr is not None:
@@ -1459,7 +1583,7 @@ class RecordingTab(QWidget):
             self._img_view.set_pixmap(QPixmap.fromImage(qi))
 
         total = len(self._frame_paths)
-        self._nav_lbl.setText(f"Frame {idx + 1} / {total}")
+        self._nav_lbl.setText(f"{idx + 1} / {total}")
 
         if idx < len(self._results):
             r = self._results[idx]
@@ -1467,44 +1591,118 @@ class RecordingTab(QWidget):
             center_txt = ""
             if r.centering is not None:
                 sign = "+" if r.centering.offset_px >= 0 else ""
-                center_txt = f"  centro={sign}{r.centering.offset_px:.1f}px"
+                center_txt = f"   centro {sign}{r.centering.offset_px:.1f}px"
 
             holes_nok = r.report.status == "NOK"
             if r.status == "OK":
-                label, color = "OK", _OK
+                label, color = "✓  OK", _OK
             elif getattr(r, "centering_nok", False) and holes_nok:
-                label, color = "NOK  AGUJEROS + CENTRADO", _NOK
+                label, color = "✗  NOK  AGUJEROS + CENTRADO", _NOK
             elif getattr(r, "centering_nok", False):
-                label, color = "NOK  CENTRADO", "#f97316"   # naranja — solo centrado
+                label, color = "✗  NOK  CENTRADO", "#f97316"
             else:
-                label, color = "NOK  AGUJEROS", _NOK
+                label, color = "✗  NOK  AGUJEROS", _NOK
 
-            self._result_lbl.setText(f"{label}  missing={missing}{center_txt}")
-            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
+            self._result_lbl.setText(f"{label}   missing {missing}{center_txt}")
+            self._result_lbl.setStyleSheet(f"font-size:14px;font-weight:700;color:{color};")
         else:
             self._result_lbl.setText("")
 
+        self._btn_save_current.setEnabled(idx < len(self._results))
         self._update_nav_state()
+
+    def _on_overlay_toggled(self, checked: bool) -> None:
+        self._overlay_toggle.setText("● OVERLAY" if checked else "○ OVERLAY")
+        self._show_frame(self._current_idx)
 
     def _update_nav_state(self) -> None:
         n = len(self._frame_paths)
+        self._btn_first.setEnabled(self._current_idx > 0)
         self._btn_prev.setEnabled(self._current_idx > 0)
         self._btn_next.setEnabled(self._current_idx < n - 1)
+        self._btn_last.setEnabled(self._current_idx < n - 1)
 
     # ------------------------------------------------------------------
+    # Save / Export
+    # ------------------------------------------------------------------
 
-    def _mk_btn(self, text: str, bg: str) -> QPushButton:
-        b = QPushButton(text)
-        b.setFixedHeight(30)
-        b.setStyleSheet(
-            f"background:{bg};color:white;border-radius:5px;"
-            "font-size:11px;font-weight:700;border:none;padding:0 12px;"
-        )
-        return b
+    def _save_current_frame(self) -> None:
+        """Auto-save current frame overlay to data/output/export/ with timestamp."""
+        import cv2
+        from datetime import datetime as _dt
+        if self._current_idx >= len(self._results):
+            return
+        result = self._results[self._current_idx]
+        out_dir = Path("data/output/export")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts    = _dt.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"frame_{self._current_idx:04d}_{result.status}_{ts}.png"
+        out_path = out_dir / fname
+        cv2.imwrite(str(out_path), result.overlay)
+        self._export_status_lbl.setText(f"✓  {fname}")
+        logger.info(f"[Export] frame guardado → {out_path}")
+
+    def _update_export_label(self) -> None:
+        if not self._frame_paths:
+            return
+        f_from = self._spin_from.value() - 1   # 0-based
+        f_to   = self._spin_to.value()          # exclusive (1-based input = natural end)
+        count  = max(0, f_to - f_from)
+        has_results = len(self._results) >= f_to
+        self._btn_export.setText(f"⬇  Exportar {count} frames")
+        self._btn_export.setEnabled(count > 0 and has_results)
+
+    def _update_export_range_max(self) -> None:
+        """Sync spinbox range and export button when frame/result lists change."""
+        n = len(self._frame_paths)
+        self._spin_from.setRange(1, max(1, n))
+        self._spin_to.setRange(1, max(1, n))
+        if n > 0:
+            self._spin_to.setValue(n)
+        self._update_export_label()
+
+    def _export_range(self) -> None:
+        """Export overlays for selected frame range to data/output/export/."""
+        import cv2
+        from datetime import datetime as _dt
+        if not self._results:
+            QMessageBox.information(self, "Exportar", "Primero analice la grabación.")
+            return
+        f_from = self._spin_from.value() - 1
+        f_to   = min(self._spin_to.value(), len(self._results))
+        if f_from >= f_to:
+            return
+        ts      = _dt.now().strftime("%Y%m%d_%H%M%S")
+        out_dir = Path("data/output/export") / f"rango_{ts}"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for i in range(f_from, f_to):
+            r = self._results[i]
+            cv2.imwrite(str(out_dir / f"frame_{i:04d}_{r.status}.png"), r.overlay)
+        saved = f_to - f_from
+        self._export_status_lbl.setText(f"✓  {saved} frames → export/rango_{ts}/")
+        logger.info(f"[Export] {saved} frames → {out_dir}")
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _set_rec_badge(self, state: str, n_frames: int,
+                       folder: Optional[Path]) -> None:
+        """Update the prominent recording state indicator."""
+        _STATES = {
+            "standby":   (f"color:{_MUTED};",   "● STANDBY"),
+            "recording": ("color:#f87171;",      "● GRABANDO"),
+            "ready":     (f"color:{_OK};",       "● LISTO"),
+            "analyzing": (f"color:{_ACCENT};",   "◎ ANALIZANDO"),
+            "analyzed":  (f"color:{_OK};",       "✓ ANALIZADO"),
+        }
+        style, text = _STATES.get(state, (f"color:{_MUTED};", "● —"))
+        self._rec_state_lbl.setStyleSheet(
+            f"{style}font-size:13px;font-weight:700;letter-spacing:3px;background:transparent;"
+        )
+        self._rec_state_lbl.setText(text)
+        self._rec_count_lbl.setText(f"{n_frames} FRAMES")
+        self._rec_folder_lbl.setText(folder.name if folder else "—")
 
     def _refresh_cam_info(self) -> None:
         sid = self._scanner_combo.currentText()
@@ -1522,19 +1720,17 @@ class RecordingTab(QWidget):
             ("fps",   "fps"),
         ]
         parts = []
-        for label, key in _READ:
+        for lbl, key in _READ:
             v = cam.read_setting(key)
-            parts.append(f"{label}:{v:.0f}" if v >= 0 else f"{label}:?")
+            parts.append(f"{lbl}:{v:.0f}" if v >= 0 else f"{lbl}:?")
         fps_real = cam.fps
         parts.append(f"real:{fps_real:.1f}" if fps_real > 0 else "real:—")
         self._cam_info_lbl.setText("  ".join(parts))
 
     def _active_model(self) -> str:
-        """Return the internal model ID currently selected in the model combo."""
         return to_internal(self._model_combo.currentText())
 
     def _on_scanner_changed(self, sid: str) -> None:
-        """When scanner selection changes, sync model combo to that scanner's model."""
         if self._recording:
             return
         model_internal = self._system.io.scanner_config(sid).get("model", "")
@@ -1544,7 +1740,7 @@ class RecordingTab(QWidget):
             self._model_combo.blockSignals(False)
 
     def _on_load_recording(self) -> None:
-        """Open an existing recording folder and load its frames for analysis."""
+        """Load an existing recording folder for analysis."""
         base = str(Path("data/recordings").resolve())
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar grabación", base,
@@ -1560,15 +1756,15 @@ class RecordingTab(QWidget):
             self._status_lbl.setText("La carpeta no contiene frames (frame_*.png/jpg)")
             return
 
-        self._rec_dir = folder_path
-        self._frame_paths = frames
+        self._rec_dir      = folder_path
+        self._frame_paths  = frames
         self._results.clear()
-        self._current_idx = 0
+        self._current_idx  = 0
         self._summary_lbl.setText("")
         self._stats_lbl.setText("")
         self._ana_progress.setText("")
+        self._export_status_lbl.setText("")
 
-        # Load meta.json if present and sync model combo
         meta_path = folder_path / "meta.json"
         if meta_path.exists():
             try:
@@ -1584,16 +1780,57 @@ class RecordingTab(QWidget):
                 logger.warning(f"[Grabación] no se pudo leer meta.json: {exc}")
 
         self._btn_analyze.setEnabled(True)
+        self._update_export_range_max()
         self._show_frame(0)
-        self._status_lbl.setText(f"Cargado — {len(frames)} frames de {folder_path.name}")
+        self._set_rec_badge("ready", len(frames), folder_path)
+        self._status_lbl.setText(f"Cargado — {len(frames)} frames  ·  {folder_path.name}")
         logger.info(f"[Grabación] cargada carpeta {folder_path.name} con {len(frames)} frames")
+
+    def _mk_btn(self, text: str, bg: str, h: int = 30,
+                fs: int = 11, w: int | None = None) -> QPushButton:
+        b = QPushButton(text)
+        b.setFixedHeight(h)
+        if w is not None:
+            b.setFixedWidth(w)
+        b.setStyleSheet(
+            f"background:{bg};color:white;border-radius:6px;"
+            f"font-size:{fs}px;font-weight:700;border:none;padding:0 12px;"
+        )
+        return b
+
+    def _lbl(self, text: str) -> QLabel:
+        l = QLabel(text)
+        l.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;")
+        return l
+
+    def _make_combo(self, items: list, min_w: int = 110) -> QComboBox:
+        c = QComboBox()
+        c.addItems(items)
+        c.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            f"border-radius:5px;padding:4px 8px;font-size:12px;min-width:{min_w}px;"
+        )
+        return c
+
+    def _hline(self) -> QFrame:
+        f = QFrame()
+        f.setFrameShape(QFrame.Shape.HLine)
+        f.setStyleSheet(f"color:{_BORDER};max-height:1px;")
+        return f
+
+    def _vline(self) -> QFrame:
+        f = QFrame()
+        f.setFrameShape(QFrame.Shape.VLine)
+        f.setFixedWidth(1)
+        f.setStyleSheet(f"color:{_BORDER};")
+        return f
 
     def _grp_style(self) -> str:
         return (
             f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
-            f"border-radius:8px;margin-top:12px;padding-top:10px;"
-            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
-            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+            f"border-radius:10px;margin-top:14px;padding-top:12px;"
+            f"font-size:11px;font-weight:700;color:{_ACCENT};letter-spacing:2px; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:14px;padding:0 6px; }}"
         )
 
 
