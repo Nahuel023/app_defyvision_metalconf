@@ -39,6 +39,8 @@ class InspectionResult:
     centering: CenteringResult | None = None
     centering_nok: bool = False   # True cuando el NOK fue causado (o agravado) por descentrado
     capture_quality_degraded: bool = False  # True cuando ratio cae bajo quality_ratio_min (no afecta NOK)
+    blur_score: float = 0.0        # Varianza del Laplaciano — mayor es más nítido
+    frame_quality: str = "GOOD"    # "GOOD" | "LOW_QUALITY"
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,8 @@ class FolderInspectionSummary:
     max_response_sec: float
     response_time_sec: float
     meets_response_target: bool
+    low_quality: int = 0
+    max_low_quality_streak: int = 0
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,7 @@ class TemporalFrameResult:
     nok_streak: int
     decision_status: str
     triggered: bool
+    low_quality_streak: int = 0
 
 
 def iter_image_files(input_dir: Path) -> Iterable[Path]:
@@ -150,6 +155,8 @@ def _inspect_bgr(
     max_extra             = int(tolerances.get("max_extra", -1))
     bbox_filter_margin_px = float(tolerances.get("bbox_filter_margin_px", 0.0))
     grid_affine_refinement = bool(tolerances.get("grid_affine_refinement", False))
+    blur_score_min = float(tolerances.get("blur_score_min", 0.0))
+    low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -171,6 +178,16 @@ def _inspect_bgr(
     mask  = preprocess_for_holes(img, **preprocess_kw)
     holes = detect_holes_from_mask(mask, **detect_kw)
     detected_points = [(h.x, h.y) for h in holes]
+
+    # Blur score: Laplacian variance on the inspection ROI.
+    # Low value = blurry/out-of-focus. Disabled when blur_score_min == 0.
+    _gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blur_score = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
+    frame_quality = (
+        "LOW_QUALITY"
+        if blur_score_min > 0.0 and blur_score < blur_score_min
+        else "GOOD"
+    )
 
     img_h, img_w = img.shape[:2]
 
@@ -289,7 +306,8 @@ def _inspect_bgr(
     if centering is not None:
         overlay_roi = draw_centering_overlay(overlay_roi, centering, tag_nok=centering_nok)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
-                                 min_detection_ratio, capture_quality_degraded)
+                                 min_detection_ratio, capture_quality_degraded,
+                                 frame_quality)
 
     # Composite annotated ROI onto the full aligned frame so the overlay shows
     # the complete image without any crop
@@ -315,6 +333,8 @@ def _inspect_bgr(
         centering=centering,
         centering_nok=centering_nok,
         capture_quality_degraded=capture_quality_degraded,
+        blur_score=blur_score,
+        frame_quality=frame_quality,
     )
 
 
@@ -324,6 +344,7 @@ def _draw_warnings(
     alignment_ok: bool,
     min_detection_ratio: float,
     capture_quality_degraded: bool = False,
+    frame_quality: str = "GOOD",
 ) -> np.ndarray:
     warnings = []
     if detection_ratio < min_detection_ratio:
@@ -332,6 +353,8 @@ def _draw_warnings(
         warnings.append(f"CALIDAD DEGRADADA ({detection_ratio:.0%})")
     if not alignment_ok:
         warnings.append("ALIGN FALLBACK")
+    if frame_quality == "LOW_QUALITY":
+        warnings.append("CALIDAD BAJA")
     if not warnings:
         return overlay
     out = overlay.copy()
@@ -369,12 +392,22 @@ def inspect_folder(
         tolerances["max_response_sec"] if max_response_sec is None else max_response_sec
     )
 
+    low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))
+
     image_paths = list(iter_image_files(input_dir))
     results = [inspect_image(model, path, save=save, scanner_id=scanner_id)
                for path in image_paths]
     ok_count = sum(1 for result in results if result.status == "OK")
-    temporal_results = _apply_temporal_rule(results, consecutive_nok_frames)
+    low_quality_count = sum(
+        1 for r in results if getattr(r, "frame_quality", "GOOD") == "LOW_QUALITY"
+    )
+    temporal_results = _apply_temporal_rule(
+        results, consecutive_nok_frames, low_quality_max_streak
+    )
     temporal_ok = sum(1 for item in temporal_results if item.decision_status == "OK")
+    max_lq_streak = max(
+        (item.low_quality_streak for item in temporal_results), default=0
+    )
     response_time_sec = (
         float("inf") if frame_rate_hz <= 0 else consecutive_nok_frames / frame_rate_hz
     )
@@ -394,6 +427,8 @@ def inspect_folder(
         max_response_sec=max_response_sec,
         response_time_sec=response_time_sec,
         meets_response_target=response_time_sec <= max_response_sec,
+        low_quality=low_quality_count,
+        max_low_quality_streak=max_lq_streak,
     )
 
 
@@ -481,20 +516,34 @@ def _estimate_alignment_transform(
 def _apply_temporal_rule(
     results: list[InspectionResult],
     consecutive_nok_frames: int,
+    low_quality_max_streak: int = 10,
 ) -> list[TemporalFrameResult]:
     streak = 0
+    lq_streak = 0
     temporal_results: list[TemporalFrameResult] = []
     for result in results:
-        if result.status == "NOK":
-            streak += 1
+        quality = getattr(result, "frame_quality", "GOOD")
+        if quality == "LOW_QUALITY":
+            lq_streak += 1
+            # If too many low-quality frames in a row, reset streak to avoid
+            # permanently blocking FAULT detection when sensor/backlight degrades.
+            if low_quality_max_streak > 0 and lq_streak >= low_quality_max_streak:
+                streak = 0
+                lq_streak = 0
+            # else: hold — don't increment, don't reset nok streak
         else:
-            streak = 0
+            lq_streak = 0
+            if result.status == "NOK":
+                streak += 1
+            else:
+                streak = 0
 
         decision_status = "NOK" if streak >= consecutive_nok_frames else "OK"
         temporal_results.append(
             TemporalFrameResult(
                 result=result,
                 nok_streak=streak,
+                low_quality_streak=lq_streak,
                 decision_status=decision_status,
                 triggered=decision_status == "NOK",
             )
