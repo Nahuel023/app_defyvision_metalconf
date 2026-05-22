@@ -33,6 +33,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "max_inspection_hz": 0,
     "grid_min_spacing": 30.0,
     "center_offset_tol_px": 0.0,   # 0 = medir y mostrar, nunca NOK; >0 = tolerancia activa
+    "grid_affine_refinement": False,  # True = corrección affine local post-fase-global
 }
 
 
