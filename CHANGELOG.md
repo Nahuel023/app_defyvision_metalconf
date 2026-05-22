@@ -653,6 +653,7 @@ Segunda parte: implementación del sistema de calidad de frame (blur/degradació
 "hold" en la decisión temporal — frames de baja calidad no incrementan ni resetean la racha NOK.
 
 **Commits de esta sesión:**
+- `142061f` — Calidad de frame: blur_score + política hold temporal
 - (este commit)
 
 ---
@@ -801,6 +802,41 @@ racha para evitar que un sensor degradado bloquee permanentemente la detección 
 
 ---
 
+#### Cambio 24 — edge_margin_px 25→5 para modelo_B
+
+**Problema:** `edge_margin_px=25` descartaba agujeros detectados cuyo centroide quedaba
+dentro del margen de 25px del borde de la ROI. Para modelo_B (ROI h=1077px), los agujeros
+de la última fila visible tienen su centroide cerca de y≈1034 — dentro del margen de 25px
+respecto al borde inferior de la ROI (y=1077). Esos agujeros reales quedaban como "missing".
+
+**Efecto:** 492 cruces acumuladas en borde inferior de la grabación (concentradas en y≈1034).
+Con edge_margin_px=5 → los centroides válidos a partir de 5px del borde pasan el filtro.
+
+**Decisión:** Cambiar solo para modelo_B. `pattern_edge_margin_px` se mantiene en 25.0
+(afecta reconstrucción del patrón, no la detección runtime).
+
+**Archivo modificado:**
+- `config/tolerancias.yaml` → `edge_margin_px: 25.0 → 5.0` solo en sección `modelo_B`
+
+**Resultados validados (grabación 20260519_121741, 185 frames):**
+
+| Métrica | Antes (25px) | Después (5px) |
+|---------|-------------|---------------|
+| raw OK | 185/185 | 185/185 ✓ |
+| temporal NOK | 0 | 0 ✓ |
+| missing medio | 3.50 | 0.81 |
+| missing máximo | 24 | 20 |
+| frames sin missing | 58/185 | 160/185 |
+
+Frames críticos verificados:
+- frame_0036: missing 24→20
+- frame_0064: missing=8
+- frame_0065: missing=6
+- frame_0093: missing=5
+- frame_0177: missing=10
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -817,9 +853,9 @@ racha para evitar que un sensor degradado bloquee permanentemente la detección 
 | Frame quality | `blur_score` (Laplacian var) + `frame_quality` en InspectionResult. `blur_score_min=0.0` (deshabilitado). Política "hold" wired en FSM y inspect_folder(). |
 | modelo_B — ROI | `x=710, w=650, y=3, h=1077` → excluye backlight desnudo en ambos lados |
 | modelo_B — Grid | dx=28, dy=22, 258 células. Fase X+Y 2D + affine local post-fase. |
-| modelo_B — Tolerancia | `tol_xy_px=22`, `min_area=250`, `grid_max_missing=35`, `bbox_filter_margin=20` |
+| modelo_B — Tolerancia | `tol_xy_px=22`, `min_area=250`, `grid_max_missing=35`, `bbox_filter_margin=20`, `edge_margin_px=5` |
 | modelo_B — Affine refinement | `grid_affine_refinement: true`, `tol_affine=33px`, `min_matches=12` |
-| modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=100%, 0 NOK, 0 temporal NOK. |
+| modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=104%, 0 NOK, 0 temporal NOK. missing medio=0.81, 160/185 frames sin missing. |
 | FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |

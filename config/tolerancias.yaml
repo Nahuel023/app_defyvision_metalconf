@@ -55,7 +55,7 @@ models:
     align_match_tol_px: 120.0
     min_match_count: 5        # patrón puede estar parcialmente fuera de frame
     # ── Bordes ─────────────────────────────────────────────────────────────
-    edge_margin_px: 25.0
+    edge_margin_px: 5.0            # 25→5: el filtro de 25px descartaba agujeros reales en borde inferior
     pattern_edge_margin_px: 25.0
     # Número máximo de agujeros faltantes permitidos antes de declarar NOK.
     # Patrón 258 agujeros. Con affine refinement activado:
