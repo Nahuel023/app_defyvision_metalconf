@@ -362,18 +362,17 @@ class ScannerPanel(QWidget):
             self._result_val[1].setText(health_txt)
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
 
-        # CENTRADO: offset lateral del patrón respecto a los bordes de la chapa
+        # CENTRADO: márgenes laterales y offset del patrón respecto a los bordes de la chapa
         if result is not None and result.centering is not None:
             c = result.centering
             sign = "+" if c.offset_px >= 0 else ""
-            if c.within_tol:
-                c_text  = f"{sign}{c.offset_px:.1f} px"
-                c_color = "#15803d"
-            else:
-                c_text  = f"FUERA  {sign}{c.offset_px:.1f}px"
-                c_color = "#ea580c"   # naranja para distinguir de rojo (agujeros)
+            c_color = "#15803d" if c.within_tol else "#ea580c"
+            c_text = (
+                f"I: {c.left_margin_px:.0f}px  D: {c.right_margin_px:.0f}px\n"
+                f"Offset: {sign}{c.offset_px:.1f}px"
+            )
             self._center_val[1].setText(c_text)
-            self._center_val[1].setStyleSheet(f"font-size:13px;font-weight:700;color:{c_color};")
+            self._center_val[1].setStyleSheet(f"font-size:11px;font-weight:700;color:{c_color};")
         elif result is None:
             self._center_val[1].setText("—")
             self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")
