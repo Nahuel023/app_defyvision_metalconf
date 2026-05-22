@@ -103,6 +103,26 @@ def draw_compare_overlay(
     return out
 
 
+def _draw_edge_polyline(
+    img: np.ndarray,
+    points: Sequence[Tuple[float, float]],
+    color: tuple,
+    thickness: int = 2,
+    alpha: float = 0.55,
+    dot_radius: int = 3,
+) -> None:
+    """Draw a polyline through real per-band edge points with sample dots."""
+    if len(points) < 1:
+        return
+    sorted_pts = sorted(points, key=lambda p: p[1])
+    for j in range(len(sorted_pts) - 1):
+        x0, y0 = int(round(sorted_pts[j][0])), int(round(sorted_pts[j][1]))
+        x1, y1 = int(round(sorted_pts[j + 1][0])), int(round(sorted_pts[j + 1][1]))
+        _draw_transparent_line(img, (x0, y0), (x1, y1), color, thickness, alpha)
+    for (x, y) in sorted_pts:
+        cv2.circle(img, (int(round(x)), int(round(y))), dot_radius, color, -1)
+
+
 def draw_centering_overlay(
     img_bgr: np.ndarray,
     centering: "CenteringResult",
@@ -110,36 +130,61 @@ def draw_centering_overlay(
 ) -> np.ndarray:
     """Draw metal edge lines, pattern bound lines, center lines, and margin annotation.
 
+    Uses real per-band edge points when available (polyline + dots).
+    Falls back to single vertical lines when band data is absent.
     tag_nok: when True, draws a prominent DESCENTRADO badge on the frame.
     """
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
-    lx  = int(round(centering.left_x))
-    rx  = int(round(centering.right_x))
     cx  = int(round(centering.sheet_center_x))
     hx  = int(round(centering.holes_center_x))
+
+    # Scalar fallback positions (used when per-band data is unavailable)
+    lx  = int(round(centering.left_x))
+    rx  = int(round(centering.right_x))
     plx = int(round(centering.pattern_left_x))
     prx = int(round(centering.pattern_right_x))
 
-    # Metal edges: light gray semi-transparent vertical lines
-    _draw_transparent_line(out, (lx, 0), (lx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
-    _draw_transparent_line(out, (rx, 0), (rx, h - 1), (210, 210, 210), thickness=2, alpha=0.45)
+    left_pts  = getattr(centering, "left_edge_points", ())
+    right_pts = getattr(centering, "right_edge_points", ())
+    pat_l_pts = getattr(centering, "pattern_left_points", ())
+    pat_r_pts = getattr(centering, "pattern_right_points", ())
 
-    # Pattern bounds: thin yellow dashed lines (izquierdo y derecho del patrón detectado)
+    # --- Metal edges: real polyline or fallback vertical line ---
+    _edge_color = (210, 210, 210)
+    if len(left_pts) >= 2:
+        _draw_edge_polyline(out, left_pts, _edge_color, thickness=2, alpha=0.50)
+    else:
+        _draw_transparent_line(out, (lx, 0), (lx, h - 1), _edge_color, 2, 0.45)
+
+    if len(right_pts) >= 2:
+        _draw_edge_polyline(out, right_pts, _edge_color, thickness=2, alpha=0.50)
+    else:
+        _draw_transparent_line(out, (rx, 0), (rx, h - 1), _edge_color, 2, 0.45)
+
+    # --- Pattern bounds: real polyline or fallback dashed line ---
     _pat_color = (50, 220, 255)   # amarillo-cyan
-    for y in range(0, h, 20):
-        cv2.line(out, (plx, y), (plx, min(y + 12, h - 1)), _pat_color, 1)
-        cv2.line(out, (prx, y), (prx, min(y + 12, h - 1)), _pat_color, 1)
+    if len(pat_l_pts) >= 2:
+        _draw_edge_polyline(out, pat_l_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
+    else:
+        for y in range(0, h, 20):
+            cv2.line(out, (plx, y), (plx, min(y + 12, h - 1)), _pat_color, 1)
 
-    # Sheet center: orange dashed line
+    if len(pat_r_pts) >= 2:
+        _draw_edge_polyline(out, pat_r_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
+    else:
+        for y in range(0, h, 20):
+            cv2.line(out, (prx, y), (prx, min(y + 12, h - 1)), _pat_color, 1)
+
+    # --- Sheet center: orange dashed line ---
     for y in range(0, h, 20):
         cv2.line(out, (cx, y), (cx, min(y + 10, h - 1)), (0, 165, 255), 2)
 
-    # Holes center: white line
+    # --- Holes center: white line ---
     cv2.line(out, (hx, 0), (hx, h - 1), (255, 255, 255), 1)
 
-    # Offset arrow from sheet center to holes center
+    # --- Offset arrow from sheet center to holes center ---
     color = (0, 200, 0) if centering.within_tol else (0, 0, 255)
     mid_y = h // 2
     if abs(hx - cx) >= 3:
@@ -147,16 +192,39 @@ def draw_centering_overlay(
     else:
         cv2.circle(out, (cx, mid_y), 6, (0, 200, 0), -1)
 
-    # Text: left margin, right margin, offset
+    # --- Text: margins, offset, variation ---
     sign = "+" if centering.offset_px >= 0 else ""
     lm = centering.left_margin_px
     rm = centering.right_margin_px
-    cv2.putText(out, f"Izq: {lm:.0f}px  Der: {rm:.0f}px",
-                (10, h - 45), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
-    cv2.putText(out, f"Offset: {sign}{centering.offset_px:.1f}px",
-                (10, h - 15), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
+    lm_std = getattr(centering, "left_margin_std", 0.0)
+    rm_std = getattr(centering, "right_margin_std", 0.0)
+    var_px = max(lm_std, rm_std)
 
-    # Prominent DESCENTRADO badge when centering triggered NOK
+    text_y_base = h - 15
+    cv2.putText(out, f"Offset: {sign}{centering.offset_px:.1f}px",
+                (10, text_y_base), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
+
+    margin_line = f"Izq: {lm:.0f}px  Der: {rm:.0f}px"
+    if var_px > 0:
+        margin_line += f"  Var: \xb1{var_px:.0f}px"
+    cv2.putText(out, margin_line,
+                (10, text_y_base - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (180, 180, 180), 1, cv2.LINE_AA)
+
+    # --- "CENTRADO NO CONFIABLE" badge when too few bands detected ---
+    centering_reliable = getattr(centering, "centering_reliable", True)
+    if not centering_reliable:
+        label_nc = "BORDES NO CONFIABLES"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale_nc, thick_nc = 0.75, 2
+        (tw, th), bl = cv2.getTextSize(label_nc, font, scale_nc, thick_nc)
+        bx1, by1 = w // 2 - tw // 2 - 8, 140
+        bx2, by2 = w // 2 + tw // 2 + 8, 140 + th + bl + 8
+        cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 100, 180), -1)
+        cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 165, 255), 2)
+        cv2.putText(out, label_nc, (bx1 + 8, by2 - bl - 4),
+                    font, scale_nc, (255, 255, 255), thick_nc, cv2.LINE_AA)
+
+    # --- Prominent DESCENTRADO badge when centering triggered NOK ---
     if tag_nok:
         label = "NOK CENTRADO"
         font = cv2.FONT_HERSHEY_SIMPLEX
