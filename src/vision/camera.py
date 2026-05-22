@@ -171,9 +171,12 @@ class Camera:
     # ------------------------------------------------------------------
 
     def _open_capture(self) -> bool:
-        cap = cv2.VideoCapture(self._index, cv2.CAP_MSMF)
+        t0 = time.monotonic()
+        # CAP_DSHOW (DirectShow) abre en ~1s en Windows.
+        # CAP_MSMF (Media Source Framework) puede tardar 5-15s.
+        cap = cv2.VideoCapture(self._index, cv2.CAP_DSHOW)
         if not cap.isOpened():
-            logger.error(f"Camera {self._index}: no se pudo abrir")
+            logger.error(f"Camera {self._index}: no se pudo abrir (DSHOW, {time.monotonic()-t0:.1f}s)")
             cap.release()
             return False
 
@@ -197,14 +200,15 @@ class Camera:
         fourcc_str    = "".join(chr((raw_fourcc >> 8 * i) & 0xFF) for i in range(4))
         logger.info(
             f"Camera {self._index}: {actual_w}x{actual_h} @ {actual_fps:.0f}fps "
-            f"codec={fourcc_str} (requested {width}x{height} @ {fps}fps MJPG)"
+            f"codec={fourcc_str} (requested {width}x{height} @ {fps}fps MJPG, "
+            f"open={time.monotonic()-t0:.1f}s)"
         )
 
         self._apply_settings(cap)
 
-        # Warm-up: drain 3 frames so the driver stabilises before validation.
+        # Warm-up: drain 2 frames so the driver stabilises before validation.
         test_frame = None
-        for _ in range(3):
+        for _ in range(2):
             ok, f = cap.read()
             if ok:
                 test_frame = f
