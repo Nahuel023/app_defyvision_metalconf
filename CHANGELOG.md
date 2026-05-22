@@ -43,6 +43,64 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-05-22 — Tadeo + Claude
+
+#### Contexto de la sesión
+Continuación de sesión 2026-05-21. Sistema estable en 185/185 OK con grabación de referencia.
+Trabajo en mejoras visuales del overlay de centrado.
+
+---
+
+#### Cambio 26 — Detección de bordes real por bandas (polyline overlay)
+
+**Motivación:** El overlay de centrado mostraba líneas verticales perfectas (un único X por lado)
+basadas en el perfil de columna global. No reflejaba la realidad: si el borde de la chapa no
+es perfectamente vertical o hay variación por altura, se perdía esa información.
+
+**Decisión:** Dividir la imagen en 16 bandas horizontales, detectar el borde metálico en cada
+banda por separado, y dibujar una polilínea real en lugar de una línea perfectamente vertical.
+Para el patrón punzonado, usar los agujeros reales detectados por banda (hole.x ± hole.r),
+no el bbox del patrón teórico.
+
+**Archivos modificados:**
+
+- `src/pipeline/edge_centering.py`:
+  - Nueva constante `_N_BANDS = 16`, `_MIN_RELIABLE_BANDS = 6`
+  - Nueva función `_detect_edges_by_band()` → devuelve `dict[band_idx → (x, cy)]` para left/right
+  - Nueva función `_pattern_bounds_by_band()` → bounds del patrón real por banda
+  - Nueva función `_fit_line_robust()` → ajuste x=a*y+b con sigma-clip outlier rejection
+  - Nueva función `_line_x_at_y()` → evalúa la línea en Y dado
+  - `_detect_metal_edges_full()` → fallback de imagen completa (renombrado, antes `_detect_metal_edges`)
+  - `CenteringResult` extendido con nuevos campos (todos con default para compatibilidad):
+    - `left_edge_points`, `right_edge_points`: tupla de (x, y) por banda, borde de chapa real
+    - `pattern_left_points`, `pattern_right_points`: tupla de (x, y) por banda, borde patrón real
+    - `left_margin_std`, `right_margin_std`: std dev de márgenes por banda
+    - `centering_reliable`: False si < 6 bandas detectadas
+  - `compute_centering()` reescrito para usar detección por bandas:
+    - `left_x`, `right_x` escalares ahora vienen de la línea robusta evaluada en mid-height
+    - Si no hay suficientes puntos, fallback a mediana, luego a perfil de imagen completa
+    - Estadísticas de margen por banda cuando hay correspondencia edge+patrón
+
+- `src/pipeline/annotate.py`:
+  - Nueva función `_draw_edge_polyline()` a nivel módulo: dibuja polilínea con alpha + puntos sample
+  - `draw_centering_overlay()` actualizado:
+    - Usa polilínea real cuando `left_edge_points` / `right_edge_points` tienen ≥ 2 puntos
+    - Fallback a línea vertical cuando no hay datos por banda
+    - Texto de margen extendido: agrega `Var: ±Xpx` (std dev de márgenes)
+    - Badge "BORDES NO CONFIABLES" (naranja) cuando `centering_reliable=False`
+    - Badge "NOK CENTRADO" (rojo) preservado sin cambios
+
+**Comportamiento observado en debug_crop_frame9.png (1077×1054px):**
+- 16/16 bandas detectadas en ambos lados → `centering_reliable=True`
+- `left_x≈203px`, `right_x≈893px` (consistente con medición anterior)
+- Polilínea gris para bordes de chapa, cyan para patrón, puntos pequeños en cada muestra
+
+**Garantía 185/185 OK mantenida:** La lógica de inspección (detección, comparación,
+regla temporal) no se tocó. El centrado es puramente informacional (`center_offset_tol_px=0.0`
+por defecto).
+
+---
+
 ### Sesión 2026-05-19 — Tadeo + Claude
 
 #### Contexto de la sesión
