@@ -143,12 +143,13 @@ def _inspect_bgr(
     blur_ksize          = int(tolerances.get("blur_ksize", 5))
     open_ksize          = int(tolerances.get("open_ksize", 3))
     close_ksize         = int(tolerances.get("close_ksize", 5))
-    edge_margin_px      = float(tolerances.get("edge_margin_px", 0.0))
-    grid_max_missing    = int(tolerances.get("grid_max_missing", 0))
-    min_detection_ratio = float(tolerances.get("min_detection_ratio", 0.30))
-    quality_ratio_min   = float(tolerances.get("quality_ratio_min", 0.0))
-    max_extra           = int(tolerances.get("max_extra", -1))
+    edge_margin_px        = float(tolerances.get("edge_margin_px", 0.0))
+    grid_max_missing      = int(tolerances.get("grid_max_missing", 0))
+    min_detection_ratio   = float(tolerances.get("min_detection_ratio", 0.30))
+    quality_ratio_min     = float(tolerances.get("quality_ratio_min", 0.0))
+    max_extra             = int(tolerances.get("max_extra", -1))
     bbox_filter_margin_px = float(tolerances.get("bbox_filter_margin_px", 0.0))
+    grid_affine_refinement = bool(tolerances.get("grid_affine_refinement", False))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -180,6 +181,7 @@ def _inspect_bgr(
 
     if pattern.has_grid and detected_points:
         detected_arr = np.array(detected_points, dtype=np.float32)
+        tol_affine = tol_xy_px * 1.5 if grid_affine_refinement else 0.0
         compare_points = grid_compare_points(
             detected_arr,
             pattern.cells,
@@ -190,6 +192,7 @@ def _inspect_bgr(
             None,
             img_w, img_h,
             edge_margin_px,
+            tol_affine=tol_affine,
         )
     else:
         transform = _estimate_alignment_transform(
@@ -263,9 +266,26 @@ def _inspect_bgr(
     )
     final_status = "NOK" if (report.status == "NOK" or centering_nok) else report.status
 
+    # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
+    # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
+    near_miss_pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    if report.missing_points and detected_in_bbox:
+        _det_arr = np.array(detected_in_bbox, dtype=np.float32)
+        _mis_arr = np.array(report.missing_points, dtype=np.float32)
+        _diff    = _mis_arr[:, None, :] - _det_arr[None, :, :]
+        _dists   = np.sqrt((_diff ** 2).sum(axis=2))   # (n_mis, n_det)
+        _near_d  = _dists.min(axis=1)
+        _near_j  = _dists.argmin(axis=1)
+        for _i, (_d, _j) in enumerate(zip(_near_d, _near_j)):
+            if tol_xy_px < _d <= tol_xy_px * 2.0:
+                near_miss_pairs.append(
+                    (report.missing_points[_i], detected_in_bbox[_j])
+                )
+
     # Draw annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
-                                       extra_points=report.extra_points)
+                                       extra_points=report.extra_points,
+                                       near_miss_pairs=near_miss_pairs)
     if centering is not None:
         overlay_roi = draw_centering_overlay(overlay_roi, centering, tag_nok=centering_nok)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,

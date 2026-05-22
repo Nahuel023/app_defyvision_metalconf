@@ -642,6 +642,100 @@ continuous_position_threshold: 4.0
 
 ---
 
+### Sesión 2026-05-22 — Tadeo + Claude
+
+#### Contexto de la sesión
+Análisis de falsos missing en modelo_B/scanner_1. Grabación `20260519_121741` (185 frames).
+Síntoma: cruces rojas en agujeros físicamente presentes, concentradas en borde derecho/inferior.
+Causa raíz: fase global X/Y no compensa tilt/perspectiva/curvatura local del material.
+
+**Commits de esta sesión:**
+- (este commit)
+
+---
+
+#### Cambio 19 — Corrección affine local post-fase-global (`grid_fitting.py`)
+
+**Problema:** `grid_compare_points` estimaba UNA fase global X e Y para todo el frame.
+El material puede tener tilt/perspectiva que desplaza los agujeros del borde derecho/inferior
+~25-40px respecto al esperado → falsos missing en esa zona con tol_xy_px=22.
+
+**Implementación:** Nueva función `_fit_affine_to_grid()` en `src/pipeline/grid_fitting.py`:
+1. Usa las posiciones esperadas de la fase global como punto de partida.
+2. Matchea detecciones a expected con tolerancia `tol_affine = tol_xy_px × 1.5` (=33px).
+3. Ajusta affine 2D por mínimos cuadrados: `det_xy ≈ A @ [ci×dx, cj×dy] + b`.
+4. Valida: escala 0.85–1.15, shear <0.15 por eje → rechaza fits imposibles.
+5. Si pasa: usa posiciones corregidas. Si falla: fallback a fase global.
+
+**Nuevo parámetro en `grid_compare_points`:** `tol_affine: float = 0.0` (default deshabilitado).
+Habilitado vía `grid_affine_refinement: true` en `config/tolerancias.yaml` para modelo_B.
+
+**Archivos modificados:**
+- `src/pipeline/grid_fitting.py` → nueva `_fit_affine_to_grid()` + param `tol_affine` en `grid_compare_points`
+- `src/inspection.py` → lee `grid_affine_refinement`, pasa `tol_affine` al grid
+- `src/utils/config.py` → `DEFAULT_TOLERANCES` agrega `grid_affine_refinement: False`
+- `config/tolerancias.yaml` → `grid_affine_refinement: true` en modelo_B
+
+**Resultados en frame_0036 (peor caso):**
+- Sin affine: missing=26, extra=24
+- Con affine: missing=24, extra=22 (↓2 en ambos)
+- Grabación completa: 185/185 raw OK mantenido ✓
+
+**Limitación conocida:** 9 de los 24 missing en frame_0036 tienen un detectado a <22px
+pero quedan sin match por "stealing" greedy (tol_xy_px=22 == dy=22 → zona de ambigüedad
+vertical). Esto requiere Hungarian matching para resolver definitivamente (ver pendientes).
+
+---
+
+#### Cambio 20 — Overlay near-miss lines (`annotate.py`, `inspection.py`)
+
+**Motivación:** Las cruces rojas y diamantes naranjas no mostraban la relación espacial entre
+un expected sin match y el detected más cercano fuera de tolerancia. El operador no podía
+evaluar visualmente cuánto falta para que matchee.
+
+**Implementación:**
+- `src/inspection.py` → calcula `near_miss_pairs`: lista de (expected, detected) donde
+  `tol_xy_px < dist ≤ 2×tol_xy_px`. Se pasa a `draw_compare_overlay`.
+- `src/pipeline/annotate.py` → nuevo param `near_miss_pairs` en `draw_compare_overlay`.
+  Dibuja líneas cyan-amarillas delgadas entre cada expected sin match y su detectado más
+  cercano (si cae en la zona 1×–2×tol). Dibujadas ANTES de los marcadores para que no
+  tapen los círculos.
+
+**Leyenda del overlay (ahora explícita en el código):**
+- ⚪ círculo verde = agujero detectado correctamente matcheado
+- ✕ cruz roja = posición esperada sin match dentro de tol_xy_px
+- ◇ diamante naranja = detectado sin posición esperada asignada
+- — línea cyan-amarilla = expected↔detected más cercano (fuera de tol, dentro de 2×tol)
+
+---
+
+#### Cambio 21 — Herramienta CSV de diagnóstico por carpeta (`scripts/run_folder_csv.py`)
+
+**Nuevo script:** Exporta métricas por frame a CSV para análisis posterior.
+
+```
+python scripts/run_folder_csv.py <carpeta> [--model modelo_B] [--scanner scanner_1] [--output out.csv]
+```
+
+**Columnas:** frame, status, expected, detected, missing, extra, detection_ratio,
+centering_offset_px, alignment_ok, missing_nearest_max_px, missing_nearest_med_px,
+false_missing_count (detectado dentro de 2×tol pero fuera de tol).
+
+---
+
+#### Cambio 22 — Actualización comentario grid_max_missing (`config/tolerancias.yaml`)
+
+**Motivación:** El valor 35 era conservador para la calibración inicial. Con affine refinement
+los frames buenos tienen missing≈0-5, no 16-29 (que era con tol=12 sin affine).
+
+**Sin cambio de valor** (sigue en 35 por seguridad). Actualizado el comentario:
+- Frames buenos con affine: missing 0-5
+- Blur de movimiento: missing 10-20 (estimado, pendiente validar en planta)
+- Punzón roto: ~29 missing (pendiente validar)
+- **Candidato: bajar a 20-25** después de validar con defecto real
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -651,13 +745,14 @@ continuous_position_threshold: 4.0
 | Backlight Y12/Y13 | Siempre ON al iniciar (inicializa en `initialize_lights()`). |
 | Pipeline de visión | Vectorizado, cacheado, CLOSE morfológico, centroide estable, matcher closest-first |
 | Visor modo servicio | ZoomableImageView: zoom (rueda), pan (drag), fit (doble click / botón) + scroll |
-| Overlay | Imagen completa del frame (sin recorte ROI). Anotaciones sobre la zona de inspección. |
+| Overlay | Imagen completa del frame. Cruz roja=missing, diamante naranja=extra, línea cyan=near-miss |
 | Extra detections | Detectadas y visibles (diamantes naranjas) en overlay; filtro bbox activo |
 | Centrado de chapa | Medición de offset lateral siempre activa. `center_offset_tol_px=0` (sin NOK por centrado). |
 | Detection ratio | Por frame y promedio de sesión. Flag `CALIDAD_DEGRADADA` configurable. |
 | modelo_B — ROI | `x=710, w=650, y=3, h=1077` → excluye backlight desnudo en ambos lados |
-| modelo_B — Grid | dx=28, dy=22, 258 células. Fase X+Y estimadas por escaneo 2D por frame. |
+| modelo_B — Grid | dx=28, dy=22, 258 células. Fase X+Y 2D + affine local post-fase. |
 | modelo_B — Tolerancia | `tol_xy_px=22`, `min_area=250`, `grid_max_missing=35`, `bbox_filter_margin=20` |
+| modelo_B — Affine refinement | `grid_affine_refinement: true`, `tol_affine=33px`, `min_matches=12` |
 | modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=100%, 0 NOK, 0 temporal NOK. |
 | FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
 | Control automático pistones | Planificado, NO implementado. |
@@ -669,18 +764,21 @@ continuous_position_threshold: 4.0
 
 ### Alta prioridad (próxima sesión)
 - **Validar en planta con material real:**
-  - Frame estático sin defecto: `missing = 0`, `extra = 0`
-  - Frame con punzón roto: `missing > 35` de forma sostenida → temporal NOK en streak
+  - Frame estático sin defecto: verificar missing≤5 con affine activo
+  - Frame con punzón roto: missing > grid_max_missing de forma sostenida → temporal NOK
   - Verificar que `consecutive_nok_frames=40` y `grid_max_missing=35` son los valores
     correctos para la velocidad real de la máquina
 - **Calibrar `grid_max_missing`:**
-  - Con baseline `missing=0` en frames buenos, un punzón roto agrega ~29 missing/frame
-  - El valor actual `35` deja muy poco margen (29 < 35 → punzón roto podría no detectarse)
-  - **Recomendación: reducir a 20–25** una vez validado que los frames de transición
-    quedan dentro de ese rango en producción real
+  - Candidato: 20-25 (frames buenos con affine → 0-5 missing, margen amplio)
+  - Validar que blur de movimiento no supere ese umbral en producción
+  - Punzón roto agrega ~29 missing → debe estar sobre el umbral elegido
+- **Hungarian matching (reemplazo del greedy):**
+  - 9/24 missing en frame_0036 son "stolen": tol_xy_px=22=dy → dos expected compiten
+    por el mismo detected cuando el agujero está entre dos filas adyacentes.
+  - Greedy closest-first no puede resolver esto. Hungarian matching sí.
+  - Impacto estimado: ↓9 missing en frame_0036 (24→15).
 - **Activar `quality_ratio_min`:**
   - Calibrar en planta: medir el ratio promedio en operación normal vs blur de movimiento
-  - Setear `quality_ratio_min` al valor que separa ambas condiciones
 
 ### Media prioridad
 - Activar `center_offset_tol_px` con valor real (medir cuántos px de offset se toleran)
@@ -691,4 +789,3 @@ continuous_position_threshold: 4.0
 ### Baja prioridad
 - Tests unitarios para pipeline de visión (compare, detect, preprocess, grid_fitting)
 - Modelo_A: revisar si tiene células duplicadas en grid (113 únicas de 117)
-- Considerar Hungarian matching en lugar de greedy-closest-first para casos extremos

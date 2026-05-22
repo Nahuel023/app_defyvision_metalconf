@@ -53,19 +53,33 @@ def draw_compare_overlay(
     missing_points: Sequence[Tuple[float, float]],
     status: str,
     extra_points: Sequence[Tuple[float, float]] = (),
+    near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
 ) -> np.ndarray:
+    """Draw inspection overlay.
+
+    near_miss_pairs: list of ((exp_x, exp_y), (det_x, det_y)) for expected points
+    that have a detected hole nearby but outside tol_xy_px. A thin cyan line
+    connects them so the operator can see the gap at a glance.
+    """
     out = img_bgr.copy()
+
+    # Líneas near-miss: esperado → detectado más cercano (fuera de tolerancia)
+    for (ex, ey), (dx, dy) in near_miss_pairs:
+        cv2.line(out, (int(ex), int(ey)), (int(dx), int(dy)),
+                 (255, 220, 0), 1, cv2.LINE_AA)
 
     # Detectados: verde
     for h in detected:
         cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (0, 255, 0), 2)
 
     # Missing esperados: rojo
+    # cruz roja = posición esperada sin match dentro de tol_xy_px
     for (x, y) in missing_points:
         cv2.drawMarker(out, (int(x), int(y)), (0, 0, 255),
                        markerType=cv2.MARKER_TILTED_CROSS, markerSize=25, thickness=3)
 
     # Extra detectados (espurios): naranja diamante
+    # diamante naranja = detectado sin posición esperada asignada
     for (x, y) in extra_points:
         cv2.drawMarker(out, (int(x), int(y)), (0, 165, 255),
                        markerType=cv2.MARKER_DIAMOND, markerSize=20, thickness=2)
