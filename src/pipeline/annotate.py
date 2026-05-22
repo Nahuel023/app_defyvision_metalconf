@@ -111,16 +111,31 @@ def _draw_edge_polyline(
     alpha: float = 0.55,
     dot_radius: int = 3,
 ) -> None:
-    """Draw a polyline through real per-band edge points with sample dots."""
+    """Draw a polyline through real per-band edge points with sample dots.
+
+    All segments are drawn onto a single off-screen layer which is then blended
+    in one pass — avoids N separate alpha compositing operations per polyline.
+    """
     if len(points) < 1:
         return
     sorted_pts = sorted(points, key=lambda p: p[1])
+
+    # Single layer for all segments + dots, one alpha blend
+    layer = np.zeros_like(img)
     for j in range(len(sorted_pts) - 1):
-        x0, y0 = int(round(sorted_pts[j][0])), int(round(sorted_pts[j][1]))
+        x0, y0 = int(round(sorted_pts[j][0])),     int(round(sorted_pts[j][1]))
         x1, y1 = int(round(sorted_pts[j + 1][0])), int(round(sorted_pts[j + 1][1]))
-        _draw_transparent_line(img, (x0, y0), (x1, y1), color, thickness, alpha)
+        cv2.line(layer, (x0, y0), (x1, y1), color, thickness)
     for (x, y) in sorted_pts:
-        cv2.circle(img, (int(round(x)), int(round(y))), dot_radius, color, -1)
+        cv2.circle(layer, (int(round(x)), int(round(y))), dot_radius, color, -1)
+
+    mask = layer.any(axis=2)
+    if mask.any():
+        img[mask] = np.clip(
+            img[mask].astype(np.float32) * (1.0 - alpha)
+            + layer[mask].astype(np.float32) * alpha,
+            0, 255,
+        ).astype(np.uint8)
 
 
 def draw_centering_overlay(

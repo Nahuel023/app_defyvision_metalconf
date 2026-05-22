@@ -51,6 +51,70 @@ Trabajo en mejoras visuales del overlay de centrado y rediseño del tab de graba
 
 ---
 
+#### Cambio 28 — Centrado: detección real en ventanas full-frame + fix perf anotación
+
+**Motivación / diagnóstico:**
+`run-folder` sobre 185 frames tardaba ~182 s (~1 s/frame). El origen eran dos bugs:
+
+1. **Bug funcional:** `compute_centering()` recibía la imagen ROI-recortada (650×1077).
+   La ROI excluye ambos backlights (izq: col 416–687; ROI empieza en x=710; der: col
+   1374–1645; ROI termina en x=1360). Sin backlight, el algoritmo detectaba los propios
+   bordes de la ROI como borde de chapa → `left_x=0, right_x=649` (nulos).
+
+2. **Bug de rendimiento en anotación:** `_draw_edge_polyline()` llamaba
+   `_draw_transparent_line()` una vez por segmento (15 segmentos × 4 bordes = 60 llamadas
+   por frame). Cada llamada: `np.zeros_like(img_1077×650)` + `any(axis=2)` sobre 700 K
+   píxeles → 3 s en 5 frames solo en numpy.ufunc.reduce según cProfile.
+
+**Solución:**
+
+A) **`src/pipeline/edge_centering.py`** — reescrito completamente:
+   - Nueva firma: `compute_centering(img_full, holes, roi=None, tol_px=0.0)`
+   - Cuando `roi` está presente, `img_full` es el frame completo alineado (ambos
+     backlights visibles). Cuando `roi=None`, mantiene la detección legacy por bandas
+     (sin cambio de comportamiento para el path sin ROI).
+   - Nueva función `_detect_sheet_edges_in_windows()`:
+     - Ventana izquierda: `[max(0, roi.x-350) : roi.x+80]` (full-frame x)
+     - Ventana derecha: `[roi.x+roi.w-80 : min(W, roi.x+roi.w+350)]`
+     - Canal R (backlight rojo → brillante)
+     - Downsampling de filas con paso `_DS=4` para velocidad
+     - Kernel de suavizado pequeño `_SMOOTH_K=7` (preserva magnitud del gradiente)
+     - Left: `argmin(diff(col_profile))` → transición brillante→oscura
+     - Right: `argmax(diff(col_profile))` → transición oscura→brillante
+     - Umbral: rango de brillo ≥ 20 AND gradiente ≥ 3% del rango
+     - Devuelve coordenadas en espacio ROI-relativo (mismo que los agujeros)
+   - `_N_BANDS=16` de detección por banda, mismo número que antes
+   - `_MIN_RELIABLE_BANDS=6` sin cambio
+   - Márgenes calculados en espacio ROI (consistente con holes)
+
+B) **`src/inspection.py` línea 278:**
+   ```python
+   # ANTES (roto):
+   centering = compute_centering(img, holes, tol_px=center_offset_tol_px)
+   # DESPUÉS (correcto):
+   centering = compute_centering(img_aligned, holes, roi=roi, tol_px=center_offset_tol_px)
+   ```
+
+C) **`src/pipeline/annotate.py` — `_draw_edge_polyline()`:**
+   - Antes: 1 capa temporal + 1 alpha blend POR SEGMENTO (hasta 15 por polilínea)
+   - Después: todos los segmentos se dibujan en UNA capa, 1 sola pasada de alpha blend
+   - Reduce 60 operaciones de blend/frame → 4 (una por borde)
+   - Eliminada la llamada a `_draw_transparent_line` desde `_draw_edge_polyline`
+
+**Resultados medidos:**
+- `frame_0009`: `left_x = -31.2 px` (ROI-relativo) → full-frame ≈ 679 px (borde real)
+              `right_x = 700.9 px` (ROI-relativo) → full-frame ≈ 1411 px (borde real)
+  (antes: 0 y 649 — bordes de ROI; o 0 y 1919 — bordes de frame)
+- 16/16 bandas detectadas, `centering_reliable=True`
+- `compute_centering`: ~6 ms/frame (antes ~1 010 ms)
+- `run-folder` 185 frames: **27.9 s total** (antes 182.75 s → 6.5× más rápido)
+- `inspect_image` aislado: ~175 ms/frame (antes ~1 094 ms)
+- 185/185 OK mantenido (centrado es informacional, `center_offset_tol_px=0.0`)
+
+**Sin tocar:** PLC, solenoides, lógica temporal, lógica de comparación de agujeros.
+
+---
+
 #### Cambio 27 — Rediseño tab Grabación: estética industrial + exportación de imágenes
 
 **Motivación:** El tab de Grabación en la UI de Servicio tenía controles apilados en una sola
