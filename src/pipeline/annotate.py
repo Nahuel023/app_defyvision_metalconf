@@ -166,31 +166,42 @@ def draw_centering_overlay(
     pat_l_pts = getattr(centering, "pattern_left_points", ())
     pat_r_pts = getattr(centering, "pattern_right_points", ())
 
-    # --- Metal edges: real polyline or fallback vertical line ---
+    _font_sm = cv2.FONT_HERSHEY_SIMPLEX
+
+    # --- Metal edges (CHAPA): real polyline or fallback vertical line ---
     _edge_color = (210, 210, 210)
+    # Clamp x to image bounds for label placement (edge may be outside ROI)
+    lx_vis = max(3, min(lx, w - 55))
+    rx_vis = max(3, min(rx, w - 55))
     if len(left_pts) >= 2:
         _draw_edge_polyline(out, left_pts, _edge_color, thickness=2, alpha=0.50)
     else:
         _draw_transparent_line(out, (lx, 0), (lx, h - 1), _edge_color, 2, 0.45)
+    cv2.putText(out, "CHAPA", (lx_vis, 28), _font_sm, 0.45, _edge_color, 1, cv2.LINE_AA)
 
     if len(right_pts) >= 2:
         _draw_edge_polyline(out, right_pts, _edge_color, thickness=2, alpha=0.50)
     else:
         _draw_transparent_line(out, (rx, 0), (rx, h - 1), _edge_color, 2, 0.45)
+    cv2.putText(out, "CHAPA", (rx_vis, 28), _font_sm, 0.45, _edge_color, 1, cv2.LINE_AA)
 
-    # --- Pattern bounds: real polyline or fallback dashed line ---
+    # --- Pattern bounds (PATRON): real polyline or fallback dashed line ---
     _pat_color = (50, 220, 255)   # amarillo-cyan
+    plx_vis = max(3, min(plx, w - 65))
+    prx_vis = max(3, min(prx, w - 65))
     if len(pat_l_pts) >= 2:
         _draw_edge_polyline(out, pat_l_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
     else:
         for y in range(0, h, 20):
             cv2.line(out, (plx, y), (plx, min(y + 12, h - 1)), _pat_color, 1)
+    cv2.putText(out, "PATRON", (plx_vis, 44), _font_sm, 0.45, _pat_color, 1, cv2.LINE_AA)
 
     if len(pat_r_pts) >= 2:
         _draw_edge_polyline(out, pat_r_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
     else:
         for y in range(0, h, 20):
             cv2.line(out, (prx, y), (prx, min(y + 12, h - 1)), _pat_color, 1)
+    cv2.putText(out, "PATRON", (prx_vis, 44), _font_sm, 0.45, _pat_color, 1, cv2.LINE_AA)
 
     # --- Sheet center: orange dashed line ---
     for y in range(0, h, 20):
@@ -207,28 +218,25 @@ def draw_centering_overlay(
     else:
         cv2.circle(out, (cx, mid_y), 6, (0, 200, 0), -1)
 
-    # --- Text: margins, offset, variation ---
-    sign = "+" if centering.offset_px >= 0 else ""
+    # --- Text: margins, delta, offset, verticality ---
     lm = centering.left_margin_px
     rm = centering.right_margin_px
-    lm_std = getattr(centering, "left_margin_std", 0.0)
-    rm_std = getattr(centering, "right_margin_std", 0.0)
-    var_px = max(lm_std, rm_std)
+    delta = centering.margin_delta_px
+    offset = centering.offset_px
+    sign_d = "+" if delta >= 0 else ""
+    sign_o = "+" if offset >= 0 else ""
 
     text_y_base = h - 15
-    cv2.putText(out, f"Offset: {sign}{centering.offset_px:.1f}px",
-                (10, text_y_base), cv2.FONT_HERSHEY_SIMPLEX, 0.75, color, 2, cv2.LINE_AA)
-
-    margin_line = f"Izq: {lm:.0f}px  Der: {rm:.0f}px"
-    if var_px > 0:
-        margin_line += f"  Var: \xb1{var_px:.0f}px"
-    cv2.putText(out, margin_line,
-                (10, text_y_base - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (180, 180, 180), 1, cv2.LINE_AA)
-
-    # Pattern edge verticality (slope from vertical in degrees)
+    # Row 1 (bottom): margins left / right
+    cv2.putText(out, f"Izq: {lm:.0f}px   Der: {rm:.0f}px",
+                (10, text_y_base), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
+    # Row 2: delta + offset
+    cv2.putText(out, f"Delta: {sign_d}{delta:.1f}px   Offset: {sign_o}{offset:.1f}px",
+                (10, text_y_base - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+    # Row 3: pattern edge verticality
     pl_slope = getattr(centering, "pattern_left_slope_deg", 0.0)
     pr_slope = getattr(centering, "pattern_right_slope_deg", 0.0)
-    vert_color = (80, 200, 255)  # cyan-yellow
+    vert_color = (80, 200, 255)
     cv2.putText(out, f"Vert pat: Izq={pl_slope:+.1f}\xb0  Der={pr_slope:+.1f}\xb0",
                 (10, text_y_base - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, vert_color, 1, cv2.LINE_AA)
 

@@ -84,6 +84,13 @@ models:
     # >tol_xy_px de su posición esperada. Usa tol_xy_px×1.5 como radio de matching
     # inicial, requiere ≥12 matches y valida que escala y shear sean razonables (±15%).
     grid_affine_refinement: true
+    # ── Centrado ───────────────────────────────────────────────────────────
+    # Tolerancia de offset para marcar NOK CENTRADO. 0.0 = solo medir, nunca NOK.
+    # offset_px = (left_margin_px - right_margin_px) / 2
+    # Positivo = patrón corrido a la derecha. Negativo = corrido a la izquierda.
+    # En grabación 20260519_121741: mediana ≈ -0.9 px, peor ≈ 7 px.
+    # Activar cuando se calibre la tolerancia de centrado en planta (ej: 15.0).
+    center_offset_tol_px: 0.0
     # Filtro de extras falsos: un detectado sin match solo cuenta como "extra" si
     # está a más de (extra_min_dist_factor × tol_xy_px) de CUALQUIER posición
     # esperada. Con tol=22px y factor=2.0 → umbral=44px. Agujeros reales que el
