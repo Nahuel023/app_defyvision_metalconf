@@ -12,10 +12,13 @@ to avoid false alarms caused by measurement jitter near the tolerance edge.
 
 Edge filter: missing points within `same_zone_px` of the top or bottom of
 the ROI are ignored (they appear when the sheet enters or exits the camera).
+
+In continuous feed the same broken/clogged punch moves vertically through the
+ROI.  Zones are therefore matched primarily by X column; Y is tracked for
+visualization but does not reset the streak.
 """
 from __future__ import annotations
 
-import math
 from typing import Sequence
 
 
@@ -74,18 +77,11 @@ class MachineStopDetector:
         if frame_quality == "LOW_QUALITY":
             return self._triggered, self._triggered_positions()
 
-        # Near-miss expected positions to filter out
-        nm_set: set[tuple[int, int]] = set()
-        if self._ignore_near_miss:
-            for (ex, ey), _ in near_miss_pairs:
-                nm_set.add((round(ex), round(ey)))
-
-        # Apply Y-edge and near-miss filters
+        # Apply Y-edge filter.  Do not discard near-misses here: if they repeat
+        # in the same X column across frames, they are evidence of a real issue.
         edge_y = self._same_zone_px
         effective: list[tuple[float, float]] = []
         for (x, y) in missing_points:
-            if (round(x), round(y)) in nm_set:
-                continue
             if y < edge_y or y > img_h - edge_y:
                 continue
             effective.append((x, y))
@@ -94,13 +90,14 @@ class MachineStopDetector:
         for z in self._zones:
             z["count"] = 0
 
-        # Greedy closest-first: match each effective point to a zone
+        # Greedy closest-first: match by X column.  The sheet advances in Y,
+        # so a persistent punch defect appears at changing Y but similar X.
         unmatched: list[tuple[float, float]] = []
         for (x, y) in effective:
             best_i = -1
-            best_d = math.inf
+            best_d = float("inf")
             for i, z in enumerate(self._zones):
-                d = math.hypot(z["x"] - x, z["y"] - y)
+                d = abs(z["x"] - x)
                 if d <= self._same_zone_px and d < best_d:
                     best_d = d
                     best_i = i

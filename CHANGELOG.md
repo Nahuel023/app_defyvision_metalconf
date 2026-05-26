@@ -1680,6 +1680,92 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 
 ---
 
+### SesiÃ³n 2026-05-26 â€” Tadeo + Codex
+
+#### Cambio 38 â€” Parada por agujero tapado persistente en material continuo
+
+**MotivaciÃ³n:** Un agujero tapado desde el inicio de la secuencia no activaba
+`DETENCION DE MAQUINA`. La causa era doble:
+1. El tracker buscaba persistencia en la misma posiciÃ³n `(x,y)`, pero la chapa avanza
+   verticalmente y el mismo defecto aparece con `x` similar y `y` cambiante.
+2. Los faltantes eran descartados como near-miss porque en la grilla densa siempre hay
+   un agujero vecino cerca.
+
+**Cambios:**
+- `src/pipeline/machine_stop.py`:
+  - Las zonas persistentes ahora matchean por columna `X` (`abs(dx) <= same_zone_px`).
+  - `Y` se sigue actualizando para visualizaciÃ³n, pero ya no resetea la racha.
+  - Los near-miss persistentes ya no se descartan antes del tracking; la persistencia
+    por columna es el filtro contra falsos positivos.
+- `src/inspection.py`:
+  - Si `machine_stop=True`, `final_status` pasa a `NOK`.
+  - `_apply_temporal_rule()` marca `decision_status=NOK` inmediatamente para machine stop.
+- `src/controller/scanner_controller.py`:
+  - En producciÃ³n, `result.machine_stop=True` fuerza `ScannerState.FAULT` inmediato,
+    sin esperar `consecutive_nok_frames`.
+
+**ValidaciÃ³n en `20260519_121741`:**
+- `machine_stop_frames=22`.
+- El defecto persistente inicial dispara desde `frame_0006.png`:
+  - `frame_0006.png` a `frame_0009.png` â†’ `NOK/NOK`, `machine_stop=True`.
+- `frame_0037.png` sigue `LOW_QUALITY` y no decide.
+- `python -m compileall src` OK.
+
+---
+
+#### Cambio 37 â€” Mapeo fijo de cÃ¡maras por scanner
+
+**MotivaciÃ³n:** Asegurar que la UI y el control nunca intercambien feeds:
+`scanner_1` debe usar siempre cÃ¡mara Ã­ndice 0 y `scanner_2` siempre cÃ¡mara Ã­ndice 1.
+Si una cÃ¡mara no abre, su scanner queda sin imagen; no debe ocupar el lugar del otro.
+
+**Cambio:**
+- `src/controller/system.py`:
+  - Agregado `_FIXED_CAMERA_BY_SCANNER = {"scanner_1": 0, "scanner_2": 1}`.
+  - `InspectionSystem` usa ese mapeo como autoridad por encima de `config/io_map.yaml`.
+  - Si el YAML difiere, emite warning y mantiene el mapeo fijo.
+
+**ValidaciÃ³n:**
+- `python -m compileall src/controller/system.py` OK.
+- InstanciaciÃ³n de `InspectionSystem(disable_plc_outputs=True)`:
+  - `scanner_1: camera_index=0`
+  - `scanner_2: camera_index=1`
+
+---
+
+#### Cambio 36 â€” Sensibilidad de patrÃ³n desalineado menos agresiva
+
+**MotivaciÃ³n:** La mÃ©trica nueva de `pattern_center_zigzag_*` quedÃ³ demasiado sensible:
+marcaba 129/185 frames como NOK en la carpeta `20260519_121741`. El problema era conceptual:
+usar la mediana X de todos los agujeros por banda reacciona a la alternancia natural de filas
+del microperforado, aun cuando el patrÃ³n fÃ­sico estÃ¡ correcto.
+
+**Cambios:**
+- `src/pipeline/edge_centering.py`:
+  - `_pattern_center_by_band()` ahora calcula el centro como promedio entre borde fÃ­sico
+    izquierdo y derecho del patrÃ³n por banda.
+  - Evita falsos zigzag por filas alternadas del microperforado.
+- `config/tolerancias.yaml` y `src/utils/config.py`:
+  - `pattern_align_abs_max_px: 15.0 â†’ 30.0`
+  - `pattern_center_zigzag_std_max_px: 8.0 â†’ 4.0`
+  - `pattern_center_zigzag_abs_max_px: 18.0 â†’ 6.5`
+- `src/inspection.py`:
+  - Si `frame_geometry_quality == "UNSTABLE"`, no se permite que `pattern_alignment_warn`
+    convierta el frame en NOK. La imagen inestable se analiza, pero no decide.
+
+**ValidaciÃ³n en `20260519_121741`:**
+- Antes: 129/185 NOK por sensibilidad excesiva.
+- DespuÃ©s: 9/185 NOK + 1 frame `LOW_QUALITY`.
+- Frames pedidos:
+  - `frame_0121.png` â†’ NOK por `PATRON DESALINEADO`
+  - `frame_0122.png` â†’ NOK por `PATRON DESALINEADO`
+  - `frame_0124.png` â†’ NOK por `PATRON DESALINEADO`
+- `frame_0037.png` queda `LOW_QUALITY / IMAGEN INESTABLE - NO DECIDE`, sin forzar NOK.
+- Overlays de prueba guardados en `data/output/sensibilidad_patron_ajustada_v2/`.
+- `python -m compileall src` OK.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |

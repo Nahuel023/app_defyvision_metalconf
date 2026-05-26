@@ -352,13 +352,13 @@ def _inspect_bgr(
                 frame_geometry_quality = "UNSTABLE"
                 frame_quality = "LOW_QUALITY"  # skip streaks + machine stop
 
-        if pattern_align_enabled:
+        if pattern_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_zigzag_std_px > pattern_align_std_max_px
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
 
-        if pattern_center_align_enabled:
+        if pattern_center_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
                     or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max):
                 pattern_alignment_warn = True
@@ -386,6 +386,8 @@ def _inspect_bgr(
         machine_stop, _ms_positions = _ms_detector.update(
             report.missing_points, near_miss_pairs, frame_quality, img_h,
         )
+    if machine_stop:
+        final_status = "NOK"
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
@@ -667,7 +669,11 @@ def _apply_temporal_rule(
             else:
                 streak = 0
 
-        decision_status = "NOK" if streak >= consecutive_nok_frames else "OK"
+        decision_status = (
+            "NOK"
+            if getattr(result, "machine_stop", False) or streak >= consecutive_nok_frames
+            else "OK"
+        )
         temporal_results.append(
             TemporalFrameResult(
                 result=result,

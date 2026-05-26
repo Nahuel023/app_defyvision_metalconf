@@ -22,6 +22,11 @@ logger = logging.getLogger(__name__)
 
 _APP_CONFIG_PATH = Path("config/app.yaml")
 
+_FIXED_CAMERA_BY_SCANNER = {
+    "scanner_1": 0,
+    "scanner_2": 1,
+}
+
 
 class InspectionSystem:
     def __init__(self, io_map_path: Path = Path("config/io_map.yaml"),
@@ -41,9 +46,17 @@ class InspectionSystem:
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
+            camera_index = _FIXED_CAMERA_BY_SCANNER.get(
+                scanner_id, int(cfg["camera_index"])
+            )
+            if camera_index != int(cfg["camera_index"]):
+                logger.warning(
+                    "%s: camera_index fijo=%s (config decia %s)",
+                    scanner_id, camera_index, cfg["camera_index"],
+                )
             cam_settings = load_camera_settings(scanner_id)
             camera = Camera(
-                cfg["camera_index"],
+                camera_index,
                 retry_interval_s=cam_cfg.get("retry_interval_s", 1.0),
                 settings=cam_settings,
             )
