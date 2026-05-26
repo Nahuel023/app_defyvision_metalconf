@@ -157,6 +157,7 @@ def _inspect_bgr(
     grid_affine_refinement = bool(tolerances.get("grid_affine_refinement", False))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
+    extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -264,7 +265,8 @@ def _inspect_bgr(
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
     report  = compare_missing_only(compare_points, detected_in_bbox,
                                    tol_xy_px=tol_xy_px, max_missing=_max_missing,
-                                   max_extra=max_extra)
+                                   max_extra=max_extra,
+                                   extra_min_dist_factor=extra_min_dist_factor)
 
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
     capture_quality_degraded = (

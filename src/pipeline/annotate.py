@@ -225,6 +225,13 @@ def draw_centering_overlay(
     cv2.putText(out, margin_line,
                 (10, text_y_base - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.60, (180, 180, 180), 1, cv2.LINE_AA)
 
+    # Pattern edge verticality (slope from vertical in degrees)
+    pl_slope = getattr(centering, "pattern_left_slope_deg", 0.0)
+    pr_slope = getattr(centering, "pattern_right_slope_deg", 0.0)
+    vert_color = (80, 200, 255)  # cyan-yellow
+    cv2.putText(out, f"Vert pat: Izq={pl_slope:+.1f}\xb0  Der={pr_slope:+.1f}\xb0",
+                (10, text_y_base - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, vert_color, 1, cv2.LINE_AA)
+
     # --- "CENTRADO NO CONFIABLE" badge when too few bands detected ---
     centering_reliable = getattr(centering, "centering_reliable", True)
     if not centering_reliable:

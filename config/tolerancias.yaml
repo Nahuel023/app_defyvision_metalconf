@@ -84,6 +84,12 @@ models:
     # >tol_xy_px de su posición esperada. Usa tol_xy_px×1.5 como radio de matching
     # inicial, requiere ≥12 matches y valida que escala y shear sean razonables (±15%).
     grid_affine_refinement: true
+    # Filtro de extras falsos: un detectado sin match solo cuenta como "extra" si
+    # está a más de (extra_min_dist_factor × tol_xy_px) de CUALQUIER posición
+    # esperada. Con tol=22px y factor=2.0 → umbral=44px. Agujeros reales que el
+    # matcher no asignó (por error de fase) suelen estar <44px de su expected.
+    # Los reflejos/ruido espurio están típicamente muy lejos de toda posición esperada.
+    extra_min_dist_factor: 2.0
     # ── Modo continuo ──────────────────────────────────────────────────────
     # Grabaciones @ 10fps muestran diff máx 5.21px. Global=8.0 nunca dispara
     # para este material. Con 4.0 se obtienen ~100-140 inspecciones / 321 frames.

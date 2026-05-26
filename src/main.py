@@ -193,6 +193,148 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
 
 
 
+def cmd_missing_folder(args: argparse.Namespace) -> int:
+    """Diagnostic: scan folder and export frames where missing >= min_missing.
+
+    production_status  — normal pipeline result (grid_max_missing applies).
+    missing_status     — FALTANTE when report.missing >= min_missing, else OK.
+
+    Exports:
+      <output>/missing_overlays/frame_NNNN_missing_M_overlay.png  (one per FALTANTE frame)
+      <output>/missing_report.csv
+
+    This command does NOT touch PLC logic, production thresholds, or grid_max_missing.
+    """
+    import csv
+    import cv2
+    import numpy as np
+
+    from src.inspection import inspect_image, iter_image_files
+    from src.utils.config import load_tolerances
+
+    input_dir: Path = args.input
+    output_dir: Path = args.output
+    min_missing: int = args.min_missing
+    model: str = args.model
+    scanner: str | None = args.scanner
+
+    if not input_dir.is_dir():
+        print(f"[missing-folder] ERROR: {input_dir} no es un directorio")
+        return 1
+
+    tol_xy_px = float(load_tolerances(model).get("tol_xy_px", 22.0))
+
+    overlay_dir = output_dir / "missing_overlays"
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+
+    frames = list(iter_image_files(input_dir))
+    if not frames:
+        print("[missing-folder] No se encontraron imágenes.")
+        return 1
+
+    print(f"[missing-folder] model={model}  scanner={scanner or '(global)'}")
+    print(f"[missing-folder] frames={len(frames)}  min_missing={min_missing}  tol_xy={tol_xy_px}px")
+    print(f"[missing-folder] salida -> {output_dir}")
+    print()
+
+    fieldnames = [
+        "frame", "production_status", "missing_status",
+        "expected", "detected", "missing", "extra",
+        "detection_ratio", "alignment_ok",
+        "false_missing_count", "missing_nearest_med_px", "missing_nearest_max_px",
+    ]
+
+    rows: list[dict] = []
+    faltante_frames: list[tuple[str, int]] = []  # (name, missing_count)
+
+    for idx, img_path in enumerate(frames, 1):
+        result = inspect_image(model, img_path, save=False, scanner_id=scanner)
+        r = result.report
+
+        # Missing nearest-distance metrics (diagnose false missing)
+        mis_nearest_max = 0.0
+        mis_nearest_med = 0.0
+        false_missing   = 0
+        if r.missing_points and result.holes:
+            det_pts = np.array([(h.x, h.y) for h in result.holes], dtype=np.float32)
+            mis_pts = np.array(r.missing_points, dtype=np.float32)
+            diff    = mis_pts[:, None, :] - det_pts[None, :, :]
+            dists   = np.sqrt((diff ** 2).sum(axis=2)).min(axis=1)
+            mis_nearest_max = float(dists.max())
+            mis_nearest_med = float(np.median(dists))
+            false_missing   = int((dists < tol_xy_px * 2.0).sum())
+
+        missing_status = "FALTANTE" if r.missing >= min_missing else "OK"
+
+        rows.append({
+            "frame":                  img_path.name,
+            "production_status":      result.status,
+            "missing_status":         missing_status,
+            "expected":               r.expected,
+            "detected":               r.detected,
+            "missing":                r.missing,
+            "extra":                  r.extra,
+            "detection_ratio":        f"{result.detection_ratio:.3f}",
+            "alignment_ok":           result.alignment_ok,
+            "false_missing_count":    false_missing,
+            "missing_nearest_med_px": f"{mis_nearest_med:.1f}",
+            "missing_nearest_max_px": f"{mis_nearest_max:.1f}",
+        })
+
+        if r.missing >= min_missing:
+            faltante_frames.append((img_path.name, r.missing))
+            # Draw "FALTANTE: N" badge on overlay and save
+            ov = result.overlay.copy()
+            label = f"FALTANTE: {r.missing}"
+            font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 1.1, 3
+            (tw, th), bl = cv2.getTextSize(label, font, scale, thick)
+            h_ov, w_ov = ov.shape[:2]
+            bx1, by1 = w_ov // 2 - tw // 2 - 10, 110
+            bx2, by2 = w_ov // 2 + tw // 2 + 10, 110 + th + bl + 12
+            cv2.rectangle(ov, (bx1, by1), (bx2, by2), (0, 60, 160), -1)
+            cv2.rectangle(ov, (bx1, by1), (bx2, by2), (0, 80, 255), 2)
+            cv2.putText(ov, label, (bx1 + 10, by2 - bl - 6),
+                        font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+            stem = img_path.stem
+            out_name = f"{stem}_missing_{r.missing}_overlay.png"
+            cv2.imwrite(str(overlay_dir / out_name), ov)
+
+        if idx % 20 == 0 or idx == len(frames):
+            n_faltante = sum(1 for row in rows if row["missing_status"] == "FALTANTE")
+            print(f"  {idx}/{len(frames)}  FALTANTE={n_faltante}")
+
+    # Write CSV
+    csv_path = output_dir / "missing_report.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    # Console summary
+    total = len(rows)
+    n_faltante = sum(1 for row in rows if row["missing_status"] == "FALTANTE")
+    all_missing = [int(row["missing"]) for row in rows]
+    total_missing = sum(all_missing)
+    max_missing = max(all_missing)
+
+    print()
+    print("=== RESUMEN ===")
+    print(f"  Frames totales:        {total}")
+    print(f"  Frames FALTANTE:       {n_faltante} ({n_faltante/total:.0%})")
+    print(f"  Frames OK (diag):      {total - n_faltante}")
+    print(f"  Missing acumulado:     {total_missing}")
+    print(f"  Missing maximo:        {max_missing}")
+    if faltante_frames:
+        top10 = sorted(faltante_frames, key=lambda x: x[1], reverse=True)[:10]
+        print(f"  Top 10 por missing:")
+        for name, m in top10:
+            print(f"    {name}: {m}")
+    print()
+    print(f"  CSV:     {csv_path}")
+    print(f"  Overlays: {overlay_dir}  ({n_faltante} imagenes)")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
     from src.utils.logger import setup_logging
@@ -275,6 +417,22 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--fps", type=float, default=None, help="FPS efectivo de la secuencia para decision temporal.")
     sp.add_argument("--save", action="store_true", help="Guardar resultados en data/output.")
     sp.set_defaults(func=cmd_run_folder)
+
+    sp = sub.add_parser(
+        "missing-folder",
+        help=(
+            "Diagnóstico: detecta y exporta frames con agujeros faltantes. "
+            "production_status usa grid_max_missing (no cambia). "
+            "missing_status marca FALTANTE cuando missing >= --min-missing."
+        ),
+    )
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_1).")
+    sp.add_argument("--input",   required=True, type=Path, help="Carpeta con frames a analizar.")
+    sp.add_argument("--output",  required=True, type=Path, help="Carpeta de salida (CSV + overlays).")
+    sp.add_argument("--min-missing", type=int, default=1, dest="min_missing",
+                    help="Umbral de agujeros faltantes para marcar FALTANTE (default: 1).")
+    sp.set_defaults(func=cmd_missing_folder)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.add_argument("--no-plc-outputs", action="store_true", dest="no_plc_outputs",
