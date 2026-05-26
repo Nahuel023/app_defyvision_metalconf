@@ -48,6 +48,9 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pattern_align_enabled": False,
     "pattern_align_std_max_px": 6.0,
     "pattern_align_abs_max_px": 15.0,
+    "pattern_center_align_enabled": False,
+    "pattern_center_zigzag_std_max_px": 8.0,
+    "pattern_center_zigzag_abs_max_px": 18.0,
 }
 
 

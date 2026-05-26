@@ -160,3 +160,8 @@ models:
     pattern_align_enabled: true
     pattern_align_std_max_px: 5.0
     pattern_align_abs_max_px: 15.0
+    # PATRON CENTER zigzag (mediana X de todos los agujeros por banda) — detecta zigzag interno
+    # que los bordes externos no capturan. Umbrales más amplios para evitar falsos positivos.
+    pattern_center_align_enabled: true
+    pattern_center_zigzag_std_max_px: 8.0
+    pattern_center_zigzag_abs_max_px: 18.0

@@ -1182,6 +1182,61 @@ D) **`config/tolerancias.yaml`** — modelo_B:
 
 ---
 
+#### Cambio 42 — Métrica de zigzag del centro del patrón por bandas (PATRON CENTER)
+
+**Problema reportado:**
+Frames 0120, 0121, 0123 pasan como OK pero el centro del patrón de agujeros zigzaguea
+visualmente. La métrica anterior (`pattern_zigzag_*`) usa solo los bordes externos del
+patrón (agujero más a la izquierda / más a la derecha por banda), lo cual no detecta
+desalineación interna.
+
+**Causa raíz:**
+`_pattern_bounds_by_band()` devuelve `min(x - r)` y `max(x + r)` por banda. Si el
+patrón se tuerce en el centro pero los agujeros de los extremos no se mueven mucho,
+el zigzag no se detecta. Los frames 0122, 0124–0126 sí disparaban porque el desvío
+era más extremo.
+
+**Solución — nueva métrica PATRON CENTER:**
+
+A) **`src/pipeline/edge_centering.py`:**
+   - Nueva función `_pattern_center_by_band(holes, img_h, n_bands=16)`:
+     - Por banda: `center_x = np.median([h.x for h in band_holes])` (mínimo 2 agujeros)
+     - Devuelve lista de `(center_x, cy)` por banda
+   - Nuevos campos en `CenteringResult` (frozen dataclass, con default 0.0):
+     - `pattern_center_zigzag_std_px: float = 0.0`
+     - `pattern_center_zigzag_max_px: float = 0.0`
+   - En `compute_centering()`: calcula `center_pts = _pattern_center_by_band(holes, img_h_for_bands)`
+     y aplica `_zigzag_residuals([center_pts])` para obtener std/max.
+
+B) **`src/inspection.py`:**
+   - Nuevos campos en `InspectionResult`:
+     - `pattern_center_zigzag_std_px: float = 0.0`
+     - `pattern_center_zigzag_max_px: float = 0.0`
+   - Lee tolerancias: `pattern_center_align_enabled`, `pattern_center_zigzag_std_max_px`,
+     `pattern_center_zigzag_abs_max_px`
+   - Si el umbral se supera: `pattern_alignment_warn = True` + `final_status = "NOK"`
+     (misma consecuencia que `pattern_align_enabled` — badge PATRON DESALINEADO)
+
+C) **`src/utils/config.py`** — nuevos defaults:
+   ```python
+   "pattern_center_align_enabled": False,
+   "pattern_center_zigzag_std_max_px": 8.0,
+   "pattern_center_zigzag_abs_max_px": 18.0,
+   ```
+
+D) **`config/tolerancias.yaml`** — modelo_B:
+   ```yaml
+   pattern_center_align_enabled: true
+   pattern_center_zigzag_std_max_px: 8.0
+   pattern_center_zigzag_abs_max_px: 18.0
+   ```
+   Umbrales más amplios que el borde (std=5, abs=15) para evitar falsos positivos,
+   ya que la mediana reduce la varianza frente a agujeros extremos.
+
+**Sin tocar:** PLC, solenoides, lógica temporal, patrón de referencia, grid_max_missing.
+
+---
+
 #### Cambio 41 — PATRON DESALINEADO → NOK + badge en tope + bordes resaltados
 
 **Problema reportado:** frame_0122 mostraba "STATUS: OK" con badge DETENER MAQUINA activo.
