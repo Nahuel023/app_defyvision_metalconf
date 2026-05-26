@@ -138,23 +138,58 @@ def _draw_edge_polyline(
         ).astype(np.uint8)
 
 
-def draw_machine_stop_badge(img: np.ndarray) -> np.ndarray:
-    """Draw a prominent DETENCION DE MAQUINA badge centered on the image."""
+def draw_machine_stop_badge(
+    img: np.ndarray,
+    reason: str = "",
+    y_offset: int = 0,
+) -> np.ndarray:
+    """Draw a full-width red DETENER MAQUINA banner with optional reason text.
+
+    y_offset: shift the banner vertically (px). Use to stack two banners when
+    both machine_stop and pattern_alignment_warn are active simultaneously.
+    """
     out = img.copy()
     h, w = out.shape[:2]
-    label = "DETENCION DE MAQUINA"
     font = cv2.FONT_HERSHEY_SIMPLEX
-    scale, thick = 1.4, 4
-    (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
-    pad = 14
-    bx1 = w // 2 - tw // 2 - pad
-    by1 = h // 2 - th - baseline - pad
-    bx2 = w // 2 + tw // 2 + pad
-    by2 = h // 2 + baseline + pad
-    cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 140), -1)
-    cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 255), 3)
-    cv2.putText(out, label, (bx1 + pad, by2 - baseline - 4),
-                font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+
+    main_label = "DETENER MAQUINA"
+    main_scale, main_thick = 2.0, 5
+    (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
+
+    reason_scale, reason_thick = 0.85, 2
+    (rw, rh), rbl = (cv2.getTextSize(reason, font, reason_scale, reason_thick)
+                     if reason else ((0, 0), 0))
+
+    inner_h = mh + mbl + (rh + rbl + 8 if reason else 0)
+    pad_v = 14
+    banner_h = inner_h + pad_v * 2
+    banner_y = max(0, h // 3 + y_offset)
+    banner_y = min(banner_y, h - banner_h - 4)
+
+    # Semi-transparent dark-red background
+    layer = out.copy()
+    cv2.rectangle(layer, (0, banner_y), (w, banner_y + banner_h), (0, 0, 160), -1)
+    cv2.addWeighted(layer, 0.88, out, 0.12, 0, out)
+
+    # Red border lines (top and bottom)
+    cv2.line(out, (0, banner_y),               (w, banner_y),               (0, 0, 255), 4)
+    cv2.line(out, (0, banner_y + banner_h),    (w, banner_y + banner_h),    (0, 0, 255), 4)
+
+    # Main "DETENER MAQUINA" text — white with red glow
+    mx = w // 2 - mw // 2
+    my = banner_y + pad_v + mh
+    cv2.putText(out, main_label, (mx + 2, my + 2), font, main_scale,
+                (0, 0, 100), main_thick + 3, cv2.LINE_AA)   # shadow
+    cv2.putText(out, main_label, (mx, my), font, main_scale,
+                (255, 255, 255), main_thick, cv2.LINE_AA)
+
+    # Reason text — yellow
+    if reason:
+        ry_pos = my + mbl + rh + 6
+        rx = w // 2 - rw // 2
+        cv2.putText(out, reason, (rx, ry_pos), font, reason_scale,
+                    (0, 200, 255), reason_thick, cv2.LINE_AA)
+
     return out
 
 

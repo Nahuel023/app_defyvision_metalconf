@@ -85,8 +85,14 @@ class CenteringResult:
     pattern_left_slope_deg: float = 0.0
     pattern_right_slope_deg: float = 0.0
 
-    # Horizontal residuals of per-band pattern points from a robust fitted line.
-    # High values indicate zigzag/vibration. Both sides combined.
+    # Horizontal residuals of per-band SHEET EDGE points from a robust fitted line.
+    # High values indicate camera/sheet vibration (frame image quality issue).
+    # 0.0 when insufficient points (<3) for a line fit.
+    chapa_zigzag_std_px: float = 0.0
+    chapa_zigzag_max_px: float = 0.0
+
+    # Horizontal residuals of per-band PATTERN (hole) edge points from a robust fitted line.
+    # High values indicate pattern misalignment within the sheet (mechanical issue).
     # 0.0 when insufficient points (<3) for a line fit.
     pattern_zigzag_std_px: float = 0.0
     pattern_zigzag_max_px: float = 0.0
@@ -419,25 +425,31 @@ def compute_centering(
     pattern_left_slope_deg  = _slope_deg(list(pattern_left_points))
     pattern_right_slope_deg = _slope_deg(list(pattern_right_points))
 
-    # Pattern zigzag: horizontal residuals from fitted line on each pattern border.
-    # Combines both sides to get a single frame-level stability metric.
-    _zr: list[float] = []
-    for _pts in (list(pattern_left_points), list(pattern_right_points)):
-        if len(_pts) < 3:
-            continue
-        _c = _fit_line_robust(_pts)
-        if _c is None:
-            continue
-        _xs = np.array([p[0] for p in _pts])
-        _ys = np.array([p[1] for p in _pts])
-        _zr.extend(np.abs(_xs - (_c[0] * _ys + _c[1])).tolist())
-    if _zr:
-        _zr_arr = np.array(_zr)
-        pattern_zigzag_std_px = float(_zr_arr.std())
-        pattern_zigzag_max_px = float(_zr_arr.max())
-    else:
-        pattern_zigzag_std_px = 0.0
-        pattern_zigzag_max_px = 0.0
+    def _zigzag_residuals(pts_lists: list) -> tuple[float, float]:
+        """Compute (std_px, max_px) of horizontal residuals from fitted line. Returns (0,0) if insufficient data."""
+        residuals: list[float] = []
+        for pts in pts_lists:
+            if len(pts) < 3:
+                continue
+            c = _fit_line_robust(list(pts))
+            if c is None:
+                continue
+            xs = np.array([p[0] for p in pts])
+            ys = np.array([p[1] for p in pts])
+            residuals.extend(np.abs(xs - (c[0] * ys + c[1])).tolist())
+        if residuals:
+            arr = np.array(residuals)
+            return float(arr.std()), float(arr.max())
+        return 0.0, 0.0
+
+    # CHAPA (sheet edge) zigzag — camera/sheet vibration indicator
+    chapa_zigzag_std_px, chapa_zigzag_max_px = _zigzag_residuals(
+        [left_pts_list, right_pts_list]
+    )
+    # PATRON (hole pattern edge) zigzag — mechanical misalignment indicator
+    pattern_zigzag_std_px, pattern_zigzag_max_px = _zigzag_residuals(
+        [list(pattern_left_points), list(pattern_right_points)]
+    )
 
     return CenteringResult(
         left_x=left_x,
@@ -463,6 +475,8 @@ def compute_centering(
         right_edge_slope_deg=right_edge_slope_deg,
         pattern_left_slope_deg=pattern_left_slope_deg,
         pattern_right_slope_deg=pattern_right_slope_deg,
+        chapa_zigzag_std_px=chapa_zigzag_std_px,
+        chapa_zigzag_max_px=chapa_zigzag_max_px,
         pattern_zigzag_std_px=pattern_zigzag_std_px,
         pattern_zigzag_max_px=pattern_zigzag_max_px,
     )
