@@ -335,6 +335,140 @@ def cmd_missing_folder(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_center_folder(args: argparse.Namespace) -> int:
+    """Diagnostic: measure sheet-centering for every frame in a folder.
+
+    Exports:
+      <output>/center_report.csv   — one row per frame, 20 columns
+      <output>/center_overlays/    — annotated overlay PNG per frame
+
+    This command does NOT touch PLC logic, production thresholds, or patterns.
+    """
+    import csv
+    import cv2
+
+    from src.inspection import inspect_image, iter_image_files
+
+    input_dir: Path = args.input
+    output_dir: Path = args.output
+    model: str = args.model
+    scanner: str | None = args.scanner
+
+    if not input_dir.is_dir():
+        print(f"[center-folder] ERROR: {input_dir} no es un directorio")
+        return 1
+
+    overlay_dir = output_dir / "center_overlays"
+    overlay_dir.mkdir(parents=True, exist_ok=True)
+
+    frames = list(iter_image_files(input_dir))
+    if not frames:
+        print("[center-folder] No se encontraron imagenes.")
+        return 1
+
+    print(f"[center-folder] model={model}  scanner={scanner or '(global)'}")
+    print(f"[center-folder] frames={len(frames)}")
+    print(f"[center-folder] salida -> {output_dir}")
+    print()
+
+    fieldnames = [
+        "frame", "status", "missing",
+        "centering_reliable",
+        "sheet_left_x", "sheet_right_x", "sheet_width_px",
+        "pattern_left_x", "pattern_right_x", "pattern_width_px",
+        "left_margin_px", "right_margin_px", "margin_delta_px", "offset_px",
+        "left_margin_std", "right_margin_std",
+        "sheet_left_slope_deg", "sheet_right_slope_deg",
+        "pattern_left_slope_deg", "pattern_right_slope_deg",
+    ]
+
+    rows: list[dict] = []
+
+    for idx, img_path in enumerate(frames, 1):
+        result = inspect_image(model, img_path, save=False, scanner_id=scanner)
+        c = result.centering
+
+        if c is not None:
+            row = {
+                "frame":                 img_path.name,
+                "status":                result.status,
+                "missing":               result.report.missing,
+                "centering_reliable":    c.centering_reliable,
+                "sheet_left_x":          f"{c.left_x:.1f}",
+                "sheet_right_x":         f"{c.right_x:.1f}",
+                "sheet_width_px":        f"{c.sheet_width_px:.1f}",
+                "pattern_left_x":        f"{c.pattern_left_x:.1f}",
+                "pattern_right_x":       f"{c.pattern_right_x:.1f}",
+                "pattern_width_px":      f"{c.pattern_right_x - c.pattern_left_x:.1f}",
+                "left_margin_px":        f"{c.left_margin_px:.1f}",
+                "right_margin_px":       f"{c.right_margin_px:.1f}",
+                "margin_delta_px":       f"{c.margin_delta_px:.1f}",
+                "offset_px":             f"{c.offset_px:.2f}",
+                "left_margin_std":       f"{c.left_margin_std:.2f}",
+                "right_margin_std":      f"{c.right_margin_std:.2f}",
+                "sheet_left_slope_deg":  f"{c.left_edge_slope_deg:.2f}",
+                "sheet_right_slope_deg": f"{c.right_edge_slope_deg:.2f}",
+                "pattern_left_slope_deg":  f"{c.pattern_left_slope_deg:.2f}",
+                "pattern_right_slope_deg": f"{c.pattern_right_slope_deg:.2f}",
+            }
+        else:
+            row = {
+                "frame":   img_path.name,
+                "status":  result.status,
+                "missing": result.report.missing,
+                **{k: "" for k in fieldnames[3:]},
+            }
+
+        rows.append(row)
+
+        # Save centering overlay (main overlay already includes centering drawing)
+        if result.overlay is not None:
+            stem = img_path.stem
+            cv2.imwrite(str(overlay_dir / f"{stem}_center.png"), result.overlay)
+
+        if idx % 20 == 0 or idx == len(frames):
+            n_reliable = sum(1 for r in rows if r.get("centering_reliable") == True)
+            print(f"  {idx}/{len(frames)}  reliable={n_reliable}")
+
+    # Write CSV
+    csv_path = output_dir / "center_report.csv"
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    # Summary
+    total = len(rows)
+    valid_rows = [r for r in rows if r.get("centering_reliable") == True]
+    n_reliable = len(valid_rows)
+
+    offsets   = [float(r["offset_px"]) for r in valid_rows if r["offset_px"] != ""]
+    lmargins  = [float(r["left_margin_px"]) for r in valid_rows if r["left_margin_px"] != ""]
+    rmargins  = [float(r["right_margin_px"]) for r in valid_rows if r["right_margin_px"] != ""]
+
+    def _median(lst):
+        if not lst:
+            return float("nan")
+        s = sorted(lst)
+        n = len(s)
+        return (s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2)
+
+    print()
+    print("=== RESUMEN CENTRADO ===")
+    print(f"  Frames totales:    {total}")
+    print(f"  Mediciones fiables: {n_reliable} / {total}")
+    if offsets:
+        print(f"  Offset (px):  mediana={_median(offsets):+.2f}  min={min(offsets):+.2f}  max={max(offsets):+.2f}")
+    if lmargins:
+        print(f"  Margen Izq:   mediana={_median(lmargins):.1f}  min={min(lmargins):.1f}  max={max(lmargins):.1f}")
+    if rmargins:
+        print(f"  Margen Der:   mediana={_median(rmargins):.1f}  min={min(rmargins):.1f}  max={max(rmargins):.1f}")
+    print()
+    print(f"  CSV:      {csv_path}")
+    print(f"  Overlays: {overlay_dir}  ({total} imagenes)")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
     from src.utils.logger import setup_logging
@@ -433,6 +567,19 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--min-missing", type=int, default=1, dest="min_missing",
                     help="Umbral de agujeros faltantes para marcar FALTANTE (default: 1).")
     sp.set_defaults(func=cmd_missing_folder)
+
+    sp = sub.add_parser(
+        "center-folder",
+        help=(
+            "Diagnóstico: mide centrado del patrón respecto a bordes de chapa por frame. "
+            "Exporta CSV (20 columnas) + overlays PNG. No toca lógica de producción."
+        ),
+    )
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_1).")
+    sp.add_argument("--input",   required=True, type=Path, help="Carpeta con frames a analizar.")
+    sp.add_argument("--output",  required=True, type=Path, help="Carpeta de salida (CSV + overlays).")
+    sp.set_defaults(func=cmd_center_folder)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.add_argument("--no-plc-outputs", action="store_true", dest="no_plc_outputs",

@@ -1175,6 +1175,47 @@ punzonado tiene deriva). Necesario poder cuantificar ese ángulo para diagnósti
 
 ---
 
+#### Cambio 33 — Comando CLI `center-folder` + overlay CHAPA/PATRON labels + documentación `center_offset_tol_px`
+
+**Motivación:** Formalizar y exportar las mediciones de centrado en forma diagnóstica, para poder
+calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
+
+**Implementación:**
+
+`src/main.py` — nueva función `cmd_center_folder()`:
+- Itera frames con `iter_image_files()` y llama `inspect_image()` por frame
+- Extrae `CenteringResult` de `result.centering`
+- Escribe CSV de 20 columnas: `frame, status, missing, centering_reliable,
+  sheet_left_x, sheet_right_x, sheet_width_px, pattern_left_x, pattern_right_x,
+  pattern_width_px, left_margin_px, right_margin_px, margin_delta_px, offset_px,
+  left_margin_std, right_margin_std, sheet_left_slope_deg, sheet_right_slope_deg,
+  pattern_left_slope_deg, pattern_right_slope_deg`
+- `pattern_width_px = pattern_right_x - pattern_left_x` (calculado, no campo de CenteringResult)
+- Exporta overlay PNG de cada frame a `<output>/center_overlays/`
+- Imprime resumen: mediana/min/max de offset_px, margen Izq, margen Der
+- Registrado como subparser `center-folder` en `build_parser()`
+
+`src/pipeline/annotate.py` — `draw_centering_overlay()`:
+- Agrega etiquetas "CHAPA" (gris) y "PATRON" (cyan-amarillo) sobre cada línea de borde
+- Reestructura texto inferior: fila 1=`Izq: Npx   Der: Mpx`, fila 2=`Delta: Xpx   Offset: Ypx`
+- Coordenadas clampeadas al ancho visible (borde chapa puede estar fuera del ROI)
+
+`config/tolerancias.yaml` — modelo_B:
+- Agrega `center_offset_tol_px: 0.0` con comentario completo de semántica:
+  - `offset_px = (left_margin_px - right_margin_px) / 2`
+  - Positivo = patrón corrido a la derecha, negativo = a la izquierda
+  - Mediana -0.95px en grabación 185 frames; peor caso +7.02px
+
+**Validación** — grabación `20260519_121741` (185 frames, modelo_B/scanner_1):
+- 185/185 mediciones fiables (centering_reliable=True en todos)
+- Offset mediana = **-0.95 px** ✓ (esperado ≈ -0.9 px)
+- Margen Izq mediana = **207.2 px** ✓ (esperado ≈ 207 px)
+- Margen Der mediana = **209.2 px** ✓ (esperado ≈ 209 px)
+- Offset máx = **+7.02 px** ✓ (esperado ≈ 7 px)
+- 185/185 raw OK mantenido ✓ (no se tocó lógica de producción)
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -1200,6 +1241,8 @@ punzonado tiene deriva). Necesario poder cuantificar ese ángulo para diagnósti
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |
 | CLI missing-folder | Nuevo comando diagnóstico: exporta CSV + overlays para frames con missing >= --min-missing. No toca criterio productivo. |
+| CLI center-folder | Nuevo comando diagnóstico: exporta CSV 20 cols + overlays de centrado por frame. Validado 185/185 fiable. |
+| Centrado modelo_B 185f | Offset mediana=-0.95px, Izq=207.2px, Der=209.2px, peor offset=+7.02px. `center_offset_tol_px=0.0` (sin NOK activado). |
 | run_folder_csv.py | Fix cp1252: reemplazados caracteres Unicode `→` por ASCII `->` en salidas de consola. |
 
 ---
