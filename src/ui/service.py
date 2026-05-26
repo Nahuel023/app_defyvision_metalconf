@@ -1088,15 +1088,24 @@ class RecordingTab(QWidget):
 
         # ── Config row ────────────────────────────────────────────────
         cfg = QHBoxLayout()
-        cfg.setSpacing(10)
+        cfg.setSpacing(0)
 
-        cfg.addWidget(self._lbl("Scanner:"))
+        def _chip(label: str) -> QLabel:
+            l = QLabel(label)
+            l.setStyleSheet(
+                f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+                f"background:{_DARK};border:1px solid {_BORDER};"
+                "border-radius:4px;padding:2px 8px;margin-right:4px;"
+            )
+            return l
+
+        cfg.addWidget(_chip("SCANNER"))
         self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=90)
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
         cfg.addWidget(self._scanner_combo)
 
-        cfg.addSpacing(6)
-        cfg.addWidget(self._lbl("Modelo:"))
+        cfg.addSpacing(12)
+        cfg.addWidget(_chip("MODELO"))
         self._model_combo = QComboBox()
         self._model_combo.addItems(DISPLAY_NAMES)
         self._model_combo.setStyleSheet(
@@ -1110,8 +1119,8 @@ class RecordingTab(QWidget):
                 self._model_combo.setCurrentText(to_display(_m))
         cfg.addWidget(self._model_combo)
 
-        cfg.addSpacing(6)
-        cfg.addWidget(self._lbl("FPS:"))
+        cfg.addSpacing(12)
+        cfg.addWidget(_chip("FPS"))
         self._fps_spin = QSpinBox()
         self._fps_spin.setRange(1, 60)
         self._fps_spin.setValue(10)
@@ -1121,7 +1130,7 @@ class RecordingTab(QWidget):
         )
         cfg.addWidget(self._fps_spin)
 
-        cfg.addSpacing(14)
+        cfg.addSpacing(16)
         self._live_chk = QCheckBox("Análisis en vivo")
         self._live_chk.setChecked(False)
         self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:12px;")
@@ -1129,15 +1138,16 @@ class RecordingTab(QWidget):
 
         cfg.addStretch()
 
-        # Camera info inline (right side)
-        self._btn_read_cam = QPushButton("↻  Cámara")
-        self._btn_read_cam.setFixedHeight(28)
+        # Camera info inline
+        self._btn_read_cam = QPushButton("↻  Info cámara")
+        self._btn_read_cam.setFixedHeight(30)
         self._btn_read_cam.setStyleSheet(
-            f"background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
-            "border-radius:5px;font-size:10px;font-weight:600;padding:0 12px;"
+            f"QPushButton {{ background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
+            "border-radius:6px;font-size:10px;font-weight:600;padding:0 12px; }}"
+            f"QPushButton:hover {{ color:{_TEXT};border-color:#64748b; }}"
         )
         cfg.addWidget(self._btn_read_cam)
-
+        cfg.addSpacing(8)
         self._cam_info_lbl = QLabel("—")
         self._cam_info_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
@@ -1150,8 +1160,8 @@ class RecordingTab(QWidget):
         act = QHBoxLayout()
         act.setSpacing(10)
 
-        self._btn_start = self._mk_btn("▶   INICIAR GRABACIÓN", "#166534", h=40, fs=13)
-        self._btn_stop  = self._mk_btn("■   DETENER",           "#7f1d1d", h=40, fs=13)
+        self._btn_start = self._mk_btn("▶  INICIAR GRABACIÓN", "#15803d", h=42, fs=13)
+        self._btn_stop  = self._mk_btn("■  DETENER",           "#991b1b", h=42, fs=13)
         self._btn_stop.setEnabled(False)
         act.addWidget(self._btn_start)
         act.addWidget(self._btn_stop)
@@ -1162,31 +1172,47 @@ class RecordingTab(QWidget):
         badge.setStyleSheet(
             f"QFrame {{ background:{_DARK};border:1px solid {_BORDER};border-radius:10px; }}"
         )
-        badge_lay = QVBoxLayout(badge)
-        badge_lay.setContentsMargins(20, 10, 20, 10)
-        badge_lay.setSpacing(2)
-        badge_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_lay = QHBoxLayout(badge)
+        badge_lay.setContentsMargins(20, 10, 24, 10)
+        badge_lay.setSpacing(18)
 
+        left_col = QVBoxLayout()
+        left_col.setSpacing(2)
+        left_col.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_state_lbl = QLabel("● STANDBY")
         self._rec_state_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_state_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:13px;font-weight:700;"
+            f"color:{_MUTED};font-size:11px;font-weight:700;"
             "letter-spacing:3px;background:transparent;"
-        )
-        self._rec_count_lbl = QLabel("0 FRAMES")
-        self._rec_count_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rec_count_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:26px;font-weight:700;"
-            "letter-spacing:1px;background:transparent;"
         )
         self._rec_folder_lbl = QLabel("—")
         self._rec_folder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_folder_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:9px;font-family:Consolas;background:transparent;"
         )
-        badge_lay.addWidget(self._rec_state_lbl)
-        badge_lay.addWidget(self._rec_count_lbl)
-        badge_lay.addWidget(self._rec_folder_lbl)
+        left_col.addWidget(self._rec_state_lbl)
+        left_col.addWidget(self._rec_folder_lbl)
+
+        self._rec_count_lbl = QLabel("0")
+        self._rec_count_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._rec_count_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:32px;font-weight:700;"
+            "letter-spacing:1px;background:transparent;"
+        )
+        frames_lbl = QLabel("FRAMES")
+        frames_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        frames_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:9px;font-weight:700;"
+            "letter-spacing:3px;background:transparent;"
+        )
+        right_col = QVBoxLayout()
+        right_col.setSpacing(0)
+        right_col.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_col.addWidget(self._rec_count_lbl)
+        right_col.addWidget(frames_lbl)
+
+        badge_lay.addLayout(left_col)
+        badge_lay.addLayout(right_col)
         act.addWidget(badge)
 
         lay.addLayout(act)
@@ -1197,50 +1223,52 @@ class RecordingTab(QWidget):
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
-        lay.setSpacing(8)
+        lay.setSpacing(10)
 
         # Row 1: action buttons + progress
         row1 = QHBoxLayout()
-        row1.setSpacing(10)
+        row1.setSpacing(8)
 
-        self._btn_load    = self._mk_btn("📂  Abrir grabación", "#374151", h=34)
-        self._btn_analyze = self._mk_btn("⚙   Analizar",        "#0f4c81", h=34, fs=12)
+        self._btn_load    = self._mk_btn("📂  Abrir grabación", "#374151", h=36, fs=11)
+        self._btn_analyze = self._mk_btn("⚙  Analizar",         "#1d4ed8", h=36, fs=12)
         self._btn_analyze.setEnabled(False)
         row1.addWidget(self._btn_load)
         row1.addWidget(self._btn_analyze)
-        row1.addSpacing(10)
+        row1.addSpacing(12)
 
         self._ana_progress = QLabel("")
         self._ana_progress.setStyleSheet(
-            f"color:{_ACCENT};font-size:12px;font-family:Consolas;font-weight:600;"
+            f"color:{_ACCENT};font-size:11px;font-family:Consolas;font-weight:600;"
         )
         row1.addWidget(self._ana_progress)
         row1.addStretch()
 
         self._status_lbl = QLabel("Listo")
-        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        self._status_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+        )
         row1.addWidget(self._status_lbl)
 
         lay.addLayout(row1)
 
-        # Row 2: results summary
-        row2 = QHBoxLayout()
-        row2.setSpacing(16)
+        # Row 2: results summary as stat chips
+        self._summary_row = QHBoxLayout()
+        self._summary_row.setSpacing(8)
 
         self._summary_lbl = QLabel("")
         self._summary_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:12px;font-weight:700;letter-spacing:0.5px;"
+            f"color:{_TEXT};font-size:11px;font-weight:700;letter-spacing:0.5px;"
         )
-        row2.addWidget(self._summary_lbl)
-        row2.addStretch()
+        self._summary_row.addWidget(self._summary_lbl)
+        self._summary_row.addStretch()
 
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas;"
         )
-        row2.addWidget(self._stats_lbl)
+        self._summary_row.addWidget(self._stats_lbl)
 
-        lay.addLayout(row2)
+        lay.addLayout(self._summary_row)
         return grp
 
     def _build_browser_section(self) -> QGroupBox:
@@ -1248,56 +1276,118 @@ class RecordingTab(QWidget):
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
-        lay.setSpacing(8)
+        lay.setSpacing(10)
 
-        # ── Navigation row ────────────────────────────────────────────
+        # ── Navigation bar ────────────────────────────────────────────
         nav = QHBoxLayout()
-        nav.setSpacing(6)
+        nav.setSpacing(4)
 
-        self._btn_first   = self._mk_btn("⏮",   "#1e293b", h=32, w=38)
-        self._btn_prev10  = self._mk_btn("-10",  "#1e293b", h=32, w=44)
-        self._btn_prev    = self._mk_btn("◀",   "#334155", h=32, w=44)
+        _NAV_BASE = (
+            "QPushButton {{"
+            "  background:{bg};color:{fg};border-radius:7px;"
+            "  font-size:{fs}px;font-weight:700;border:1px solid {bd};padding:0 {pad}px;"
+            "}}"
+            "QPushButton:hover {{"
+            "  background:{hv};border-color:#64748b;"
+            "}}"
+            "QPushButton:pressed {{ background:#0f172a; }}"
+            "QPushButton:disabled {{ background:#131e2e;color:#374151;border-color:#1e293b; }}"
+        )
 
+        def _nav_btn(label, bg="#1e293b", fg=_TEXT, bd=_BORDER, hv="#2d3f55",
+                     fs=13, w=None, h=38, tooltip="", pad=10):
+            b = QPushButton(label)
+            b.setToolTip(tooltip)
+            b.setFixedHeight(h)
+            if w:
+                b.setFixedWidth(w)
+            b.setStyleSheet(_NAV_BASE.format(
+                bg=bg, fg=fg, bd=bd, hv=hv, fs=fs, pad=pad
+            ))
+            return b
+
+        # First / Last — outlined style
+        self._btn_first = _nav_btn("⏮", w=40, tooltip="Primer frame", pad=0)
+        self._btn_last  = _nav_btn("⏭", w=40, tooltip="Último frame",  pad=0)
+
+        # ±10 — larger with text
+        self._btn_prev10 = _nav_btn("«  −10", w=74, tooltip="Retroceder 10 frames",
+                                     bg="#1e293b", bd="#334155", hv="#2d3f55", fs=12)
+        self._btn_next10 = _nav_btn("+10  »", w=74, tooltip="Avanzar 10 frames",
+                                     bg="#1e293b", bd="#334155", hv="#2d3f55", fs=12)
+
+        # ±1 — filled accent style
+        self._btn_prev = _nav_btn("◀  Ant.", w=76, tooltip="Frame anterior",
+                                   bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8", fs=12)
+        self._btn_next = _nav_btn("Sig.  ▶", w=76, tooltip="Frame siguiente",
+                                   bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8", fs=12)
+
+        # Frame counter
         self._nav_lbl = QLabel("—")
         self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._nav_lbl.setMinimumWidth(150)
+        self._nav_lbl.setMinimumWidth(130)
         self._nav_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:14px;font-weight:700;"
+            f"color:{_TEXT};font-size:15px;font-weight:700;"
             f"background:{_DARK};border:1px solid {_BORDER};"
-            "border-radius:5px;padding:4px 14px;letter-spacing:1px;"
+            "border-radius:7px;padding:4px 16px;letter-spacing:2px;"
         )
 
-        self._btn_next    = self._mk_btn("▶",   "#334155", h=32, w=44)
-        self._btn_next10  = self._mk_btn("+10",  "#1e293b", h=32, w=44)
-        self._btn_last    = self._mk_btn("⏭",   "#1e293b", h=32, w=38)
+        for w in (self._btn_first, self._btn_prev10, self._btn_prev):
+            nav.addWidget(w)
+        nav.addSpacing(6)
+        nav.addWidget(self._nav_lbl)
+        nav.addSpacing(6)
+        for w in (self._btn_next, self._btn_next10, self._btn_last):
+            nav.addWidget(w)
 
-        self._overlay_toggle = QPushButton("● OVERLAY")
+        nav.addSpacing(14)
+        # Separator line
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedWidth(1)
+        sep.setStyleSheet(f"color:{_BORDER};")
+        nav.addWidget(sep)
+        nav.addSpacing(10)
+
+        # Overlay toggle — pill style
+        self._overlay_toggle = QPushButton("◉  OVERLAY")
         self._overlay_toggle.setCheckable(True)
         self._overlay_toggle.setChecked(True)
-        self._overlay_toggle.setFixedHeight(32)
+        self._overlay_toggle.setFixedHeight(38)
         self._overlay_toggle.setStyleSheet(
-            f"QPushButton:checked {{ background:{_ACCENT};color:{_DARK};"
-            "border-radius:5px;font-size:11px;font-weight:700;padding:0 14px;border:none; }}"
-            f"QPushButton:!checked {{ background:{_PANEL};color:{_MUTED};"
-            "border-radius:5px;font-size:11px;font-weight:700;padding:0 14px;"
-            f"border:1px solid {_BORDER}; }}"
+            f"QPushButton:checked {{"
+            f"  background:#0c4a6e;color:{_ACCENT};"
+            f"  border-radius:7px;font-size:11px;font-weight:700;padding:0 16px;"
+            f"  border:1px solid {_ACCENT};"
+            "}}"
+            f"QPushButton:!checked {{"
+            f"  background:{_PANEL};color:{_MUTED};"
+            "  border-radius:7px;font-size:11px;font-weight:700;padding:0 16px;"
+            f"  border:1px solid {_BORDER};"
+            "}}"
+            "QPushButton:hover { border-color:#64748b; }"
         )
-
-        self._btn_fit = self._mk_btn("⊞ Ajustar", "#1e3a5f", h=32)
-
-        for w in (self._btn_first, self._btn_prev10, self._btn_prev, self._nav_lbl,
-                  self._btn_next, self._btn_next10, self._btn_last):
-            nav.addWidget(w)
-        nav.addSpacing(10)
         nav.addWidget(self._overlay_toggle)
+        nav.addSpacing(4)
+
+        self._btn_fit = _nav_btn("⊞  Ajustar", bg="#0f3460", bd="#1d4ed8", hv="#1e40af",
+                                  tooltip="Ajustar imagen a ventana (doble clic en imagen)")
         nav.addWidget(self._btn_fit)
         nav.addStretch()
 
-        self._result_lbl = QLabel("")
-        self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self._result_lbl.setMinimumWidth(220)
-        self._result_lbl.setStyleSheet(f"font-size:14px;font-weight:700;color:{_MUTED};")
-        nav.addWidget(self._result_lbl)
+        # ── Result card — right of nav bar ────────────────────────────
+        self._result_card = QFrame()
+        self._result_card.setMinimumWidth(280)
+        self._result_card.setStyleSheet(
+            f"QFrame {{ background:{_PANEL};border:1px solid {_BORDER};border-radius:8px; }}"
+        )
+        rc_lay = QHBoxLayout(self._result_card)
+        rc_lay.setContentsMargins(14, 0, 14, 0)
+        self._result_lbl = QLabel("—")
+        self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._result_lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{_MUTED};")
+        rc_lay.addWidget(self._result_lbl)
+        nav.addWidget(self._result_card)
 
         lay.addLayout(nav)
 
@@ -1308,18 +1398,38 @@ class RecordingTab(QWidget):
         save = QHBoxLayout()
         save.setSpacing(10)
 
-        self._btn_save_current = self._mk_btn("💾  Guardar frame actual", "#065f46", h=32)
+        self._btn_save_current = self._mk_btn("💾  Guardar frame", "#065f46", h=36, fs=11)
         self._btn_save_current.setEnabled(False)
-        self._btn_save_current.setToolTip(
-            "Guarda el overlay del frame actual en data/output/export/"
-        )
+        self._btn_save_current.setToolTip("Guarda el overlay del frame actual en data/output/export/")
         save.addWidget(self._btn_save_current)
 
         save.addWidget(self._vline())
 
-        save.addWidget(self._lbl("Exportar rango:"))
+        # Export group — visual container
+        exp_card = QFrame()
+        exp_card.setStyleSheet(
+            f"QFrame {{ background:{_DARK};border:1px solid {_BORDER};border-radius:7px; }}"
+        )
+        eg = QHBoxLayout(exp_card)
+        eg.setContentsMargins(12, 6, 12, 6)
+        eg.setSpacing(8)
 
-        save.addWidget(self._lbl("Desde"))
+        exp_title = QLabel("Exportar rango")
+        exp_title.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+        )
+        eg.addWidget(exp_title)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFixedWidth(1)
+        sep2.setStyleSheet(f"color:{_BORDER};")
+        eg.addWidget(sep2)
+
+        lbl_from = QLabel("desde")
+        lbl_from.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        eg.addWidget(lbl_from)
+
         self._spin_from = QSpinBox()
         self._spin_from.setRange(1, 1)
         self._spin_from.setValue(1)
@@ -1327,9 +1437,12 @@ class RecordingTab(QWidget):
             f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:5px;padding:3px 6px;font-size:12px;max-width:72px;"
         )
-        save.addWidget(self._spin_from)
+        eg.addWidget(self._spin_from)
 
-        save.addWidget(self._lbl("hasta"))
+        lbl_to = QLabel("hasta")
+        lbl_to.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        eg.addWidget(lbl_to)
+
         self._spin_to = QSpinBox()
         self._spin_to.setRange(1, 1)
         self._spin_to.setValue(1)
@@ -1337,14 +1450,13 @@ class RecordingTab(QWidget):
             f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:5px;padding:3px 6px;font-size:12px;max-width:72px;"
         )
-        save.addWidget(self._spin_to)
+        eg.addWidget(self._spin_to)
 
-        save.addSpacing(4)
-        self._btn_export = self._mk_btn("⬇  Exportar 0 frames", "#1e3a5f", h=32)
+        save.addWidget(exp_card)
+
+        self._btn_export = self._mk_btn("⬇  Exportar 0 frames", "#0f3460", h=36, fs=11)
         self._btn_export.setEnabled(False)
-        self._btn_export.setToolTip(
-            "Exporta los overlays del rango seleccionado a data/output/export/"
-        )
+        self._btn_export.setToolTip("Exporta los overlays del rango seleccionado a data/output/export/")
         save.addWidget(self._btn_export)
 
         save.addStretch()
@@ -1595,22 +1707,32 @@ class RecordingTab(QWidget):
             center_txt = ""
             if r.centering is not None:
                 sign = "+" if r.centering.offset_px >= 0 else ""
-                center_txt = f"   centro {sign}{r.centering.offset_px:.1f}px"
+                center_txt = f"  ·  centro {sign}{r.centering.offset_px:.1f}px"
 
             holes_nok = r.report.status == "NOK"
             if r.status == "OK":
-                label, color = "✓  OK", _OK
+                label, color, card_border = "✓  OK", _OK, "#15803d"
             elif getattr(r, "centering_nok", False) and holes_nok:
-                label, color = "✗  NOK  AGUJEROS + CENTRADO", _NOK
+                label, color, card_border = "✗  NOK  AGUJEROS+CENTRADO", _NOK, "#991b1b"
             elif getattr(r, "centering_nok", False):
-                label, color = "✗  NOK  CENTRADO", "#f97316"
+                label, color, card_border = "✗  NOK  CENTRADO", "#f97316", "#92400e"
             else:
-                label, color = "✗  NOK  AGUJEROS", _NOK
+                label, color, card_border = "✗  NOK  AGUJEROS", _NOK, "#991b1b"
 
-            self._result_lbl.setText(f"{label}   missing {missing}{center_txt}")
-            self._result_lbl.setStyleSheet(f"font-size:14px;font-weight:700;color:{color};")
+            miss_txt = f"  ·  faltantes: {missing}" if missing else ""
+            self._result_lbl.setText(f"{label}{miss_txt}{center_txt}")
+            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
+            self._result_card.setStyleSheet(
+                f"QFrame {{ background:{_PANEL};border:2px solid {card_border};"
+                "border-radius:8px; }}"
+            )
         else:
-            self._result_lbl.setText("")
+            self._result_lbl.setText("—")
+            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{_MUTED};")
+            self._result_card.setStyleSheet(
+                f"QFrame {{ background:{_PANEL};border:1px solid {_BORDER};"
+                "border-radius:8px; }}"
+            )
 
         self._btn_save_current.setEnabled(idx < len(self._results))
         self._update_nav_state()
@@ -1707,7 +1829,7 @@ class RecordingTab(QWidget):
             f"{style}font-size:13px;font-weight:700;letter-spacing:3px;background:transparent;"
         )
         self._rec_state_lbl.setText(text)
-        self._rec_count_lbl.setText(f"{n_frames} FRAMES")
+        self._rec_count_lbl.setText(str(n_frames))
         self._rec_folder_lbl.setText(folder.name if folder else "—")
 
     def _refresh_cam_info(self) -> None:
@@ -1798,9 +1920,16 @@ class RecordingTab(QWidget):
         b.setFixedHeight(h)
         if w is not None:
             b.setFixedWidth(w)
+        # Compute a brighter hover variant (+30 lightness)
         b.setStyleSheet(
-            f"background:{bg};color:white;border-radius:6px;"
-            f"font-size:{fs}px;font-weight:700;border:none;padding:0 12px;"
+            f"QPushButton {{"
+            f"  background:{bg};color:white;border-radius:6px;"
+            f"  font-size:{fs}px;font-weight:700;border:none;padding:0 12px;"
+            f"}}"
+            f"QPushButton:hover {{ background-color: rgba(255,255,255,0.12);"
+            f"  border:1px solid rgba(255,255,255,0.18); }}"
+            f"QPushButton:pressed {{ background-color: rgba(0,0,0,0.25); }}"
+            f"QPushButton:disabled {{ background:#1e293b;color:#475569;border:none; }}"
         )
         return b
 
