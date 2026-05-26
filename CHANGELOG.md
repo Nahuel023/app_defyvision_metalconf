@@ -1182,6 +1182,38 @@ D) **`config/tolerancias.yaml`** — modelo_B:
 
 ---
 
+#### Cambio 40 — Aceleración de análisis batch (pre-cache + threading)
+
+**Objetivo:** Reducir el tiempo de análisis de una grabación sin cambiar ninguna lógica
+de detección ni parámetros de calidad.
+
+**Cuellos de botella identificados:**
+1. `load_tolerances()` + `load_pattern()` + `load_roi()` se llamaban para CADA frame
+   (N×3 lecturas de disco innecesarias).
+2. El procesamiento era estrictamente secuencial — un solo núcleo de CPU.
+3. El score de blur (Laplaciano + cvtColor) se calculaba siempre aunque
+   `blur_score_min == 0` (deshabilitado en modelo_B).
+
+**Cambios:**
+
+A) **`src/inspection.py`**:
+   - `inspect_image()` acepta ahora parámetro `_preloaded: Optional[dict]` (igual que
+     `inspect_frame()`) y lo pasa a `_inspect_bgr()`.
+   - Blur score (Laplaciano): se calcula solo si `blur_score_min > 0`. Ahorra ~3ms/frame
+     en modelo_B donde está deshabilitado.
+
+B) **`src/ui/service.py`** — `_AnalysisWorker.run()`:
+   - Pre-carga tolerancias + patrón + ROI **una sola vez** antes del loop.
+   - Usa `ThreadPoolExecutor(max_workers=min(cpu_count, 6))`: OpenCV y numpy liberan
+     el GIL, así que múltiples frames se procesan en paralelo sobre todos los núcleos.
+   - Los resultados se reensamblan en orden correcto (lista indexada por `idx`).
+   - Progreso funciona igual (se emite al completar cada future).
+
+**Speedup esperado:** 3-5x en máquinas con 4+ núcleos (típico en Windows de producción).
+Sin cambio en ningún parámetro de detección ni resultado de inspección.
+
+---
+
 #### Cambio 38 — CHAPA vs PATRON zigzag + badges DETENER MAQUINA con razón
 
 **Objetivo:** Separar la detección de inestabilidad de imagen en dos métricas distintas
