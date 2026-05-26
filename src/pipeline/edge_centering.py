@@ -97,6 +97,12 @@ class CenteringResult:
     pattern_zigzag_std_px: float = 0.0
     pattern_zigzag_max_px: float = 0.0
 
+    # Horizontal residuals of per-band PATTERN CENTER (median X of all holes per band).
+    # Catches internal zigzag that the outer-border metric misses.
+    # 0.0 when insufficient points (<3) for a line fit.
+    pattern_center_zigzag_std_px: float = 0.0
+    pattern_center_zigzag_max_px: float = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -264,6 +270,26 @@ def _pattern_bounds_by_band(
         right_dict[i] = (float(max(hh.x + hh.r for hh in band_holes)), cy)
 
     return left_dict, right_dict
+
+
+def _pattern_center_by_band(
+    holes: Sequence,
+    img_h: int,
+    n_bands: int = _N_BANDS,
+) -> list[tuple[float, float]]:
+    """Per-band median X of all hole centers — robust center of pattern per band."""
+    band_h = img_h / n_bands
+    points: list[tuple[float, float]] = []
+    for i in range(n_bands):
+        y0 = i * band_h
+        y1 = (i + 1) * band_h
+        band_holes = [hh for hh in holes if y0 <= hh.y < y1]
+        if len(band_holes) < 2:
+            continue
+        center_x = float(np.median([hh.x for hh in band_holes]))
+        cy = (y0 + y1) / 2.0
+        points.append((center_x, cy))
+    return points
 
 
 def _fit_line_robust(
@@ -450,6 +476,11 @@ def compute_centering(
     pattern_zigzag_std_px, pattern_zigzag_max_px = _zigzag_residuals(
         [list(pattern_left_points), list(pattern_right_points)]
     )
+    # PATRON CENTER zigzag — median X of all holes per band; catches internal zigzag
+    center_pts = _pattern_center_by_band(holes, img_h_for_bands)
+    pattern_center_zigzag_std_px, pattern_center_zigzag_max_px = _zigzag_residuals(
+        [center_pts]
+    )
 
     return CenteringResult(
         left_x=left_x,
@@ -479,4 +510,6 @@ def compute_centering(
         chapa_zigzag_max_px=chapa_zigzag_max_px,
         pattern_zigzag_std_px=pattern_zigzag_std_px,
         pattern_zigzag_max_px=pattern_zigzag_max_px,
+        pattern_center_zigzag_std_px=pattern_center_zigzag_std_px,
+        pattern_center_zigzag_max_px=pattern_center_zigzag_max_px,
     )

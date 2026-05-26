@@ -49,6 +49,8 @@ class InspectionResult:
     chapa_zigzag_max_px: float = 0.0
     pattern_zigzag_std_px: float = 0.0
     pattern_zigzag_max_px: float = 0.0
+    pattern_center_zigzag_std_px: float = 0.0
+    pattern_center_zigzag_max_px: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -191,6 +193,10 @@ def _inspect_bgr(
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
+    # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
+    pattern_center_align_enabled    = bool(tolerances.get("pattern_center_align_enabled", False))
+    pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
+    pattern_center_zigzag_abs_max   = float(tolerances.get("pattern_center_zigzag_abs_max_px", 18.0))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -327,14 +333,18 @@ def _inspect_bgr(
     chapa_zigzag_max_px = 0.0
     pattern_zigzag_std_px = 0.0
     pattern_zigzag_max_px = 0.0
+    pattern_center_zigzag_std_px = 0.0
+    pattern_center_zigzag_max_px = 0.0
     frame_geometry_quality = "STABLE"
     pattern_alignment_warn = False
 
     if centering is not None:
-        chapa_zigzag_std_px   = getattr(centering, "chapa_zigzag_std_px",   0.0)
-        chapa_zigzag_max_px   = getattr(centering, "chapa_zigzag_max_px",   0.0)
-        pattern_zigzag_std_px = getattr(centering, "pattern_zigzag_std_px", 0.0)
-        pattern_zigzag_max_px = getattr(centering, "pattern_zigzag_max_px", 0.0)
+        chapa_zigzag_std_px          = getattr(centering, "chapa_zigzag_std_px",          0.0)
+        chapa_zigzag_max_px          = getattr(centering, "chapa_zigzag_max_px",          0.0)
+        pattern_zigzag_std_px        = getattr(centering, "pattern_zigzag_std_px",        0.0)
+        pattern_zigzag_max_px        = getattr(centering, "pattern_zigzag_max_px",        0.0)
+        pattern_center_zigzag_std_px = getattr(centering, "pattern_center_zigzag_std_px", 0.0)
+        pattern_center_zigzag_max_px = getattr(centering, "pattern_center_zigzag_max_px", 0.0)
 
         if verticality_quality_enabled:
             if (chapa_zigzag_std_px > chapa_zigzag_std_max_px
@@ -347,6 +357,12 @@ def _inspect_bgr(
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
+
+        if pattern_center_align_enabled:
+            if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
+                    or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max):
+                pattern_alignment_warn = True
+                final_status = "NOK"   # zigzag interno del patrón → NOK
 
     # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
     # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
@@ -432,6 +448,8 @@ def _inspect_bgr(
         chapa_zigzag_max_px=chapa_zigzag_max_px,
         pattern_zigzag_std_px=pattern_zigzag_std_px,
         pattern_zigzag_max_px=pattern_zigzag_max_px,
+        pattern_center_zigzag_std_px=pattern_center_zigzag_std_px,
+        pattern_center_zigzag_max_px=pattern_center_zigzag_max_px,
     )
 
 
