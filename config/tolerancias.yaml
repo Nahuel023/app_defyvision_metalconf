@@ -148,3 +148,10 @@ models:
     machine_stop_min_missing: 1
     machine_stop_same_zone_px: 35.0
     machine_stop_ignore_near_miss: true
+    # ── Calidad geometrica / zigzag ────────────────────────────────────────────
+    # Si los bordes del patron zigzaguean mas de estos umbrales, el frame se marca
+    # IMAGEN INESTABLE y se ignora para rachas NOK y parada de maquina.
+    # Calibrar con frame_0037 (inestable) vs frame_0038 (estable) de 20260519_121741.
+    verticality_quality_enabled: true
+    pattern_zigzag_std_max_px: 4.0
+    pattern_zigzag_abs_max_px: 10.0

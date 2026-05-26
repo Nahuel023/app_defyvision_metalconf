@@ -1110,6 +1110,78 @@ Windows con codepage cp1252. El mismo carácter estaba también en el nuevo `cmd
 
 ---
 
+### Sesión 2026-05-26 (zigzag filter + UI +10) — Tadeo + Claude
+
+#### Cambio 37 — Filtro de calidad geométrica (zigzag) + navegación ±10 frames
+
+**Objetivo A:** Detectar frames con vibración de cámara/chapa midiendo el zigzag horizontal
+de los bordes del patrón. Marcarlos como `IMAGEN INESTABLE - NO DECIDE` y excluirlos de
+rachas NOK y detección de parada de máquina. El blur_score (Laplaciano) no detecta
+bien este tipo de inestabilidad lateral.
+
+**Objetivo B:** En la UI de Servicio → tab Grabación → NAVEGADOR DE CAPTURAS, agregar
+botones −10 / +10 para saltar de a 10 frames al navegar una carpeta analizada.
+
+---
+
+**A. Filtro de calidad geométrica**
+
+Métrica: **residuales horizontales** de los puntos por banda del patrón respecto a
+una línea robusta ajustada. Combina ambos bordes (izquierdo + derecho).
+- `pattern_zigzag_std_px` — desviación estándar de los residuales
+- `pattern_zigzag_max_px` — residual máximo
+
+Si `std > pattern_zigzag_std_max_px` OR `max > pattern_zigzag_abs_max_px` → `UNSTABLE`.
+Un frame UNSTABLE fuerza `frame_quality = "LOW_QUALITY"` → toda la maquinaria existente
+de "hold" (regla temporal + MachineStopDetector) lo omite automáticamente.
+
+**Calibración sobre grabación 20260519_121741 (185 frames):**
+- frame_0037 (inestable): `std=3.5px, max=13.5px` → UNSTABLE ✓ (max > 10px)
+- frame_0038 (estable):   `std=1.4px, max=4.5px`  → STABLE  ✓
+- Total UNSTABLE: 5/185 (2.7%) — todos con max > 13px, son genuinamente inestables
+- 185/185 raw OK + 185/185 temporal OK mantenidos ✓
+
+**Archivos modificados:**
+
+A) **`src/pipeline/edge_centering.py`**:
+   - `CenteringResult` agrega `pattern_zigzag_std_px: float = 0.0` y
+     `pattern_zigzag_max_px: float = 0.0`.
+   - `compute_centering()`: calcula residuales de `pattern_left_points` y
+     `pattern_right_points` contra su línea robusta ajustada (reutiliza `_fit_line_robust`).
+     Almacena std y max en el resultado.
+
+B) **`src/inspection.py`**:
+   - `InspectionResult` agrega `frame_geometry_quality: str = "STABLE"`,
+     `pattern_zigzag_std_px: float = 0.0`, `pattern_zigzag_max_px: float = 0.0`.
+   - `_inspect_bgr()`: lee `verticality_quality_enabled`, `pattern_zigzag_std_max_px`,
+     `pattern_zigzag_abs_max_px` de tolerancias. Si centering disponible y umbrales
+     superados, setea `frame_geometry_quality = "UNSTABLE"` y fuerza
+     `frame_quality = "LOW_QUALITY"`.
+   - `_draw_warnings()`: acepta `frame_geometry_quality`. Si UNSTABLE, muestra badge
+     `"IMAGEN INESTABLE - NO DECIDE"` (reemplaza "CALIDAD BAJA" para este caso).
+
+C) **`src/utils/config.py`**:
+   - 3 nuevos defaults: `verticality_quality_enabled: False`,
+     `pattern_zigzag_std_max_px: 4.0`, `pattern_zigzag_abs_max_px: 10.0`.
+
+D) **`config/tolerancias.yaml`** — modelo_B:
+   - `verticality_quality_enabled: true`
+   - `pattern_zigzag_std_max_px: 4.0`
+   - `pattern_zigzag_abs_max_px: 10.0`
+
+**B. Navegación ±10 frames en UI**
+
+**`src/ui/service.py`** — `RecordingTab._build_browser_section()`:
+   - Nuevos botones `self._btn_prev10` (`-10`) y `self._btn_next10` (`+10`) a ambos
+     lados de los botones `◀` / `▶` existentes.
+   - `_show_frame()` ya clampea a `[0, len(frame_paths)-1]` → salto automático al límite.
+   - `_update_nav_state()` habilita/deshabilita `_btn_prev10` / `_btn_next10` igual que prev/next.
+
+**Sin tocar:** PLC, solenoides, lógica de producción, `grid_max_missing`,
+`consecutive_nok_frames`, patrón de modelo_B.
+
+---
+
 ### Sesión 2026-05-26 (machine stop) — Tadeo + Claude
 
 #### Cambio 36 — Detección de parada de máquina por agujero faltante persistente
