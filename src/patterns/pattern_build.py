@@ -78,8 +78,23 @@ def build_pattern_from_image(
     phase_x = estimate_phase(xs, dx)
     phase_y = estimate_phase(ys, dy)
     cells = assign_cells(points, dx, dy, phase_x, phase_y)
-    print(f"[build-pattern] {len(points)} holes  dx={dx:.1f} dy={dy:.1f}"
+    n_total  = len(cells)
+    n_unique = len(set(cells))
+    n_dup    = n_total - n_unique
+    print(f"[build-pattern] {len(points)} puntos  dx={dx:.1f} dy={dy:.1f}"
           f"  phase=({phase_x:.1f},{phase_y:.1f})")
+    print(f"[build-pattern] Celdas totales: {n_total}  Unicas: {n_unique}  Duplicadas: {n_dup}")
+    if n_dup > 0:
+        from collections import Counter
+        dup_cells = sorted(
+            [(c, cnt) for c, cnt in Counter(cells).items() if cnt > 1],
+            key=lambda x: x[0][1],
+        )
+        print(f"[build-pattern] ADVERTENCIA: {n_dup} celda(s) duplicada(s) detectadas:")
+        for c, cnt in dup_cells:
+            idxs = [i for i, cc in enumerate(cells) if cc == c]
+            pts  = [(round(points[i][0], 1), round(points[i][1], 1)) for i in idxs]
+            print(f"  (ci={c[0]}, cj={c[1]}) x{cnt}: {pts}")
 
     pat = Pattern(
         model=model, image_size=(w, h), points=points, radii=radii,
