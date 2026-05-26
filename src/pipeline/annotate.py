@@ -141,54 +141,55 @@ def _draw_edge_polyline(
 def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
-    y_offset: int = 0,
+    index: int = 0,
 ) -> np.ndarray:
-    """Draw a full-width red DETENER MAQUINA banner with optional reason text.
+    """Draw compact DETENER MAQUINA strip at the top of the image.
 
-    y_offset: shift the banner vertically (px). Use to stack two banners when
-    both machine_stop and pattern_alignment_warn are active simultaneously.
+    index: stacking order — 0 = topmost strip, 1 = immediately below the first.
+    Positioned at the very top so it never covers the hole/pattern area.
     """
     out = img.copy()
     h, w = out.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
 
-    main_label = "DETENER MAQUINA"
-    main_scale, main_thick = 2.0, 5
+    main_label = "! DETENER MAQUINA"
+    main_scale, main_thick = 1.3, 3
     (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
 
-    reason_scale, reason_thick = 0.85, 2
+    reason_scale, reason_thick = 0.72, 2
     (rw, rh), rbl = (cv2.getTextSize(reason, font, reason_scale, reason_thick)
                      if reason else ((0, 0), 0))
 
-    inner_h = mh + mbl + (rh + rbl + 8 if reason else 0)
-    pad_v = 14
-    banner_h = inner_h + pad_v * 2
-    banner_y = max(0, h // 3 + y_offset)
-    banner_y = min(banner_y, h - banner_h - 4)
+    pad_v = 9
+    banner_h = pad_v + mh + mbl + (rh + rbl + 6 if reason else 0) + pad_v
+    banner_y = index * (banner_h + 3)
 
     # Semi-transparent dark-red background
     layer = out.copy()
-    cv2.rectangle(layer, (0, banner_y), (w, banner_y + banner_h), (0, 0, 160), -1)
+    cv2.rectangle(layer, (0, banner_y), (w, banner_y + banner_h), (0, 0, 130), -1)
     cv2.addWeighted(layer, 0.88, out, 0.12, 0, out)
 
-    # Red border lines (top and bottom)
-    cv2.line(out, (0, banner_y),               (w, banner_y),               (0, 0, 255), 4)
-    cv2.line(out, (0, banner_y + banner_h),    (w, banner_y + banner_h),    (0, 0, 255), 4)
+    # Red border bottom; top border only when stacked (not at the very edge)
+    cv2.line(out, (0, banner_y + banner_h), (w, banner_y + banner_h), (0, 0, 255), 3)
+    if banner_y > 0:
+        cv2.line(out, (0, banner_y), (w, banner_y), (0, 0, 180), 2)
 
-    # Main "DETENER MAQUINA" text — white with red glow
+    # Main text — centered, white with dark shadow
     mx = w // 2 - mw // 2
     my = banner_y + pad_v + mh
     cv2.putText(out, main_label, (mx + 2, my + 2), font, main_scale,
-                (0, 0, 100), main_thick + 3, cv2.LINE_AA)   # shadow
+                (0, 0, 60), main_thick + 3, cv2.LINE_AA)
     cv2.putText(out, main_label, (mx, my), font, main_scale,
                 (255, 255, 255), main_thick, cv2.LINE_AA)
 
-    # Reason text — yellow
+    # Reason text — amber/yellow, centered below
     if reason:
         ry_pos = my + mbl + rh + 6
         rx = w // 2 - rw // 2
+        cv2.putText(out, reason, (rx + 1, ry_pos + 1), font, reason_scale,
+                    (0, 0, 60), reason_thick + 1, cv2.LINE_AA)
         cv2.putText(out, reason, (rx, ry_pos), font, reason_scale,
-                    (0, 200, 255), reason_thick, cv2.LINE_AA)
+                    (0, 210, 255), reason_thick, cv2.LINE_AA)
 
     return out
 
@@ -199,6 +200,7 @@ def draw_centering_overlay(
     tag_nok: bool = False,
     roi_x: int = 0,
     roi_y: int = 0,
+    pattern_warn: bool = False,
 ) -> np.ndarray:
     """Draw metal edge lines, pattern bound lines, center lines, and margin annotation.
 
@@ -251,22 +253,42 @@ def draw_centering_overlay(
     cv2.putText(out, "CHAPA", (rx_vis, 28), _font_sm, 0.45, _edge_color, 1, cv2.LINE_AA)
 
     # --- Pattern bounds (PATRON): real polyline or fallback dashed line ---
-    _pat_color = (50, 220, 255)   # amarillo-cyan
+    # When pattern_warn: draw in orange-red with glow + circle at worst deviation point.
+    _pat_color      = (50, 220, 255)   # normal: cyan
+    _pat_warn_color = (0, 110, 255)    # warning: vivid orange (BGR)
+    pat_color  = _pat_warn_color if pattern_warn else _pat_color
+    pat_thick  = 2 if pattern_warn else 1
+    pat_alpha  = 0.90 if pattern_warn else 0.65
+    pat_label  = "PATRON !!" if pattern_warn else "PATRON"
+    pat_lw     = 2 if pattern_warn else 1
+
     plx_vis = max(3, min(plx, w - 65))
     prx_vis = max(3, min(prx, w - 65))
-    if len(pat_l_pts) >= 2:
-        _draw_edge_polyline(out, pat_l_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
-    else:
-        for y in range(0, h, 20):
-            cv2.line(out, (plx, y), (plx, min(y + 12, h - 1)), _pat_color, 1)
-    cv2.putText(out, "PATRON", (plx_vis, 44), _font_sm, 0.45, _pat_color, 1, cv2.LINE_AA)
 
-    if len(pat_r_pts) >= 2:
-        _draw_edge_polyline(out, pat_r_pts, _pat_color, thickness=1, alpha=0.65, dot_radius=2)
-    else:
-        for y in range(0, h, 20):
-            cv2.line(out, (prx, y), (prx, min(y + 12, h - 1)), _pat_color, 1)
-    cv2.putText(out, "PATRON", (prx_vis, 44), _font_sm, 0.45, _pat_color, 1, cv2.LINE_AA)
+    for pts, fallback_x in ((pat_l_pts, plx), (pat_r_pts, prx)):
+        x_vis = max(3, min(fallback_x, w - 65))
+        if len(pts) >= 2:
+            if pattern_warn:
+                # Glow layer: thick dark red beneath the bright line
+                _draw_edge_polyline(out, pts, (0, 0, 80),
+                                    thickness=pat_thick + 4, alpha=0.65, dot_radius=0)
+            _draw_edge_polyline(out, pts, pat_color,
+                                thickness=pat_thick, alpha=pat_alpha, dot_radius=3)
+            # Mark worst-deviation point with circle + exclamation
+            if pattern_warn and len(pts) >= 3:
+                xs = [p[0] for p in pts]
+                mean_x = sum(xs) / len(xs)
+                wi = max(range(len(pts)), key=lambda i: abs(pts[i][0] - mean_x))
+                wp = (int(round(pts[wi][0])), int(round(pts[wi][1])))
+                cv2.circle(out, wp, 20, (0, 0, 200), 4)
+                cv2.circle(out, wp, 22, (255, 255, 255), 1)
+                cv2.putText(out, "!", (wp[0] - 7, wp[1] + 9),
+                            _font_sm, 0.9, (0, 0, 255), 3, cv2.LINE_AA)
+        else:
+            for yy in range(0, h, 20):
+                cv2.line(out, (fallback_x, yy),
+                         (fallback_x, min(yy + 12, h - 1)), pat_color, 1)
+        cv2.putText(out, pat_label, (x_vis, 44), _font_sm, 0.45, pat_color, pat_lw, cv2.LINE_AA)
 
     # --- Sheet center: orange dashed line ---
     for y in range(0, h, 20):
