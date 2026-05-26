@@ -273,22 +273,21 @@ def _pattern_bounds_by_band(
 
 
 def _pattern_center_by_band(
-    holes: Sequence,
-    img_h: int,
-    n_bands: int = _N_BANDS,
+    left_by_band: dict[int, tuple[float, float]],
+    right_by_band: dict[int, tuple[float, float]],
 ) -> list[tuple[float, float]]:
-    """Per-band median X of all hole centers — robust center of pattern per band."""
-    band_h = img_h / n_bands
+    """Per-band center between physical pattern bounds.
+
+    Median X of all holes is too sensitive for staggered microperforated grids:
+    alternating rows can move the median even when the physical pattern is fine.
+    The center between left/right pattern bounds is steadier and still catches
+    real lateral waviness.
+    """
     points: list[tuple[float, float]] = []
-    for i in range(n_bands):
-        y0 = i * band_h
-        y1 = (i + 1) * band_h
-        band_holes = [hh for hh in holes if y0 <= hh.y < y1]
-        if len(band_holes) < 2:
-            continue
-        center_x = float(np.median([hh.x for hh in band_holes]))
-        cy = (y0 + y1) / 2.0
-        points.append((center_x, cy))
+    for i in sorted(set(left_by_band) & set(right_by_band)):
+        lx, ly = left_by_band[i]
+        rx, ry = right_by_band[i]
+        points.append(((lx + rx) / 2.0, (ly + ry) / 2.0))
     return points
 
 
@@ -477,7 +476,7 @@ def compute_centering(
         [list(pattern_left_points), list(pattern_right_points)]
     )
     # PATRON CENTER zigzag — median X of all holes per band; catches internal zigzag
-    center_pts = _pattern_center_by_band(holes, img_h_for_bands)
+    center_pts = _pattern_center_by_band(pat_left, pat_right)
     pattern_center_zigzag_std_px, pattern_center_zigzag_max_px = _zigzag_residuals(
         [center_pts]
     )
