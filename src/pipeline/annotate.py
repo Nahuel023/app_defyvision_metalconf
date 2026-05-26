@@ -142,8 +142,15 @@ def draw_centering_overlay(
     img_bgr: np.ndarray,
     centering: "CenteringResult",
     tag_nok: bool = False,
+    roi_x: int = 0,
+    roi_y: int = 0,
 ) -> np.ndarray:
     """Draw metal edge lines, pattern bound lines, center lines, and margin annotation.
+
+    roi_x / roi_y: offset to convert ROI-relative coordinates to full-frame coordinates.
+    When drawing on a full-frame image (not the ROI crop), pass roi.x and roi.y so that
+    CHAPA edge lines land on the real sheet edges (which are outside the ROI crop).
+    When roi_x=roi_y=0 (default), behaviour is unchanged from the original.
 
     Uses real per-band edge points when available (polyline + dots).
     Falls back to single vertical lines when band data is absent.
@@ -152,19 +159,22 @@ def draw_centering_overlay(
     out = img_bgr.copy()
     h, w = out.shape[:2]
 
-    cx  = int(round(centering.sheet_center_x))
-    hx  = int(round(centering.holes_center_x))
+    cx  = int(round(centering.sheet_center_x  + roi_x))
+    hx  = int(round(centering.holes_center_x  + roi_x))
 
     # Scalar fallback positions (used when per-band data is unavailable)
-    lx  = int(round(centering.left_x))
-    rx  = int(round(centering.right_x))
-    plx = int(round(centering.pattern_left_x))
-    prx = int(round(centering.pattern_right_x))
+    lx  = int(round(centering.left_x          + roi_x))
+    rx  = int(round(centering.right_x         + roi_x))
+    plx = int(round(centering.pattern_left_x  + roi_x))
+    prx = int(round(centering.pattern_right_x + roi_x))
 
-    left_pts  = getattr(centering, "left_edge_points", ())
-    right_pts = getattr(centering, "right_edge_points", ())
-    pat_l_pts = getattr(centering, "pattern_left_points", ())
-    pat_r_pts = getattr(centering, "pattern_right_points", ())
+    # Offset per-band point lists to full-frame space
+    _off = (roi_x, roi_y)
+    _shift = lambda pts: tuple((x + _off[0], y + _off[1]) for x, y in pts)  # noqa: E731
+    left_pts  = _shift(getattr(centering, "left_edge_points",   ()))
+    right_pts = _shift(getattr(centering, "right_edge_points",  ()))
+    pat_l_pts = _shift(getattr(centering, "pattern_left_points",  ()))
+    pat_r_pts = _shift(getattr(centering, "pattern_right_points", ()))
 
     _font_sm = cv2.FONT_HERSHEY_SIMPLEX
 

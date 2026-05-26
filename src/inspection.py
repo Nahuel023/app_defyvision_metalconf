@@ -303,12 +303,10 @@ def _inspect_bgr(
                     (report.missing_points[_i], detected_in_bbox[_j])
                 )
 
-    # Draw annotations on the ROI image (hole coords are in ROI space)
+    # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs)
-    if centering is not None:
-        overlay_roi = draw_centering_overlay(overlay_roi, centering, tag_nok=centering_nok)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
                                  min_detection_ratio, capture_quality_degraded,
                                  frame_quality)
@@ -320,6 +318,17 @@ def _inspect_bgr(
         overlay[roi.y:roi.y + roi.h, roi.x:roi.x + roi.w] = overlay_roi
     else:
         overlay = overlay_roi
+
+    # Draw centering overlay on the FULL-FRAME image so CHAPA edge lines land on
+    # the real sheet edges (which are outside the ROI crop in ROI-relative coords).
+    # roi_x/roi_y convert CenteringResult ROI-relative coords → full-frame coords.
+    if centering is not None:
+        _roi_x = roi.x if roi is not None else 0
+        _roi_y = roi.y if roi is not None else 0
+        overlay = draw_centering_overlay(
+            overlay, centering, tag_nok=centering_nok,
+            roi_x=_roi_x, roi_y=_roi_y,
+        )
 
     return InspectionResult(
         model=model,
