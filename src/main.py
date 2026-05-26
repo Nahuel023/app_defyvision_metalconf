@@ -170,9 +170,11 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
     )
     align_fails = sum(1 for t in summary.temporal_results if not t.result.alignment_ok)
     avg_ratio   = sum(t.result.detection_ratio for t in summary.temporal_results) / max(1, summary.total)
+    ms_count    = getattr(summary, "machine_stop_count", 0)
     print(
         f"[quality]  avg_detection_ratio={avg_ratio:.0%}  "
-        f"align_failures={align_fails}/{summary.total}"
+        f"align_failures={align_fails}/{summary.total}  "
+        f"machine_stop_frames={ms_count}"
     )
     for temporal in summary.temporal_results:
         result = temporal.result
@@ -183,6 +185,8 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
             warn += " ALIGN_FALLBACK"
         if result.capture_quality_degraded:
             warn += " CALIDAD_DEGRADADA"
+        if getattr(result, "machine_stop", False):
+            warn += " MACHINE_STOP"
         print(
             f"  {result.image_path.name}: {result.status}/{temporal.decision_status}"
             f"  streak={temporal.nok_streak}"

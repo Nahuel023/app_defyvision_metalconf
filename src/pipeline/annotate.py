@@ -138,6 +138,26 @@ def _draw_edge_polyline(
         ).astype(np.uint8)
 
 
+def draw_machine_stop_badge(img: np.ndarray) -> np.ndarray:
+    """Draw a prominent DETENCION DE MAQUINA badge centered on the image."""
+    out = img.copy()
+    h, w = out.shape[:2]
+    label = "DETENCION DE MAQUINA"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 1.4, 4
+    (tw, th), baseline = cv2.getTextSize(label, font, scale, thick)
+    pad = 14
+    bx1 = w // 2 - tw // 2 - pad
+    by1 = h // 2 - th - baseline - pad
+    bx2 = w // 2 + tw // 2 + pad
+    by2 = h // 2 + baseline + pad
+    cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 140), -1)
+    cv2.rectangle(out, (bx1, by1), (bx2, by2), (0, 0, 255), 3)
+    cv2.putText(out, label, (bx1 + pad, by2 - baseline - 4),
+                font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+    return out
+
+
 def draw_centering_overlay(
     img_bgr: np.ndarray,
     centering: "CenteringResult",

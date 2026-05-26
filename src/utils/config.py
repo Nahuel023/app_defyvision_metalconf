@@ -37,6 +37,11 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "blur_score_min": 0.0,            # 0 = deshabilitado; >0 = varianza mín del Laplaciano
     "low_quality_max_streak": 10,     # frames LOW_QUALITY consecutivos antes de resetear racha
     "extra_min_dist_factor": 0.0,     # 0 = todos los extras se muestran; >0 = umbral en múltiplos de tol_xy_px
+    "machine_stop_enabled": False,
+    "machine_stop_missing_frames": 5,
+    "machine_stop_min_missing": 1,
+    "machine_stop_same_zone_px": 35.0,
+    "machine_stop_ignore_near_miss": True,
 }
 
 

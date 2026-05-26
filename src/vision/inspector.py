@@ -16,6 +16,7 @@ import numpy as np
 from src.inspection import InspectionResult, inspect_frame
 from src.patterns.pattern_io import load_pattern, find_pattern_path
 from src.patterns.roi import load_roi
+from src.pipeline.machine_stop import MachineStopDetector
 from src.utils.config import load_tolerances
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 class Inspector:
     def __init__(self) -> None:
-        self._tols:    dict[str, dict]   = {}   # model → tolerances dict
-        self._pattern: dict[tuple, object] = {}  # (model, scanner_id) → Pattern
-        self._roi:     dict[tuple, object] = {}  # (model, scanner_id) → ROI | None
-        self._ema:     dict[str | None, dict] = {}  # scanner_id → {'angle': float}
+        self._tols:      dict[str, dict]           = {}   # model → tolerances dict
+        self._pattern:   dict[tuple, object]       = {}   # (model, scanner_id) → Pattern
+        self._roi:       dict[tuple, object]       = {}   # (model, scanner_id) → ROI | None
+        self._ema:       dict[str | None, dict]    = {}   # scanner_id → {'angle': float}
+        self._detectors: dict[tuple, MachineStopDetector] = {}  # (model, scanner_id) → detector
 
     # ------------------------------------------------------------------
     # API pública
@@ -46,10 +48,11 @@ class Inspector:
         """
         try:
             preloaded = {
-                "tolerances": self._get_tols(model),
-                "pattern":    self._get_pattern(model, scanner_id),
-                "roi":        self._get_roi(model, scanner_id),
-                "ema_state":  self._get_ema(scanner_id),
+                "tolerances":          self._get_tols(model),
+                "pattern":             self._get_pattern(model, scanner_id),
+                "roi":                 self._get_roi(model, scanner_id),
+                "ema_state":           self._get_ema(scanner_id),
+                "machine_stop_detector": self._get_detector(model, scanner_id),
             }
             return inspect_frame(
                 model, frame, frame_id=frame_id, save=save,
@@ -72,12 +75,15 @@ class Inspector:
             self._tols.clear()
             self._pattern.clear()
             self._roi.clear()
+            self._detectors.clear()
         else:
             self._tols.pop(model, None)
             for k in [k for k in self._pattern if k[0] == model]:
                 del self._pattern[k]
             for k in [k for k in self._roi if k[0] == model]:
                 del self._roi[k]
+            for k in [k for k in self._detectors if k[0] == model]:
+                del self._detectors[k]
         # Resetear EMA del scanner afectado para no arrastrar ángulos obsoletos
         if scanner_id is not None:
             self._ema.pop(scanner_id, None)
@@ -109,3 +115,16 @@ class Inspector:
         if scanner_id not in self._ema:
             self._ema[scanner_id] = {}
         return self._ema[scanner_id]
+
+    def _get_detector(self, model: str, scanner_id: str | None) -> MachineStopDetector:
+        key = (model, scanner_id)
+        if key not in self._detectors:
+            tols = self._get_tols(model)
+            self._detectors[key] = MachineStopDetector(
+                enabled=bool(tols.get("machine_stop_enabled", False)),
+                missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                min_missing=int(tols.get("machine_stop_min_missing", 1)),
+                same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
+                ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
+            )
+        return self._detectors[key]
