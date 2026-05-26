@@ -141,10 +141,10 @@ def main() -> None:
     print(f"  Missing: min={min(missings)}  max={max(missings)}  "
           f"media={sum(missings)/len(missings):.1f}")
     if false_mis:
-        print(f"  Falsos missing (detectado cercano <2×tol): "
+        print(f"  Falsos missing (detectado cercano <2xtol): "
               f"max_por_frame={max(false_mis)}  total={sum(false_mis)}")
     if max_nearest:
-        print(f"  Distancia missing→más_cercano: "
+        print(f"  Distancia missing->mas_cercano: "
               f"max_global={max(max_nearest):.1f}px  "
               f"media={sum(max_nearest)/len(max_nearest):.1f}px")
     print(f"\nCSV guardado: {out_path}")

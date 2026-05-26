@@ -78,6 +78,13 @@ class CenteringResult:
     # False if too few bands were detected to trust the measurement
     centering_reliable: bool = True
 
+    # Slope of each edge line from vertical (degrees). 0° = perfectly vertical.
+    # Positive = edge leans right as Y increases. Measured from per-band points.
+    left_edge_slope_deg: float = 0.0
+    right_edge_slope_deg: float = 0.0
+    pattern_left_slope_deg: float = 0.0
+    pattern_right_slope_deg: float = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -396,6 +403,16 @@ def compute_centering(
     pattern_left_points  = tuple(sorted(pat_left.values(),  key=lambda p: p[1]))
     pattern_right_points = tuple(sorted(pat_right.values(), key=lambda p: p[1]))
 
+    def _slope_deg(pts: list) -> float:
+        """Slope angle from vertical (°). 0 = vertical. Sign: + leans right going down."""
+        c = _fit_line_robust(pts)
+        return float(np.degrees(np.arctan(c[0]))) if c is not None else 0.0
+
+    left_edge_slope_deg    = _slope_deg(left_pts_list)
+    right_edge_slope_deg   = _slope_deg(right_pts_list)
+    pattern_left_slope_deg  = _slope_deg(list(pattern_left_points))
+    pattern_right_slope_deg = _slope_deg(list(pattern_right_points))
+
     return CenteringResult(
         left_x=left_x,
         right_x=right_x,
@@ -416,4 +433,8 @@ def compute_centering(
         left_margin_std=left_margin_std,
         right_margin_std=right_margin_std,
         centering_reliable=centering_reliable,
+        left_edge_slope_deg=left_edge_slope_deg,
+        right_edge_slope_deg=right_edge_slope_deg,
+        pattern_left_slope_deg=pattern_left_slope_deg,
+        pattern_right_slope_deg=pattern_right_slope_deg,
     )

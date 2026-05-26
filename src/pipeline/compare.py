@@ -22,6 +22,7 @@ def compare_missing_only(
     tol_xy_px: float = 8.0,
     max_missing: int = 0,
     max_extra: int = -1,
+    extra_min_dist_factor: float = 0.0,
 ) -> CompareReport:
     """
     Matching greedy: cada punto esperado toma el detectado más cercano aún libre.
@@ -30,6 +31,11 @@ def compare_missing_only(
 
     extra = detectados sin match (contornos espurios / reflejos).
     max_extra=-1 deshabilita el criterio de extra.
+
+    extra_min_dist_factor: si > 0, un detectado sin match solo cuenta como "extra"
+    si está a más de (extra_min_dist_factor × tol_xy_px) de CUALQUIER posición
+    esperada (incluyendo las ya matcheadas). Los que caen más cerca son agujeros
+    reales que el matcher no asignó por error de fase — no espurios genuinos.
     """
     n_exp = len(expected_points)
     n_det = len(detected_points)
@@ -69,7 +75,21 @@ def compare_missing_only(
             missing_points.append(expected_points[i])
 
     missing = len(missing_points)
-    extra_points = [detected_points[j] for j in range(n_det) if not used_det[j]]
+    raw_extra = [detected_points[j] for j in range(n_det) if not used_det[j]]
+
+    # Filter near-expected extras: holes closer than extra_min_dist_factor×tol to
+    # ANY expected position (even already matched ones) are real holes the
+    # phase/tolerance missed — not genuine spurious detections (reflections, noise).
+    if extra_min_dist_factor > 0.0 and raw_extra:
+        min_d2_thr = (tol_xy_px * extra_min_dist_factor) ** 2
+        extra_det = np.array(raw_extra, dtype=np.float32)          # (n_raw, 2)
+        # (n_raw, n_exp) squared distances to every expected position
+        d2_to_exp = ((extra_det[:, None, :] - exp[None, :, :]) ** 2).sum(axis=2)
+        truly_far = d2_to_exp.min(axis=1) > min_d2_thr             # (n_raw,)
+        extra_points = [pt for pt, far in zip(raw_extra, truly_far) if far]
+    else:
+        extra_points = raw_extra
+
     extra = len(extra_points)
 
     nok = missing > max_missing or (max_extra >= 0 and extra > max_extra)

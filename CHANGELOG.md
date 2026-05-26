@@ -1050,6 +1050,131 @@ está corrido hacia un lado aunque el offset total sea pequeño.
 
 ---
 
+### Sesión 2026-05-26 (continuación) — Tadeo + Claude
+
+#### Cambio 31 — Comando CLI `missing-folder` (diagnóstico de agujeros faltantes)
+
+**Motivación:** En producción `grid_max_missing=35` permite hasta 35 faltantes antes de
+declarar NOK. Para diagnóstico se necesita detectar y exportar cualquier frame con
+≥1 agujero faltante sin tocar el criterio productivo.
+
+**Nuevo comando:**
+```
+python -m src.main missing-folder \
+  --model modelo_B --scanner scanner_1 \
+  --input <carpeta> --output data/output/<nombre> \
+  --min-missing 1
+```
+
+**Diferencia de criterios (importante):**
+- `production_status` — usa el pipeline normal con `grid_max_missing` → nunca NOK en material bueno
+- `missing_status` — marca `FALTANTE` cuando `report.missing >= min_missing` → diagnóstico puro
+
+**Salidas generadas:**
+- `<output>/missing_report.csv` — una fila por frame con columnas:
+  `frame, production_status, missing_status, expected, detected, missing, extra,
+  detection_ratio, alignment_ok, false_missing_count,
+  missing_nearest_med_px, missing_nearest_max_px`
+- `<output>/missing_overlays/frame_NNNN_missing_M_overlay.png` — overlay por frame FALTANTE
+  con badge azul "FALTANTE: N" superpuesto debajo del status normal
+
+**Resumen en consola:**
+- frames totales, FALTANTE, OK (diagnóstico)
+- missing acumulado, missing máximo
+- top 10 frames por missing
+
+**false_missing_count:** cuántos faltantes tienen un detectado dentro de 2×tol_xy_px —
+candidatos a ser agujeros reales con error de fase, no agujeros físicamente ausentes.
+
+**Resultado sobre grabación 20260519_121741 (185 frames, min_missing=1):**
+- 160/185 sin ningún faltante
+- 25/185 frames con ≥1 faltante (production_status=OK en todos, 185/185 OK mantenido)
+- missing acumulado: 149 (media 0.81/frame en frames buenos)
+- Frame más crítico: frame_0036 con 20 missing (borde inferior del frame, fin de material)
+
+**Archivos modificados:**
+- `src/main.py` → nuevo `cmd_missing_folder()` + subcomando registrado en `build_parser()`
+
+---
+
+#### Cambio 32 — Fix cp1252: caracteres Unicode en salida de consola Windows
+
+**Problema:** `scripts/run_folder_csv.py` imprimía `→` (U+2192) que falla en consolas
+Windows con codepage cp1252. El mismo carácter estaba también en el nuevo `cmd_missing_folder`.
+
+**Fix:** Reemplazados todos los caracteres Unicode no-ASCII en salidas `print()` por ASCII:
+- `→` → `->` en `scripts/run_folder_csv.py` (2 ocurrencias)
+- `→` → `->` en `src/main.py` (1 ocurrencia en `cmd_missing_folder`)
+
+**Los CSV siguen escribiéndose en UTF-8** (sin cambio).
+
+---
+
+### Sesión 2026-05-26 — Tadeo + Claude
+
+#### Cambio 29 — Filtro de extras falsos (`extra_min_dist_factor`)
+
+**Problema:** El matcher greedy marcaba como "extra" (diamante naranja) agujeros que
+físicamente existen en el patrón pero cuya posición esperada quedó ligeramente fuera
+de `tol_xy_px` por error de fase del grid o por drift local. Estos no son detecciones
+espurias: son agujeros reales que el algoritmo no pudo asignar.
+
+**Solución:** Nuevo parámetro `extra_min_dist_factor` en `compare_missing_only()`.
+Después del matching greedy, cada detectado sin match se computa contra TODAS las
+posiciones esperadas (incluyendo ya matcheadas). Si la distancia mínima es ≤
+`extra_min_dist_factor × tol_xy_px`, se descarta como "near-expected" — no es un
+extra genuino. Solo los verdaderamente lejanos de toda posición esperada se conservan.
+
+**Implementación:**
+- `src/pipeline/compare.py` → nuevo param `extra_min_dist_factor: float = 0.0`;
+  calcula `d2_to_exp` matricial (n_raw × n_exp) y filtra con `min > thr2`.
+- `src/utils/config.py` → `DEFAULT_TOLERANCES` agrega `"extra_min_dist_factor": 0.0`
+- `src/inspection.py` → lee `extra_min_dist_factor` y lo pasa a `compare_missing_only`
+- `config/tolerancias.yaml` → `extra_min_dist_factor: 2.0` para modelo_B
+  (umbral = 2 × 22px = 44px — reflejos/ruido espurio están típicamente >100px de todo expected)
+
+**Resultado en grabación 185 frames:**
+- 185/185 raw OK mantenido ✓
+- `extra=0` en ~180/185 frames (antes podía ser 3–15 en frames sin blur)
+- Los 5 frames con `extra=1` restantes son detecciones genuinamente aisladas
+
+---
+
+#### Cambio 30 — Medición de verticalidad de bordes del patrón
+
+**Motivación:** Las polilíneas que dibujan los bordes laterales del patrón y de la chapa
+pueden no ser perfectamente verticales (el material llega con leve inclinación o el patrón
+punzonado tiene deriva). Necesario poder cuantificar ese ángulo para diagnóstico.
+
+**Implementación:**
+
+`src/pipeline/edge_centering.py`:
+- `CenteringResult` agrega 4 nuevos campos con default=0.0:
+  - `left_edge_slope_deg` — pendiente del borde izquierdo de chapa (°)
+  - `right_edge_slope_deg` — pendiente del borde derecho de chapa (°)
+  - `pattern_left_slope_deg` — pendiente del borde izquierdo del patrón (°)
+  - `pattern_right_slope_deg` — pendiente del borde derecho del patrón (°)
+- Convención: 0° = perfectamente vertical. Positivo = el borde se inclina a la derecha
+  al bajar. Se calcula como `atan(a) * 180/π` donde `a` es el coeficiente de
+  `_fit_line_robust(pts)` (ajuste `x = a*y + b`).
+- `compute_centering()` define función local `_slope_deg()` y calcula los 4 slopes
+  sobre los puntos por banda ya disponibles.
+
+`src/pipeline/annotate.py` — `draw_centering_overlay()`:
+- Nueva línea de texto en `text_y_base - 60`:
+  `"Vert pat: Izq=±X.X°  Der=±Y.Y°"` en color cyan-amarillo.
+- Usa `getattr` para retrocompatibilidad.
+
+**Comportamiento esperado:**
+- Material bien alineado: |slope| < 1°
+- Material con leve inclinación: 1°–3°
+- >3° indica problema de encuadre o error de alineación
+- Misma granularidad que la detección de bordes: 16 bandas, ajuste sigma-clip
+
+**185/185 OK mantenido ✓**
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -1068,10 +1193,14 @@ está corrido hacia un lado aunque el offset total sea pequeño.
 | modelo_B — Grid | dx=28, dy=22, 258 células. Fase X+Y 2D + affine local post-fase. |
 | modelo_B — Tolerancia | `tol_xy_px=22`, `min_area=250`, `grid_max_missing=35`, `bbox_filter_margin=20`, `edge_margin_px=5` |
 | modelo_B — Affine refinement | `grid_affine_refinement: true`, `tol_affine=33px`, `min_matches=12` |
-| modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=104%, 0 NOK, 0 temporal NOK. missing medio=0.81, 160/185 frames sin missing. |
+| modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=104%, 0 NOK, 0 temporal NOK. missing medio=0.81, 160/185 frames sin missing. Extras filtrados: ~180/185 frames con extra=0. |
+| Extras falsos | Filtro `extra_min_dist_factor=2.0` en modelo_B: solo detecciones a >44px de todo expected cuentan como extras. |
+| Verticalidad bordes | `CenteringResult` expone `pattern_left_slope_deg`, `pattern_right_slope_deg`. Mostrado en overlay: "Vert pat: Izq=±X.X° Der=±Y.Y°". |
 | FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |
+| CLI missing-folder | Nuevo comando diagnóstico: exporta CSV + overlays para frames con missing >= --min-missing. No toca criterio productivo. |
+| run_folder_csv.py | Fix cp1252: reemplazados caracteres Unicode `→` por ASCII `->` en salidas de consola. |
 
 ---
 
