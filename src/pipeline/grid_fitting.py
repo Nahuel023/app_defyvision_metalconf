@@ -37,9 +37,13 @@ def assign_cells(
     phase_x: float,
     phase_y: float,
 ) -> list[tuple[int, int]]:
-    """Assign each hole to its (col, row) grid cell index."""
+    """Assign each hole to its (col, row) grid cell index.
+
+    Uses round-half-up (int(x + 0.5)) instead of Python's banker's rounding
+    (round()) to avoid collisions when a coordinate falls exactly at mid-period.
+    """
     return [
-        (round((x - phase_x) / dx), round((y - phase_y) / dy))
+        (int((x - phase_x) / dx + 0.5), int((y - phase_y) / dy + 0.5))
         for x, y in points
     ]
 

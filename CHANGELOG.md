@@ -1110,6 +1110,119 @@ Windows con codepage cp1252. El mismo carácter estaba también en el nuevo `cmd
 
 ---
 
+### Sesión 2026-05-26 (Esterilla) — Tadeo + Claude
+
+#### Cambio 34 — Diagnóstico y calibración inicial de modelo_A (Esterilla)
+
+**Objetivo:** Revisar la lógica del patrón Esterilla (modelo_A / scanner_2) y establecer
+parámetros de inspección robustos. modelo_B (Microperforado) no fue modificado.
+
+---
+
+**Diagnóstico del patrón `data/patterns/modelo_A/holes.json`:**
+
+Resultado de `scripts/_debug_modelo_a.py`:
+
+```
+Puntos totales:    117
+Celdas totales:    117
+Celdas unicas:     113    ← 4 celdas duplicadas
+dx=68.0  dy=38.0  phase_x=16.0  phase_y=30.0
+```
+
+**Geometría real de Esterilla:**
+- Grilla rectangular (sin escalonado hexagonal). X-positions fijas: ci=7..11 → x=492,560,628,696,764px
+- Filas impares  (cj=1,3,...,25): 4 agujeros PEQUEÑOS  r≈14px, area≈627px²
+- Filas pares    (cj=2,4,...,24): 5 agujeros GRANDES   r≈25px, area≈2023px²
+- Total esperado: 13 filas impares × 4 + 12 filas pares × 5 = 52+60 = 112 celdas únicas
+
+**Celdas duplicadas identificadas — filas cj=22-25 (últimas 4 filas):**
+
+```
+(ci=10, cj=22) x2: idx=95 (x=696.7 y=849.1 r=25.0) ← correcto
+                   idx=99 (x=723.5 y=885.0 r=13.6) ← mal asignado — era (10,23)
+(ci=9,  cj=23) x2: idx=100 (x=656.2 y=885.5) y idx=105 (x=633.7 y=920.5) ambos ≈ y=904exp
+(ci=8,  cj=23) x2: idx=101 (x=589.5 y=887.0) y idx=106 (x=567.1 y=922.0) ambos ≈ y=904exp
+(ci=9,  cj=24) x2: idx=109 (x=660.8 y=957.0) y idx=110 (x=594.4 y=958.0) ambos ≈ y=942exp
+```
+
+**Causas raíz:**
+1. **(ci=10, cj=22):** Bug de redondeo en `assign_cells` — Python's `round(22.5)=22` (banker's
+   rounding, "round half to even"). El punto a y=885px = exactamente el punto medio entre
+   cj=22 (y_exp=866) y cj=23 (y_exp=904). El redondeo bancario lo asignó a cj=22 en lugar
+   de cj=23. **Corregido** con round-half-up (`int(x+0.5)`).
+2. **(cj=23 y cj=24):** Ambigüedad real en la imagen de referencia — dos agujeros físicos
+   diferentes fueron detectados como igualmente cercanos a la misma celda esperada.
+   Requiere imagen de referencia más limpia para `build-pattern`. **Sin fix por ahora.**
+
+**Impacto en runtime:** `grid_compare_points` ya deduplica por `(round(ex), round(ey))` →
+las 4 celdas duplicadas generan la misma posición esperada y solo la primera pasa.
+No hay falsos missing ni falsos extra causados por los duplicados.
+
+---
+
+**Cambios aplicados:**
+
+**`src/pipeline/grid_fitting.py` — `assign_cells()`:**
+```python
+# ANTES (banker's rounding — round(22.5) = 22, no 23):
+(round((x - phase_x) / dx), round((y - phase_y) / dy))
+# DESPUÉS (round-half-up — int(22.5 + 0.5) = 23):
+(int((x - phase_x) / dx + 0.5), int((y - phase_y) / dy + 0.5))
+```
+Previene asignaciones incorrectas cuando un punto cae exactamente en el punto medio
+entre dos celdas adyacentes. No afecta modelo_B (su holes.json ya estaba guardado).
+
+**`src/patterns/pattern_build.py` — diagnósticos post-assign:**
+Después de `assign_cells()`, imprime:
+```
+[build-pattern] 117 puntos  dx=68.0 dy=38.0  phase=(16.0,30.0)
+[build-pattern] Celdas totales: 117  Unicas: 113  Duplicadas: 4
+[build-pattern] ADVERTENCIA: 4 celda(s) duplicada(s) detectadas:
+  (ci=10, cj=22) x2: [(696.7, 849.1), (723.5, 885.0)]
+  ...
+```
+
+**`config/tolerancias.yaml` — modelo_A:**
+Reemplaza `modelo_A: {}` con overrides completos y documentados:
+
+```yaml
+modelo_A:
+  polarity: bright            # backlight → agujeros brillantes (mismo que modelo_B)
+  min_area: 400.0             # captura small holes (area≈627px²); rechaza ruido
+  circularity_min: 0.80
+  aspect_ratio_max: 2.0
+  tol_xy_px: 16.0             # < dy/2=19px → sin ambigüedad entre filas adyacentes
+  align_match_tol_px: 100.0
+  min_match_count: 5
+  edge_margin_px: 15.0
+  pattern_edge_margin_px: 40.0
+  grid_min_spacing: 30.0      # dy=38 > 30 → estimate_spacing encuentra dy correcto
+  grid_max_missing: 10        # ~9% de 112 agujeros — conservador hasta calibrar
+  bbox_filter_margin_px: 20.0
+  grid_affine_refinement: false  # sin datos de planta para validar
+  extra_min_dist_factor: 2.0     # extras deben estar >32px de todo expected
+  consecutive_nok_frames: 9999   # CALIBRACIÓN — FAULT deshabilitado
+  continuous_position_threshold: 0.0
+```
+
+**Decisión de diseño — Grid vs RANSAC para Esterilla:**
+Se eligió **grid fitting** (igual que modelo_B), porque:
+- La Esterilla es una grilla rectangular regular y repetitiva
+- La chapa llega en posición variable cada ciclo → el patrón no tiene referencia absoluta
+- RANSAC/affine requiere conocer la posición absoluta del patrón (no disponible)
+- Grid fitting es position-invariant: encuentra la fase correcta frame a frame sin referencia
+
+**No disponible — imagen OK de scanner_2/modelo_A:**
+No hay imágenes de referencia para reconstruir `data/patterns/scanner_2/modelo_A/holes.json`.
+El patrón global (`data/patterns/modelo_A/`) se usa como fallback.
+**Próximo paso:** capturar una imagen OK de Esterilla en planta con scanner_2 y correr:
+```
+python -m src.main build-pattern --model modelo_A --scanner scanner_2 --img <imagen>
+```
+
+---
+
 ### Sesión 2026-05-26 — Tadeo + Claude
 
 #### Cambio 29 — Filtro de extras falsos (`extra_min_dist_factor`)
@@ -1240,6 +1353,8 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 | FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |
+| modelo_A (Esterilla) | Grid fitting. dx=68, dy=38. Filas alt. 4 small / 5 large holes. tol_xy_px=16 (<dy/2). grid_max_missing=10 conservador. FAULT deshabilitado (9999). Sin patron scanner_2 aun. |
+| modelo_A — Patron global | 117 puntos, 113 celdas unicas, 4 duplicadas en cj=22-25. Deduplica OK en runtime. Fix assign_cells evita futuros duplicados por redondeo. |
 | CLI missing-folder | Nuevo comando diagnóstico: exporta CSV + overlays para frames con missing >= --min-missing. No toca criterio productivo. |
 | CLI center-folder | Nuevo comando diagnóstico: exporta CSV 20 cols + overlays de centrado por frame. Validado 185/185 fiable. |
 | Centrado modelo_B 185f | Offset mediana=-0.95px, Izq=207.2px, Der=209.2px, peor offset=+7.02px. `center_offset_tol_px=0.0` (sin NOK activado). |
@@ -1278,6 +1393,17 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 - Agregar display de `avg_detection_ratio` en tab Métricas de la UI de servicio
 - Medir px/mm para modelo_B (saber cuánto es `tol_xy_px=22px` en mm reales)
 
+### modelo_A (Esterilla) — pendiente calibración en planta
+- **Capturar imagen OK de Esterilla con scanner_2** y reconstruir patrón:
+  ```
+  python -m src.main build-pattern --model modelo_A --scanner scanner_2 --img <imagen>
+  ```
+  Esto creará `data/patterns/scanner_2/modelo_A/holes.json` sin los 3 duplicados residuales.
+- **Validar `min_area=400px²`** con cámara real: si se pierden agujeros pequeños subir a 350.
+- **Validar `tol_xy_px=16px`**: con grid affine deshabilitado puede necesitar ajuste.
+- **Activar `grid_affine_refinement: true`** una vez que se vean falsos missing en bordes.
+- **Calibrar `grid_max_missing`**: capturar frame con defecto real y ajustar umbral.
+- **Calibrar `consecutive_nok_frames`**: actualmente 9999 (FAULT deshabilitado).
+
 ### Baja prioridad
 - Tests unitarios para pipeline de visión (compare, detect, preprocess, grid_fitting)
-- Modelo_A: revisar si tiene células duplicadas en grid (113 únicas de 117)
