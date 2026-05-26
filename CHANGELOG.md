@@ -1110,6 +1110,47 @@ Windows con codepage cp1252. El mismo carácter estaba también en el nuevo `cmd
 
 ---
 
+### Sesión 2026-05-26 (fix overlay centrado) — Tadeo + Claude
+
+#### Cambio 35 — Fix overlay CHAPA: dibujar en frame completo con offset ROI
+
+**Problema:** `draw_centering_overlay()` se aplicaba sobre `overlay_roi` (imagen recortada
+a la ROI, 650×1077px). Las coordenadas de borde de CHAPA (`left_x≈-31px`, `right_x≈700px`)
+son ROI-relativas: el borde izquierdo queda fuera de la imagen (x<0 → clipeado a 0) y el
+borde derecho en el extremo. Las líneas/labels de CHAPA aparecían sobre el borde del PATRON,
+no sobre los bordes físicos reales de la chapa.
+
+**Fix:**
+
+`src/pipeline/annotate.py` — `draw_centering_overlay()`:
+- Nuevos parámetros `roi_x: int = 0, roi_y: int = 0` (default=0 → sin cambio de comportamiento).
+- Todos los escalares X se suman `roi_x`: `cx`, `hx`, `lx`, `rx`, `plx`, `prx`.
+- Los puntos por banda se transforman: `_shift(pts) = (x + roi_x, y + roi_y)` para
+  `left_edge_points`, `right_edge_points`, `pattern_left_points`, `pattern_right_points`.
+
+`src/inspection.py` — `_inspect_bgr()`:
+- `draw_centering_overlay` se movió de `overlay_roi` al overlay full-frame (`overlay`).
+- Se eliminó la llamada sobre overlay_roi.
+- Nueva llamada post-compositing con offset:
+  ```python
+  overlay = draw_centering_overlay(
+      overlay, centering, tag_nok=centering_nok,
+      roi_x=roi.x if roi else 0,
+      roi_y=roi.y if roi else 0,
+  )
+  ```
+
+**Resultado verificado** en frames 0036, 0090, 0120 de grabación 20260519_121741:
+- Overlay full-frame 1920×1080 ✓
+- Línea CHAPA izquierda: x≈679px (full-frame) = borde físico real de chapa ✓
+- Línea CHAPA derecha: x≈1410px (full-frame) = borde físico real de chapa ✓
+- Líneas PATRON separadas visualmente de CHAPA ✓
+- Labels "CHAPA" / "PATRON" en posiciones correctas ✓
+- Text Izq/Der/Delta/Offset sin cambios ✓
+- 185/185 OK mantenido (sin cambio en lógica de inspección) ✓
+
+---
+
 ### Sesión 2026-05-26 (Esterilla) — Tadeo + Claude
 
 #### Cambio 34 — Diagnóstico y calibración inicial de modelo_A (Esterilla)
@@ -1340,7 +1381,7 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 | Visor modo servicio | ZoomableImageView: zoom (rueda), pan (drag), fit (doble click / botón) + scroll |
 | Overlay | Imagen completa del frame. Cruz roja=missing, diamante naranja=extra, línea cyan=near-miss |
 | Extra detections | Detectadas y visibles (diamantes naranjas) en overlay; filtro bbox activo |
-| Centrado de chapa | Márgenes Izq/Der + offset. `left_margin≈176px`, `right_margin≈158px`, `offset≈+9px` en grabación de referencia. `center_offset_tol_px=0` (sin NOK). |
+| Centrado de chapa | Overlay CHAPA sobre frame completo (fix Cambio 35). CHAPA cae en borde real. PATRON separado. Texto Izq/Der/Delta/Offset OK. |
 | Detection ratio | Por frame y promedio de sesión. Flag `CALIDAD_DEGRADADA` configurable. |
 | Frame quality | `blur_score` (Laplacian var) + `frame_quality` en InspectionResult. `blur_score_min=0.0` (deshabilitado). Política "hold" wired en FSM y inspect_folder(). |
 | modelo_B — ROI | `x=710, w=650, y=3, h=1077` → excluye backlight desnudo en ambos lados |
