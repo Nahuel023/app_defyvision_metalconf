@@ -1182,6 +1182,62 @@ D) **`config/tolerancias.yaml`** — modelo_B:
 
 ---
 
+#### Cambio 38 — CHAPA vs PATRON zigzag + badges DETENER MAQUINA con razón
+
+**Objetivo:** Separar la detección de inestabilidad de imagen en dos métricas distintas
+con consecuencias distintas:
+
+1. **CHAPA edge zigzag** (borde de lámina, backlight): zigzag de la CHAPA → vibración de
+   cámara/lámina → `IMAGEN INESTABLE` → frame descartado (no cuenta para rachas ni machine stop).
+2. **PATRON edge zigzag** (bordes del patrón de agujeros): zigzag del PATRON → desalineamiento
+   mecánico del punzón → badge `DETENER MAQUINA - PATRON DESALINEADO`.
+
+Además: cuando `machine_stop` (agujero persistente faltante), el badge muestra la razón
+`AGUJERO PERSISTENTE FALTANTE`. Si ambos triggers están activos, se dibujan dos banners
+apilados verticalmente.
+
+**Archivos modificados:**
+
+A) **`src/pipeline/edge_centering.py`**:
+   - `CenteringResult` ahora tiene **4** campos zigzag en lugar de 2:
+     `chapa_zigzag_std_px`, `chapa_zigzag_max_px` (bordes de lámina) y
+     `pattern_zigzag_std_px`, `pattern_zigzag_max_px` (bordes del patrón).
+   - `compute_centering()`: nuevo helper `_zigzag_residuals(pts_lists)` → `(std, max)`.
+     chapa: computed from `[left_pts_list, right_pts_list]` (gradiente de backlight).
+     patron: computed from `[pattern_left_points, pattern_right_points]`.
+
+B) **`src/pipeline/annotate.py`**:
+   - `draw_machine_stop_badge(img, reason="", y_offset=0)`: banner full-width rojo semitransparente.
+     Texto principal `DETENER MAQUINA` (escala 2.0, grosor 5, sombra). Texto amarillo con `reason`.
+     `y_offset` para apilar dos banners cuando ambos triggers están activos.
+
+C) **`src/inspection.py`**:
+   - `InspectionResult` agrega `pattern_alignment_warn: bool = False`, `chapa_zigzag_std_px`,
+     `chapa_zigzag_max_px` (ya tenía `pattern_zigzag_*`).
+   - `_inspect_bgr()`: lógica separada:
+     - CHAPA zigzag (`verticality_quality_enabled`): si supera umbrales → `frame_geometry_quality = "UNSTABLE"`,
+       `frame_quality = "LOW_QUALITY"` (skip decisiones).
+     - PATRON zigzag (`pattern_align_enabled`): si supera umbrales → `pattern_alignment_warn = True`
+       (NO skip decisiones, solo muestra badge DETENER MAQUINA).
+   - Badge drawing: `machine_stop` → badge `"AGUJERO PERSISTENTE FALTANTE"`;
+     `pattern_alignment_warn` → badge `"PATRON DESALINEADO"`;
+     ambos activos → dos banners apilados (`y_offset=±55`).
+
+D) **`src/utils/config.py`**:
+   - Reemplaza `pattern_zigzag_std_max_px / _abs_max_px` por `chapa_zigzag_std_max_px / _abs_max_px`.
+   - Agrega `pattern_align_enabled: False`, `pattern_align_std_max_px: 6.0`,
+     `pattern_align_abs_max_px: 15.0`.
+
+E) **`config/tolerancias.yaml`** — modelo_B:
+   - Reemplaza `pattern_zigzag_*` por `chapa_zigzag_*` (valores idénticos: std=4.0, abs=10.0).
+   - Agrega `pattern_align_enabled: true`, `pattern_align_std_max_px: 6.0`,
+     `pattern_align_abs_max_px: 15.0`.
+
+**Sin tocar:** PLC, solenoides, lógica de producción, `grid_max_missing`,
+`consecutive_nok_frames`, patrón de modelo_B.
+
+---
+
 ### Sesión 2026-05-26 (machine stop) — Tadeo + Claude
 
 #### Cambio 36 — Detección de parada de máquina por agujero faltante persistente

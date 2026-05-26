@@ -43,8 +43,11 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "machine_stop_same_zone_px": 35.0,
     "machine_stop_ignore_near_miss": True,
     "verticality_quality_enabled": False,
-    "pattern_zigzag_std_max_px": 4.0,
-    "pattern_zigzag_abs_max_px": 10.0,
+    "chapa_zigzag_std_max_px": 4.0,
+    "chapa_zigzag_abs_max_px": 10.0,
+    "pattern_align_enabled": False,
+    "pattern_align_std_max_px": 6.0,
+    "pattern_align_abs_max_px": 15.0,
 }
 
 
