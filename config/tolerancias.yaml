@@ -158,5 +158,5 @@ models:
     chapa_zigzag_abs_max_px: 10.0
     # PATRON edge zigzag (bordes del patrón de agujeros) → DETENER MAQUINA - PATRON DESALINEADO
     pattern_align_enabled: true
-    pattern_align_std_max_px: 6.0
+    pattern_align_std_max_px: 5.0
     pattern_align_abs_max_px: 15.0

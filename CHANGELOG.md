@@ -1182,6 +1182,46 @@ D) **`config/tolerancias.yaml`** — modelo_B:
 
 ---
 
+#### Cambio 41 — PATRON DESALINEADO → NOK + badge en tope + bordes resaltados
+
+**Problema reportado:** frame_0122 mostraba "STATUS: OK" con badge DETENER MAQUINA activo.
+El banner tapaba el área de agujeros (posicionado en h//3 = mitad del frame).
+
+**Causa:** `final_status` se calculaba ANTES de evaluar `pattern_alignment_warn`.
+Cuando `pattern_align_enabled` detectaba zigzag excesivo, solo se seteaba el flag pero
+no se actualizaba `final_status`. `draw_compare_overlay` ya recibía el valor viejo "OK".
+
+**Correcciones:**
+
+A) **`src/inspection.py`**:
+   - `final_status = "NOK"` se asigna dentro del bloque `if pattern_align_enabled` cuando
+     se supera el umbral → `draw_compare_overlay` recibe "NOK" correctamente.
+   - `draw_centering_overlay` recibe `pattern_warn=pattern_alignment_warn`.
+   - Llamadas a `draw_machine_stop_badge`: cambian de `y_offset=±55` a `index=0/1`.
+
+B) **`src/pipeline/annotate.py`** — `draw_machine_stop_badge`:
+   - Reposicionado al TOPE del frame (`banner_y = index * (banner_h + 3)`).
+   - Altura compacta (~65px por banner). No cubre el área de agujeros.
+   - Parámetro `index` reemplaza `y_offset`: 0=primer banner, 1=apilado debajo.
+   - Icono "!" al inicio del texto principal.
+
+C) **`src/pipeline/annotate.py`** — `draw_centering_overlay`:
+   - Nuevo parámetro `pattern_warn: bool = False`.
+   - Cuando `True`: bordes del PATRON en naranja vivo (en vez de cyan), grosor 2,
+     alpha 0.9, glow oscuro debajo.
+   - Círculo blanco + "!" en el punto de MÁXIMA desviación de cada borde.
+   - Label cambia a "PATRON !!" en naranja.
+
+D) **`config/tolerancias.yaml`** — modelo_B:
+   - `pattern_align_std_max_px`: 6.0 → 5.0 (más sensible al desalineamiento).
+
+**Semántica clara resultante:**
+- CHAPA zigzag alto → IMAGEN INESTABLE (LOW_QUALITY, no decide) — sin cambio.
+- PATRON zigzag alto → STATUS: NOK + badge "PATRON DESALINEADO" en tope del frame
+  + bordes del patrón en naranja con círculo en el peor punto.
+
+---
+
 #### Cambio 40 — Aceleración de análisis batch (pre-cache + threading)
 
 **Objetivo:** Reducir el tiempo de análisis de una grabación sin cambiar ninguna lógica

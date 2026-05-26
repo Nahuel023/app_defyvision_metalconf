@@ -346,6 +346,7 @@ def _inspect_bgr(
             if (pattern_zigzag_std_px > pattern_align_std_max_px
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
+                final_status = "NOK"   # desalineamiento mecánico del patron → NOK
 
     # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
     # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
@@ -395,15 +396,16 @@ def _inspect_bgr(
         overlay = draw_centering_overlay(
             overlay, centering, tag_nok=centering_nok,
             roi_x=_roi_x, roi_y=_roi_y,
+            pattern_warn=pattern_alignment_warn,
         )
 
     if machine_stop and pattern_alignment_warn:
-        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE", y_offset=-55)
-        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", y_offset=55)
+        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE", index=0)
+        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=1)
     elif machine_stop:
-        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE")
+        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE", index=0)
     elif pattern_alignment_warn:
-        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO")
+        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
 
     return InspectionResult(
         model=model,
