@@ -94,11 +94,13 @@ def inspect_image(
     save: bool = False,
     scanner_id: str | None = None,
     _machine_stop_detector: "MachineStopDetector | None" = None,
+    _preloaded: Optional[dict] = None,
 ) -> InspectionResult:
     """Inspect an image from disk."""
     img_full = load_bgr_image(img_path)
     result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id,
-                          _machine_stop_detector=_machine_stop_detector)
+                          _machine_stop_detector=_machine_stop_detector,
+                          _preloaded=_preloaded)
     if save:
         _save_result_images(result)
     return result
@@ -212,14 +214,14 @@ def _inspect_bgr(
     detected_points = [(h.x, h.y) for h in holes]
 
     # Blur score: Laplacian variance on the inspection ROI.
-    # Low value = blurry/out-of-focus. Disabled when blur_score_min == 0.
-    _gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    blur_score = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
-    frame_quality = (
-        "LOW_QUALITY"
-        if blur_score_min > 0.0 and blur_score < blur_score_min
-        else "GOOD"
-    )
+    # Skip entirely when blur_score_min == 0 (not configured) to save ~3ms/frame.
+    if blur_score_min > 0.0:
+        _gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blur_score = float(cv2.Laplacian(_gray, cv2.CV_64F).var())
+        frame_quality = "LOW_QUALITY" if blur_score < blur_score_min else "GOOD"
+    else:
+        blur_score = 0.0
+        frame_quality = "GOOD"
 
     img_h, img_w = img.shape[:2]
 

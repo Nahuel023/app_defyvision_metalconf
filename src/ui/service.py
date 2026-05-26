@@ -881,13 +881,50 @@ class _AnalysisWorker(QThread):
         self._scanner_id = scanner_id
 
     def run(self) -> None:
+        import os
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from src.inspection import inspect_image
+        from src.patterns.pattern_io import load_pattern, find_pattern_path
+        from src.patterns.roi import load_roi
+        from src.utils.config import load_tolerances
+
         try:
-            from src.inspection import inspect_image
-            results = []
-            for i, p in enumerate(self._paths):
-                results.append(inspect_image(self._model, p,
-                                             scanner_id=self._scanner_id))
-                self.progress.emit(i + 1, len(self._paths))
+            n = len(self._paths)
+
+            # Pre-load shared read-only resources once (eliminates N×3 disk reads).
+            # These objects are only read inside _inspect_bgr — safe to share across threads.
+            _pre: dict = {
+                "tolerances": load_tolerances(self._model),
+                "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
+                "roi":        load_roi(self._model, self._scanner_id),
+            }
+
+            results: list = [None] * n
+            done = 0
+
+            # OpenCV and numpy release the GIL, so ThreadPoolExecutor gives real parallelism.
+            # Cap at 6 workers to avoid excessive memory use (each frame = full BGR image).
+            n_workers = min(os.cpu_count() or 2, 6)
+
+            def _worker(args):
+                idx, path = args
+                return idx, inspect_image(
+                    self._model, path,
+                    scanner_id=self._scanner_id,
+                    _preloaded=_pre,
+                )
+
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                futures = {
+                    executor.submit(_worker, (i, p)): i
+                    for i, p in enumerate(self._paths)
+                }
+                for future in as_completed(futures):
+                    idx, result = future.result()
+                    results[idx] = result
+                    done += 1
+                    self.progress.emit(done, n)
+
             self.finished.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
