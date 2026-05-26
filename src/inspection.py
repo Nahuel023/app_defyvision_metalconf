@@ -10,7 +10,8 @@ from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
 from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge
+from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
 from src.pipeline.edge_centering import CenteringResult, compute_centering
@@ -41,6 +42,7 @@ class InspectionResult:
     capture_quality_degraded: bool = False  # True cuando ratio cae bajo quality_ratio_min (no afecta NOK)
     blur_score: float = 0.0        # Varianza del Laplaciano — mayor es más nítido
     frame_quality: str = "GOOD"    # "GOOD" | "LOW_QUALITY"
+    machine_stop: bool = False     # True cuando una zona de agujeros faltantes supera el umbral
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,7 @@ class FolderInspectionSummary:
     meets_response_target: bool
     low_quality: int = 0
     max_low_quality_streak: int = 0
+    machine_stop_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -84,10 +87,12 @@ def inspect_image(
     img_path: Path,
     save: bool = False,
     scanner_id: str | None = None,
+    _machine_stop_detector: "MachineStopDetector | None" = None,
 ) -> InspectionResult:
     """Inspect an image from disk."""
     img_full = load_bgr_image(img_path)
-    result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id)
+    result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id,
+                          _machine_stop_detector=_machine_stop_detector)
     if save:
         _save_result_images(result)
     return result
@@ -115,6 +120,7 @@ def _inspect_bgr(
     image_path: Path,
     scanner_id: str | None = None,
     _preloaded: Optional[dict] = None,
+    _machine_stop_detector: "MachineStopDetector | None" = None,
 ) -> InspectionResult:
     """Core inspection logic on a pre-loaded BGR frame.
 
@@ -122,6 +128,11 @@ def _inspect_bgr(
     'ema_state'. Provided by Inspector to avoid per-frame disk I/O.
     """
     pre = _preloaded or {}
+
+    # Machine stop detector: explicit param takes precedence over _preloaded
+    _ms_detector: MachineStopDetector | None = (
+        _machine_stop_detector or pre.get("machine_stop_detector")
+    )
 
     tolerances = pre.get("tolerances") or load_tolerances(model)
     pattern: Pattern = pre.get("pattern") or load_pattern(find_pattern_path(model, scanner_id))
@@ -303,6 +314,13 @@ def _inspect_bgr(
                     (report.missing_points[_i], detected_in_bbox[_j])
                 )
 
+    # Machine stop detection: track persistent missing holes across frames
+    machine_stop = False
+    if _ms_detector is not None:
+        machine_stop, _ms_positions = _ms_detector.update(
+            report.missing_points, near_miss_pairs, frame_quality, img_h,
+        )
+
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                        extra_points=report.extra_points,
@@ -330,6 +348,9 @@ def _inspect_bgr(
             roi_x=_roi_x, roi_y=_roi_y,
         )
 
+    if machine_stop:
+        overlay = draw_machine_stop_badge(overlay)
+
     return InspectionResult(
         model=model,
         image_path=image_path,
@@ -348,6 +369,7 @@ def _inspect_bgr(
         capture_quality_degraded=capture_quality_degraded,
         blur_score=blur_score,
         frame_quality=frame_quality,
+        machine_stop=machine_stop,
     )
 
 
@@ -407,13 +429,23 @@ def inspect_folder(
 
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))
 
+    ms_detector = MachineStopDetector(
+        enabled=bool(tolerances.get("machine_stop_enabled", False)),
+        missing_frames=int(tolerances.get("machine_stop_missing_frames", 5)),
+        min_missing=int(tolerances.get("machine_stop_min_missing", 1)),
+        same_zone_px=float(tolerances.get("machine_stop_same_zone_px", 35.0)),
+        ignore_near_miss=bool(tolerances.get("machine_stop_ignore_near_miss", True)),
+    )
+
     image_paths = list(iter_image_files(input_dir))
-    results = [inspect_image(model, path, save=save, scanner_id=scanner_id)
+    results = [inspect_image(model, path, save=save, scanner_id=scanner_id,
+                             _machine_stop_detector=ms_detector)
                for path in image_paths]
     ok_count = sum(1 for result in results if result.status == "OK")
     low_quality_count = sum(
         1 for r in results if getattr(r, "frame_quality", "GOOD") == "LOW_QUALITY"
     )
+    machine_stop_count = sum(1 for r in results if r.machine_stop)
     temporal_results = _apply_temporal_rule(
         results, consecutive_nok_frames, low_quality_max_streak
     )
@@ -442,6 +474,7 @@ def inspect_folder(
         meets_response_target=response_time_sec <= max_response_sec,
         low_quality=low_quality_count,
         max_low_quality_streak=max_lq_streak,
+        machine_stop_count=machine_stop_count,
     )
 
 

@@ -140,3 +140,11 @@ models:
     # Grabaciones @ 10fps muestran diff máx 5.21px. Global=8.0 nunca dispara
     # para este material. Con 4.0 se obtienen ~100-140 inspecciones / 321 frames.
     continuous_position_threshold: 4.0
+    # ── Parada de máquina ──────────────────────────────────────────────────────
+    # Si un agujero faltante persiste en la misma zona por N frames consecutivos
+    # se muestra DETENCION DE MAQUINA. Indicador de punzon roto o tapado.
+    machine_stop_enabled: true
+    machine_stop_missing_frames: 5
+    machine_stop_min_missing: 1
+    machine_stop_same_zone_px: 35.0
+    machine_stop_ignore_near_miss: true

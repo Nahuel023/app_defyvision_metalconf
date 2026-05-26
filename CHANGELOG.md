@@ -1110,6 +1110,61 @@ Windows con codepage cp1252. El mismo carácter estaba también en el nuevo `cmd
 
 ---
 
+### Sesión 2026-05-26 (machine stop) — Tadeo + Claude
+
+#### Cambio 36 — Detección de parada de máquina por agujero faltante persistente
+
+**Objetivo:** Si un agujero faltante aparece en la misma zona durante N frames consecutivos,
+mostrar badge prominente "DETENCION DE MAQUINA" en el overlay. Indica punzón roto o tapado.
+No toca PLC, solenoides, lógica de producción, `grid_max_missing` ni `consecutive_nok_frames`.
+
+**Archivos modificados:**
+
+A) **`src/pipeline/machine_stop.py`** (nuevo):
+   - `MachineStopDetector`: detector persistente de zonas de agujeros faltantes.
+   - Tracking por clusters espaciales (radio `same_zone_px`). Cuando una zona acumula
+     `missing_frames` frames consecutivos con ≥ `min_missing` puntos faltantes → triggered.
+   - `frame_quality == "LOW_QUALITY"` no incrementa ni resetea racha.
+   - Filtro near-miss: excluye puntos esperados con detected cerca pero fuera de tolerancia.
+   - Filtro borde Y: ignora faltantes en top/bottom del ROI (entrada/salida de chapa).
+   - Centro de zona: EMA 0.7/0.3 para seguir deriva lenta del punzón.
+
+B) **`src/pipeline/annotate.py`**:
+   - Nueva función `draw_machine_stop_badge(img)`: badge rojo centrado con texto
+     "DETENCION DE MAQUINA" en grande.
+
+C) **`src/inspection.py`**:
+   - `InspectionResult`: nuevo campo `machine_stop: bool = False`.
+   - `FolderInspectionSummary`: nuevo campo `machine_stop_count: int = 0`.
+   - `_inspect_bgr()`: acepta `_machine_stop_detector` (explícito o vía `_preloaded`).
+     Llama `detector.update()` tras calcular `near_miss_pairs` y dibuja el badge si triggered.
+   - `inspect_image()`: acepta `_machine_stop_detector` opcional.
+   - `inspect_folder()`: crea `MachineStopDetector` desde tolerancias y lo pasa a cada frame.
+
+D) **`src/vision/inspector.py`**:
+   - `Inspector.__init__`: agrega `self._detectors: dict[tuple, MachineStopDetector]`.
+   - `_get_detector(model, scanner_id)`: cache del detector por (model, scanner_id).
+   - `inspect()`: agrega `machine_stop_detector` al dict `_preloaded`.
+   - `invalidate()`: limpia `_detectors` cuando cambia el modelo.
+
+E) **`src/utils/config.py`**:
+   - 5 nuevos defaults en `DEFAULT_TOLERANCES`:
+     `machine_stop_enabled`, `machine_stop_missing_frames`, `machine_stop_min_missing`,
+     `machine_stop_same_zone_px`, `machine_stop_ignore_near_miss`.
+
+F) **`config/tolerancias.yaml`**:
+   - modelo_B: `machine_stop_enabled: true`, `machine_stop_missing_frames: 5`,
+     `machine_stop_min_missing: 1`, `machine_stop_same_zone_px: 35.0`,
+     `machine_stop_ignore_near_miss: true`.
+
+G) **`src/main.py`** — `cmd_run_folder()`:
+   - Imprime `machine_stop_frames=N` en línea `[quality]`.
+   - Agrega `MACHINE_STOP` al warn por frame cuando `result.machine_stop`.
+
+**Sin tocar:** PLC, solenoides, lógica producción, `grid_max_missing`, `consecutive_nok_frames`.
+
+---
+
 ### Sesión 2026-05-26 (fix overlay centrado) — Tadeo + Claude
 
 #### Cambio 35 — Fix overlay CHAPA: dibujar en frame completo con offset ROI
