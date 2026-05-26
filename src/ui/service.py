@@ -1064,8 +1064,10 @@ class RecordingTab(QWidget):
         self._btn_analyze.clicked.connect(self._on_analyze)
         self._btn_read_cam.clicked.connect(self._refresh_cam_info)
         self._btn_first.clicked.connect(lambda: self._show_frame(0))
+        self._btn_prev10.clicked.connect(lambda: self._show_frame(self._current_idx - 10))
         self._btn_prev.clicked.connect(lambda: self._show_frame(self._current_idx - 1))
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
+        self._btn_next10.clicked.connect(lambda: self._show_frame(self._current_idx + 10))
         self._btn_last.clicked.connect(lambda: self._show_frame(len(self._frame_paths) - 1))
         self._btn_fit.clicked.connect(self._img_view.fit)
         self._btn_save_current.clicked.connect(self._save_current_frame)
@@ -1252,8 +1254,9 @@ class RecordingTab(QWidget):
         nav = QHBoxLayout()
         nav.setSpacing(6)
 
-        self._btn_first = self._mk_btn("⏮", "#1e293b", h=32, w=38)
-        self._btn_prev  = self._mk_btn("◀", "#334155", h=32, w=44)
+        self._btn_first   = self._mk_btn("⏮",   "#1e293b", h=32, w=38)
+        self._btn_prev10  = self._mk_btn("-10",  "#1e293b", h=32, w=44)
+        self._btn_prev    = self._mk_btn("◀",   "#334155", h=32, w=44)
 
         self._nav_lbl = QLabel("—")
         self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1264,8 +1267,9 @@ class RecordingTab(QWidget):
             "border-radius:5px;padding:4px 14px;letter-spacing:1px;"
         )
 
-        self._btn_next = self._mk_btn("▶", "#334155", h=32, w=44)
-        self._btn_last = self._mk_btn("⏭", "#1e293b", h=32, w=38)
+        self._btn_next    = self._mk_btn("▶",   "#334155", h=32, w=44)
+        self._btn_next10  = self._mk_btn("+10",  "#1e293b", h=32, w=44)
+        self._btn_last    = self._mk_btn("⏭",   "#1e293b", h=32, w=38)
 
         self._overlay_toggle = QPushButton("● OVERLAY")
         self._overlay_toggle.setCheckable(True)
@@ -1281,8 +1285,8 @@ class RecordingTab(QWidget):
 
         self._btn_fit = self._mk_btn("⊞ Ajustar", "#1e3a5f", h=32)
 
-        for w in (self._btn_first, self._btn_prev, self._nav_lbl,
-                  self._btn_next, self._btn_last):
+        for w in (self._btn_first, self._btn_prev10, self._btn_prev, self._nav_lbl,
+                  self._btn_next, self._btn_next10, self._btn_last):
             nav.addWidget(w)
         nav.addSpacing(10)
         nav.addWidget(self._overlay_toggle)
@@ -1618,8 +1622,10 @@ class RecordingTab(QWidget):
     def _update_nav_state(self) -> None:
         n = len(self._frame_paths)
         self._btn_first.setEnabled(self._current_idx > 0)
+        self._btn_prev10.setEnabled(self._current_idx > 0)
         self._btn_prev.setEnabled(self._current_idx > 0)
         self._btn_next.setEnabled(self._current_idx < n - 1)
+        self._btn_next10.setEnabled(self._current_idx < n - 1)
         self._btn_last.setEnabled(self._current_idx < n - 1)
 
     # ------------------------------------------------------------------

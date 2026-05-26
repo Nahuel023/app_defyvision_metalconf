@@ -43,6 +43,9 @@ class InspectionResult:
     blur_score: float = 0.0        # Varianza del Laplaciano — mayor es más nítido
     frame_quality: str = "GOOD"    # "GOOD" | "LOW_QUALITY"
     machine_stop: bool = False     # True cuando una zona de agujeros faltantes supera el umbral
+    frame_geometry_quality: str = "STABLE"   # "STABLE" | "UNSTABLE" (zigzag excesivo)
+    pattern_zigzag_std_px: float = 0.0
+    pattern_zigzag_max_px: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -169,6 +172,9 @@ def _inspect_bgr(
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
+    verticality_quality_enabled = bool(tolerances.get("verticality_quality_enabled", False))
+    pattern_zigzag_std_max_px   = float(tolerances.get("pattern_zigzag_std_max_px", 4.0))
+    pattern_zigzag_abs_max_px   = float(tolerances.get("pattern_zigzag_abs_max_px", 10.0))
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
@@ -298,6 +304,19 @@ def _inspect_bgr(
     )
     final_status = "NOK" if (report.status == "NOK" or centering_nok) else report.status
 
+    # Geometry quality: detect zigzag/vibration via horizontal residuals of pattern borders.
+    # If UNSTABLE, override frame_quality so temporal rule and machine stop skip this frame.
+    pattern_zigzag_std_px = 0.0
+    pattern_zigzag_max_px = 0.0
+    frame_geometry_quality = "STABLE"
+    if verticality_quality_enabled and centering is not None:
+        pattern_zigzag_std_px = getattr(centering, "pattern_zigzag_std_px", 0.0)
+        pattern_zigzag_max_px = getattr(centering, "pattern_zigzag_max_px", 0.0)
+        if (pattern_zigzag_std_px > pattern_zigzag_std_max_px
+                or pattern_zigzag_max_px > pattern_zigzag_abs_max_px):
+            frame_geometry_quality = "UNSTABLE"
+            frame_quality = "LOW_QUALITY"  # skip streaks + machine stop
+
     # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
     # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
     near_miss_pairs: list[tuple[tuple[float, float], tuple[float, float]]] = []
@@ -327,7 +346,7 @@ def _inspect_bgr(
                                        near_miss_pairs=near_miss_pairs)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
                                  min_detection_ratio, capture_quality_degraded,
-                                 frame_quality)
+                                 frame_quality, frame_geometry_quality)
 
     # Composite annotated ROI onto the full aligned frame so the overlay shows
     # the complete image without any crop
@@ -370,6 +389,9 @@ def _inspect_bgr(
         blur_score=blur_score,
         frame_quality=frame_quality,
         machine_stop=machine_stop,
+        frame_geometry_quality=frame_geometry_quality,
+        pattern_zigzag_std_px=pattern_zigzag_std_px,
+        pattern_zigzag_max_px=pattern_zigzag_max_px,
     )
 
 
@@ -380,6 +402,7 @@ def _draw_warnings(
     min_detection_ratio: float,
     capture_quality_degraded: bool = False,
     frame_quality: str = "GOOD",
+    frame_geometry_quality: str = "STABLE",
 ) -> np.ndarray:
     warnings = []
     if detection_ratio < min_detection_ratio:
@@ -388,7 +411,9 @@ def _draw_warnings(
         warnings.append(f"CALIDAD DEGRADADA ({detection_ratio:.0%})")
     if not alignment_ok:
         warnings.append("ALIGN FALLBACK")
-    if frame_quality == "LOW_QUALITY":
+    if frame_geometry_quality == "UNSTABLE":
+        warnings.append("IMAGEN INESTABLE - NO DECIDE")
+    elif frame_quality == "LOW_QUALITY":
         warnings.append("CALIDAD BAJA")
     if not warnings:
         return overlay
