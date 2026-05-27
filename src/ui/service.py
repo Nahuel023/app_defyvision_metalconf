@@ -908,6 +908,7 @@ class _AnalysisWorker(QThread):
                 # Sequential processing required: MachineStopDetector is stateful and
                 # must see frames in order to accumulate streaks correctly.
                 ms_det = MachineStopDetector(
+                    enabled=True,
                     missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
                     min_missing=int(tols.get("machine_stop_min_missing", 1)),
                     same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
@@ -1657,6 +1658,7 @@ class RecordingTab(QWidget):
                     tols = load_tolerances(model)
                     if bool(tols.get("machine_stop_enabled", False)):
                         self._live_ms_detector = MachineStopDetector(
+                            enabled=True,
                             missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
                             min_missing=int(tols.get("machine_stop_min_missing", 1)),
                             same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
