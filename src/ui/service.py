@@ -917,15 +917,20 @@ class _AnalysisWorker(QThread):
                     same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
                 )
                 _pre["machine_stop_detector"] = ms_det
+                # Emit progress at most every ~2% of total frames to avoid flooding
+                # the main thread event loop with cross-thread signal deliveries.
+                _emit_every = max(1, n // 50)
                 for i, path in enumerate(self._paths):
                     results[i] = inspect_image(
                         self._model, path,
                         scanner_id=self._scanner_id,
                         _preloaded=_pre,
                     )
-                    self.progress.emit(i + 1, n)
+                    if (i + 1) % _emit_every == 0 or i + 1 == n:
+                        self.progress.emit(i + 1, n)
             else:
                 done = 0
+                _emit_every = max(1, n // 50)
                 # OpenCV and numpy release the GIL — parallel is safe when no stateful detector.
                 n_workers = min(os.cpu_count() or 2, 6)
 
@@ -946,7 +951,8 @@ class _AnalysisWorker(QThread):
                         idx, result = future.result()
                         results[idx] = result
                         done += 1
-                        self.progress.emit(done, n)
+                        if done % _emit_every == 0 or done == n:
+                            self.progress.emit(done, n)
 
             self.finished.emit(results)
         except Exception as exc:
@@ -975,9 +981,15 @@ class ZoomableImageView(QWidget):
     # Public API
     # ------------------------------------------------------------------
 
-    def set_pixmap(self, pixmap: QPixmap) -> None:
+    def set_pixmap(self, pixmap: QPixmap, auto_fit: bool = True) -> None:
         self._pixmap = pixmap
-        self.fit()
+        if auto_fit:
+            self.fit()
+        else:
+            self.update()
+
+    def current_pixmap(self) -> QPixmap | None:
+        return self._pixmap
 
     def clear(self, placeholder: str | None = None) -> None:
         self._pixmap = None
@@ -1088,6 +1100,17 @@ class RecordingTab(QWidget):
         self._current_idx: int        = 0
         self._worker: Optional[_AnalysisWorker] = None
         self._live_ms_detector = None   # persistent detector for live inspection mode
+
+        # PNG writes go to a background thread so the main thread stays responsive.
+        self._write_executor = None   # concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        # QPixmap cache: (idx, overlay_bool) → QPixmap.  Avoids re-converting BGR→QPixmap
+        # on every navigation click. Cleared when a new analysis/load replaces the data.
+        self._px_cache: dict = {}
+        self._px_cache_max = 40  # keep last ~40 pixmaps (~320 MB for 1920×1080)
+
+        # Track last result-card state to skip redundant setStyleSheet calls.
+        self._last_card_state: str | None = None
 
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
@@ -1592,6 +1615,11 @@ class RecordingTab(QWidget):
             json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
         )
 
+        from concurrent.futures import ThreadPoolExecutor
+        self._write_executor = ThreadPoolExecutor(max_workers=1)
+        self._px_cache.clear()
+        self._last_card_state = None
+
         interval_ms = max(16, 1000 // self._fps_spin.value())
         self._rec_timer.start(interval_ms)
         self._recording = True
@@ -1614,6 +1642,9 @@ class RecordingTab(QWidget):
         self._rec_timer.stop()
         self._recording = False
         self._live_ms_detector = None
+        if self._write_executor is not None:
+            self._write_executor.shutdown(wait=True)   # flush pending PNG writes
+            self._write_executor = None
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._btn_load.setEnabled(True)
@@ -1632,7 +1663,6 @@ class RecordingTab(QWidget):
         logger.info(f"[Grabación] detenida — {n} frames")
 
     def _grab_frame(self) -> None:
-        import cv2
         sid  = self._scanner_combo.currentText()
         cam  = self._system.camera(sid)
         frame = cam.get_frame()
@@ -1640,9 +1670,19 @@ class RecordingTab(QWidget):
             return
         idx  = len(self._frame_paths)
         path = self._rec_dir / f"frame_{idx:04d}.png"
-        cv2.imwrite(str(path), frame)
         self._frame_paths.append(path)
         self._set_rec_badge("recording", idx + 1, self._rec_dir)
+
+        # Write PNG in background — PNG compression can take 50-200ms and must not
+        # block the main thread. compression=1 (fastest) trades size for speed.
+        frame_copy = frame.copy()
+        if self._write_executor is not None:
+            self._write_executor.submit(
+                cv2.imwrite, str(path), frame_copy,
+                [cv2.IMWRITE_PNG_COMPRESSION, 1],
+            )
+        else:
+            cv2.imwrite(str(path), frame_copy, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         if self._live_chk.isChecked():
             try:
@@ -1688,6 +1728,12 @@ class RecordingTab(QWidget):
     def _on_analyze(self) -> None:
         if not self._frame_paths:
             return
+        # Flush any background PNG writes before reading the files for analysis.
+        if self._write_executor is not None:
+            self._write_executor.shutdown(wait=True)
+            self._write_executor = None
+        self._px_cache.clear()
+        self._last_card_state = None
         self._btn_analyze.setEnabled(False)
         self._results.clear()
         self._stats_lbl.setText("")
@@ -1772,17 +1818,40 @@ class RecordingTab(QWidget):
         self._current_idx = idx
 
         show_ov = self._overlay_toggle.isChecked() and idx < len(self._results)
-        if show_ov:
-            bgr = self._results[idx].overlay
-        else:
-            import cv2
-            bgr = cv2.imread(str(self._frame_paths[idx]))
+        cache_key = (idx, show_ov)
 
-        if bgr is not None:
-            rgb = bgr[:, :, ::-1].copy()
-            h, w = rgb.shape[:2]
-            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
-            self._img_view.set_pixmap(QPixmap.fromImage(qi))
+        pxm = self._px_cache.get(cache_key)
+        if pxm is None:
+            if show_ov:
+                bgr = self._results[idx].overlay
+            else:
+                bgr = cv2.imread(str(self._frame_paths[idx]))
+
+            if bgr is not None:
+                # cv2.cvtColor is faster than numpy channel-flip for large images.
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                qi  = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                pxm = QPixmap.fromImage(qi)
+
+                # Store in cache; evict entries farthest from current index when full.
+                self._px_cache[cache_key] = pxm
+                if len(self._px_cache) > self._px_cache_max:
+                    keys_by_dist = sorted(
+                        self._px_cache.keys(),
+                        key=lambda k: abs(k[0] - idx),
+                        reverse=True,
+                    )
+                    for k in keys_by_dist[self._px_cache_max // 2:]:
+                        del self._px_cache[k]
+
+        if pxm is not None:
+            # auto_fit=True only when the image dimensions change (first load or new dataset).
+            prev_pxm = self._img_view.current_pixmap()
+            needs_fit = (prev_pxm is None
+                         or prev_pxm.width() != pxm.width()
+                         or prev_pxm.height() != pxm.height())
+            self._img_view.set_pixmap(pxm, auto_fit=needs_fit)
 
         total = len(self._frame_paths)
         self._nav_lbl.setText(f"{idx + 1} / {total}")
@@ -1806,19 +1875,26 @@ class RecordingTab(QWidget):
                 label, color, card_border = "✗  NOK  AGUJEROS", _NOK, "#991b1b"
 
             miss_txt = f"  ·  faltantes: {missing}" if missing else ""
-            self._result_lbl.setText(f"{label}{miss_txt}{center_txt}")
-            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
-            self._result_card.setStyleSheet(
-                f"QFrame {{ background:{_PANEL};border:2px solid {card_border};"
-                "border-radius:8px; }}"
-            )
+            new_text = f"{label}{miss_txt}{center_txt}"
+            new_card_state = f"{color}|{card_border}"
+
+            self._result_lbl.setText(new_text)
+            if new_card_state != self._last_card_state:
+                self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{color};")
+                self._result_card.setStyleSheet(
+                    f"QFrame {{ background:{_PANEL};border:2px solid {card_border};"
+                    "border-radius:8px; }}"
+                )
+                self._last_card_state = new_card_state
         else:
+            if self._last_card_state != "none":
+                self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{_MUTED};")
+                self._result_card.setStyleSheet(
+                    f"QFrame {{ background:{_PANEL};border:1px solid {_BORDER};"
+                    "border-radius:8px; }}"
+                )
+                self._last_card_state = "none"
             self._result_lbl.setText("—")
-            self._result_lbl.setStyleSheet(f"font-size:12px;font-weight:700;color:{_MUTED};")
-            self._result_card.setStyleSheet(
-                f"QFrame {{ background:{_PANEL};border:1px solid {_BORDER};"
-                "border-radius:8px; }}"
-            )
 
         self._btn_save_current.setEnabled(idx < len(self._results))
         self._update_nav_state()
@@ -1974,6 +2050,8 @@ class RecordingTab(QWidget):
         self._frame_paths  = frames
         self._results.clear()
         self._current_idx  = 0
+        self._px_cache.clear()
+        self._last_card_state = None
         self._summary_lbl.setText("")
         self._stats_lbl.setText("")
         self._ana_progress.setText("")
