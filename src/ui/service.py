@@ -1159,8 +1159,10 @@ class RecordingTab(QWidget):
         self._spin_from.valueChanged.connect(self._update_export_label)
         self._spin_to.valueChanged.connect(self._update_export_label)
         self._overlay_toggle.toggled.connect(self._on_overlay_toggled)
+        self._model_combo.currentTextChanged.connect(self._update_model_chip)
 
         self._update_nav_state()
+        self._update_model_chip(self._model_combo.currentText())
         self._set_rec_badge("standby", 0, None)
 
     def _build_recording_section(self) -> QGroupBox:
@@ -1458,6 +1460,20 @@ class RecordingTab(QWidget):
                                   tooltip="Ajustar imagen a ventana (doble clic en imagen)")
         nav.addWidget(self._btn_fit)
         nav.addStretch()
+
+        # ── Model chip — shows which pattern type was used for analysis ─
+        self._model_chip = QLabel("—")
+        self._model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._model_chip.setFixedHeight(38)
+        self._model_chip.setMinimumWidth(140)
+        self._model_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:2px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:7px;padding:0 14px;"
+        )
+        nav.addSpacing(8)
+        nav.addWidget(self._model_chip)
+        nav.addSpacing(8)
 
         # ── Result card — right of nav bar ────────────────────────────
         self._result_card = QFrame()
@@ -1797,6 +1813,7 @@ class RecordingTab(QWidget):
         self._ana_progress.setText("✓ Análisis completo")
         self._btn_analyze.setEnabled(True)
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
+        self._update_model_chip()
         self._update_export_range_max()
         self._show_frame(0)
         logger.info(f"[Grabación] análisis completo — OK={ok} NOK={nok}")
@@ -1975,6 +1992,24 @@ class RecordingTab(QWidget):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _update_model_chip(self, display_name: str = "") -> None:
+        """Refresh the model-type chip in the browser nav bar."""
+        name = display_name or self._model_combo.currentText()
+        name_upper = name.upper()
+        # Color-code by model family
+        if "MICRO" in name_upper or "PERFOR" in name_upper:
+            color, border = _ACCENT, "#0369a1"
+        elif "ESTER" in name_upper:
+            color, border = "#86efac", "#15803d"
+        else:
+            color, border = _MUTED, _BORDER
+        self._model_chip.setText(name_upper)
+        self._model_chip.setStyleSheet(
+            f"color:{color};font-size:10px;font-weight:700;letter-spacing:2px;"
+            f"background:{_DARK};border:1px solid {border};"
+            "border-radius:7px;padding:0 14px;"
+        )
 
     def _set_rec_badge(self, state: str, n_frames: int,
                        folder: Optional[Path]) -> None:
