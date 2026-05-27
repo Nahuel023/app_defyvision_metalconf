@@ -119,6 +119,7 @@ def draw_compare_overlay(
     extra_points: Sequence[Tuple[float, float]] = (),
     near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
     nok_reasons: List[str] = (),
+    nok_panel_badge_count: int = 0,
 ) -> np.ndarray:
     """Draw inspection overlay.
 
@@ -126,6 +127,8 @@ def draw_compare_overlay(
     that have a detected hole nearby but outside tol_xy_px. A thin cyan line
     connects them so the operator can see the gap at a glance.
     nok_reasons: list of human-readable cause strings drawn as a panel when NOK.
+    nok_panel_badge_count: number of top machine-stop/desalignment banners that
+    will be drawn later on the full frame. Used to push the NOK panel below them.
     """
     out = img_bgr.copy()
 
@@ -164,7 +167,8 @@ def draw_compare_overlay(
 
     # Panel de causas NOK (siempre visible cuando es NOK)
     if status == "NOK" and nok_reasons:
-        _draw_nok_reasons_panel(out, list(nok_reasons))
+        y_start = max(0, int(nok_panel_badge_count) * _BADGE_H)
+        _draw_nok_reasons_panel(out, list(nok_reasons), y_start=y_start)
     else:
         # Status compacto cuando es OK o sin razones
         color = (0, 220, 0) if status == "OK" else (0, 200, 255)

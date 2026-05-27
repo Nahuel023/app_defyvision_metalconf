@@ -2395,6 +2395,30 @@ frames inestables, demasiado agresivo para operación.
 
 ---
 
+#### Cambio 57 — Evitar solape entre panel NOK y banners de parada
+
+**Problema:** El panel rojo de razones `NOK` se dibujaba dentro de la ROI en `y=0`,
+pero los banners de `DETENCION VIRTUAL DE MAQUINA` y `PATRON DESALINEADO` se dibujaban
+después, arriba del frame completo. Cuando había parada virtual, el panel quedaba
+tapado/solapado por el banner superior.
+
+**Cambios:**
+- `src/pipeline/annotate.py`:
+  - `draw_compare_overlay()` acepta `nok_panel_badge_count`.
+  - El panel NOK se desplaza hacia abajo `badge_count * _BADGE_H`.
+- `src/inspection.py`:
+  - Calcula `badge_count = machine_stop + pattern_alignment_warn`.
+  - Pasa ese valor al overlay de comparación antes de dibujar los banners.
+
+**Validación:**
+- Overlay de control generado:
+  - `data/output/overlay_panel_spacing_debug/frame_0126.png`
+- En `frame_0126`, con dos banners arriba, el panel NOK queda debajo y visible.
+- `python -m compileall src` OK.
+- `python -m pytest tests` OK, 3 tests.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
