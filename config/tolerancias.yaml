@@ -148,6 +148,14 @@ models:
     machine_stop_min_missing: 1
     machine_stop_same_zone_px: 35.0
     machine_stop_ignore_near_miss: true
+    # Tracking por identidad de grilla (ci = columna del patrón), no por píxeles X.
+    # Cuando true, el mismo punzón roto se reconoce aunque la chapa avance en Y.
+    # same_column_tol_cells=0 → coincidencia exacta de ci (recomendado).
+    machine_stop_track_by_grid: true
+    machine_stop_same_column_tol_cells: 0
+    # Matching óptimo Hungarian (scipy requerido). false = greedy closest-first.
+    # Activar si hay falsos missing por "robo" de detectados con tol_xy_px ≈ dy.
+    use_hungarian_matching: false
     # ── Calidad geometrica / zigzag ────────────────────────────────────────────
     # Si los bordes del patron zigzaguean mas de estos umbrales, el frame se marca
     # IMAGEN INESTABLE y se ignora para rachas NOK y parada de maquina.

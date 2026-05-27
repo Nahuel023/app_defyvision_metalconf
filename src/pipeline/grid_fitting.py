@@ -157,7 +157,7 @@ def grid_compare_points(
     margin: float,
     tol_affine: float = 0.0,
     min_affine_matches: int = 12,
-) -> list[tuple[float, float]]:
+) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Return expected hole positions in the CURRENT frame.
 
@@ -174,6 +174,14 @@ def grid_compare_points(
         phase-grid positions if the fit fails.
 
     Works at any sheet position — no fixed absolute coordinates.
+
+    Returns:
+        (points, cells_out) — parallel lists where cells_out[i] = (ci, cj) for
+        points[i].  The cell indices are the canonical grid coordinates that
+        identify which physical punch produced each expected hole — used by
+        MachineStopDetector to track persistent missing holes by column (ci)
+        rather than by pixel X, so the same defect is recognised across frames
+        even as the sheet advances vertically.
     """
     if len(detected_xy) == 0 or not cells:
         return []
@@ -235,8 +243,9 @@ def grid_compare_points(
         )
 
     # ── Build final expected positions (with deduplication + margin filter) ─
-    result: list[tuple[float, float]] = []
-    seen:   set[tuple[int, int]]      = set()
+    result:       list[tuple[float, float]] = []
+    result_cells: list[tuple[int, int]]     = []
+    seen:         set[tuple[int, int]]      = set()
     for k, (ci, cj) in enumerate(cells):
         if corrected_xy is not None:
             ex = float(corrected_xy[k, 0])
@@ -250,4 +259,5 @@ def grid_compare_points(
         if margin <= ex <= img_w - margin and margin <= ey <= img_h - margin:
             seen.add(key)
             result.append((ex, ey))
-    return result
+            result_cells.append((ci, cj))
+    return result, result_cells

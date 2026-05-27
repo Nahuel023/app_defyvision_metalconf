@@ -126,5 +126,7 @@ class Inspector:
                 min_missing=int(tols.get("machine_stop_min_missing", 1)),
                 same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
                 ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
+                track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
+                same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
             )
         return self._detectors[key]

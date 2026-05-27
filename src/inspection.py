@@ -179,6 +179,7 @@ def _inspect_bgr(
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
+    use_hungarian_matching = bool(tolerances.get("use_hungarian_matching", False))
     # CHAPA edge zigzag → IMAGEN INESTABLE (frame quality issue, skip decisions)
     verticality_quality_enabled = bool(tolerances.get("verticality_quality_enabled", False))
     chapa_zigzag_std_max_px = float(
@@ -236,10 +237,12 @@ def _inspect_bgr(
 
     n_expected_total = len(pattern.points)
 
+    compare_cells: list[tuple[int, int]] = []
+
     if pattern.has_grid and detected_points:
         detected_arr = np.array(detected_points, dtype=np.float32)
         tol_affine = tol_xy_px * 1.5 if grid_affine_refinement else 0.0
-        compare_points = grid_compare_points(
+        compare_points, compare_cells = grid_compare_points(
             detected_arr,
             pattern.cells,
             pattern.dx,
@@ -277,15 +280,25 @@ def _inspect_bgr(
     # Recortar posiciones esperadas al rango Y de agujeros detectados + margen dy.
     # Evita contar como "missing" las filas del patrón que salen de cuadro cuando
     # el borde de la zona perforada cruza el encuadre (corte de patrón).
+    # compare_cells se mantiene sincronizado para que la identidad de celda sea
+    # correcta tras el recorte.
     if compare_points and detected_points and pattern.has_grid:
         det_ys = [y for _x, y in detected_points]
         dy_clip = float(pattern.dy) * 1.5
         y_clip_min = min(det_ys) - dy_clip
         y_clip_max = max(det_ys) + dy_clip
-        compare_points = [
-            (x, y) for x, y in compare_points
-            if y_clip_min <= y <= y_clip_max
-        ]
+        if compare_cells:
+            _filtered = [
+                (p, c) for p, c in zip(compare_points, compare_cells)
+                if y_clip_min <= p[1] <= y_clip_max
+            ]
+            compare_points = [p for p, _ in _filtered]
+            compare_cells  = [c for _, c in _filtered]
+        else:
+            compare_points = [
+                (x, y) for x, y in compare_points
+                if y_clip_min <= y <= y_clip_max
+            ]
 
     # Filtrar detecciones al bounding box del patrón esperado para eliminar agujeros
     # reales del material fuera de la ventana del patrón (reducen extra y costo de matching).
@@ -305,7 +318,9 @@ def _inspect_bgr(
     report  = compare_missing_only(compare_points, detected_in_bbox,
                                    tol_xy_px=tol_xy_px, max_missing=_max_missing,
                                    max_extra=max_extra,
-                                   extra_min_dist_factor=extra_min_dist_factor)
+                                   extra_min_dist_factor=extra_min_dist_factor,
+                                   expected_cells=compare_cells if compare_cells else None,
+                                   use_hungarian=use_hungarian_matching)
 
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
     capture_quality_degraded = (
@@ -380,12 +395,22 @@ def _inspect_bgr(
                     (report.missing_points[_i], detected_in_bbox[_j])
                 )
 
-    # Machine stop detection: track persistent missing holes across frames
+    # Machine stop detection: track persistent missing holes across frames.
+    # Pass missing_cells so grid-mode tracking can key by column ci instead
+    # of pixel X — the same broken punch is then recognised across frames
+    # even as the sheet advances vertically.
     machine_stop = False
+    _ms_reason   = "AGUJERO PERSISTENTE FALTANTE"
     if _ms_detector is not None:
         machine_stop, _ms_positions = _ms_detector.update(
             report.missing_points, near_miss_pairs, frame_quality, img_h,
+            missing_cells=report.missing_cells if report.missing_cells else None,
         )
+        if machine_stop:
+            cols = _ms_detector.triggered_columns
+            if cols:
+                col_str  = ", ".join(str(c) for c in cols)
+                _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
     if machine_stop:
         final_status = "NOK"
 
@@ -418,10 +443,10 @@ def _inspect_bgr(
         )
 
     if machine_stop and pattern_alignment_warn:
-        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE", index=0)
+        overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
         overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=1)
     elif machine_stop:
-        overlay = draw_machine_stop_badge(overlay, reason="AGUJERO PERSISTENTE FALTANTE", index=0)
+        overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
     elif pattern_alignment_warn:
         overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
 
@@ -520,6 +545,8 @@ def inspect_folder(
         min_missing=int(tolerances.get("machine_stop_min_missing", 1)),
         same_zone_px=float(tolerances.get("machine_stop_same_zone_px", 35.0)),
         ignore_near_miss=bool(tolerances.get("machine_stop_ignore_near_miss", True)),
+        track_by_grid=bool(tolerances.get("machine_stop_track_by_grid", True)),
+        same_column_tol_cells=int(tolerances.get("machine_stop_same_column_tol_cells", 0)),
     )
 
     image_paths = list(iter_image_files(input_dir))
