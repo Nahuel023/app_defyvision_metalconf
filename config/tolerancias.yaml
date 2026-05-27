@@ -183,10 +183,18 @@ models:
     # CHAPA edge zigzag (borde de lámina, backlight) → IMAGEN INESTABLE (vibración/movimiento)
     chapa_zigzag_std_max_px: 4.0
     chapa_zigzag_abs_max_px: 10.0
+    # Si Hough no encuentra líneas confiables del borde externo y la CHAPA
+    # muestra zigzag claro, considerar el frame borroso/inestable y no decidir.
+    chapa_no_line_min_used_lines: 1
+    chapa_no_line_abs_max_px: 4.5
     # PATRON edge zigzag (bordes del patrón de agujeros) → DETENER MAQUINA - PATRON DESALINEADO
     pattern_align_enabled: true
     pattern_align_std_max_px: 2.4
     pattern_align_abs_max_px: 6.0
+    # Desalineacion global del patron respecto de la CHAPA.
+    # Detecta corrimientos grandes o inclinacion brusca aunque el patron siga recto.
+    pattern_global_offset_max_px: 10.0
+    pattern_slope_delta_max_deg: 2.0
     # PATRON CENTER zigzag (centro entre bordes físicos por banda) — detecta
     # zigzag interno sin reaccionar a la alternancia normal de filas microperforadas.
     pattern_center_align_enabled: true

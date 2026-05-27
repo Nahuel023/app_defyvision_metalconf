@@ -21,7 +21,7 @@ track_by_grid=True (grid identity mode, default):
 
 Common rules (both modes)
 --------------------------
-- LOW_QUALITY frames do NOT increment or reset streaks (hold policy).
+- LOW_QUALITY frames do NOT increment/reset streaks and do NOT report a stop.
 - Edge filter: missing points within `same_zone_px` of the top or bottom of
   the ROI are ignored (sheet entering / exiting the camera view).
 """
@@ -91,12 +91,14 @@ class MachineStopDetector:
             - triggered: True when any zone has streak >= missing_frames.
             - triggered_zone_positions: (x, y) centres of triggered zones.
 
-        LOW_QUALITY frames leave state unchanged and return the current value.
+        LOW_QUALITY frames leave streak state unchanged, but never report a
+        stop on that frame. A blurry/unstable image is not evidence enough to
+        show DETENCION DE MAQUINA.
         """
         if not self._enabled:
             return False, []
 
-        if self._track_by_grid and missing_cells:
+        if self._track_by_grid and missing_cells is not None:
             return self._update_grid(missing_points, missing_cells, frame_quality, img_h)
         return self._update_pixel(missing_points, near_miss_pairs, frame_quality, img_h)
 
@@ -126,7 +128,7 @@ class MachineStopDetector:
         img_h: int,
     ) -> tuple[bool, list[tuple[float, float]]]:
         if frame_quality == "LOW_QUALITY":
-            return self._triggered, self._triggered_positions()
+            return False, []
 
         # Y-edge filter: ignore holes entering / exiting the camera view.
         edge_y = self._same_zone_px
@@ -194,7 +196,7 @@ class MachineStopDetector:
         img_h: int,
     ) -> tuple[bool, list[tuple[float, float]]]:
         if frame_quality == "LOW_QUALITY":
-            return self._triggered, self._triggered_positions()
+            return False, []
 
         edge_y = self._same_zone_px
         effective: list[tuple[float, float]] = []
