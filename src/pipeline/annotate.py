@@ -209,6 +209,30 @@ def _draw_edge_polyline(
         ).astype(np.uint8)
 
 
+def _draw_full_height_fit_line(
+    img: np.ndarray,
+    points: Sequence[Tuple[float, float]],
+    color: tuple,
+    thickness: int = 1,
+    alpha: float = 0.75,
+) -> None:
+    """Draw the fitted edge line across the full frame height for visual audit."""
+    if len(points) < 2:
+        return
+    xs = np.array([p[0] for p in points], dtype=np.float64)
+    ys = np.array([p[1] for p in points], dtype=np.float64)
+    try:
+        a, b = np.polyfit(ys, xs, 1)
+    except Exception:
+        return
+    h, w = img.shape[:2]
+    x0 = int(round(b))
+    x1 = int(round(a * (h - 1) + b))
+    x0 = max(-w, min(2 * w, x0))
+    x1 = max(-w, min(2 * w, x1))
+    _draw_transparent_line(img, (x0, 0), (x1, h - 1), color, thickness, alpha)
+
+
 def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
@@ -339,6 +363,9 @@ def draw_centering_overlay(
     for pts, fallback_x in ((pat_l_pts, plx), (pat_r_pts, prx)):
         x_vis = max(3, min(fallback_x, w - 65))
         if len(pts) >= 2:
+            _draw_full_height_fit_line(out, pts, pat_color,
+                                       thickness=pat_thick + 1,
+                                       alpha=0.42 if pattern_warn else 0.34)
             if pattern_warn:
                 # Glow layer: thick dark red beneath the bright line
                 _draw_edge_polyline(out, pts, (0, 0, 80),
@@ -394,8 +421,9 @@ def draw_centering_overlay(
     # Row 3: pattern edge verticality
     pl_slope = getattr(centering, "pattern_left_slope_deg", 0.0)
     pr_slope = getattr(centering, "pattern_right_slope_deg", 0.0)
+    ps_delta = getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
     vert_color = (80, 200, 255)
-    cv2.putText(out, f"Vert pat: Izq={pl_slope:+.1f}\xb0  Der={pr_slope:+.1f}\xb0",
+    cv2.putText(out, f"Vert pat: Izq={pl_slope:+.1f}\xb0  Der={pr_slope:+.1f}\xb0  dCh={ps_delta:.1f}\xb0",
                 (10, text_y_base - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, vert_color, 1, cv2.LINE_AA)
 
     # --- "CENTRADO NO CONFIABLE" badge when too few bands detected ---

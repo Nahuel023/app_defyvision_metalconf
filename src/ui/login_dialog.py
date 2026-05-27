@@ -21,6 +21,17 @@ _BORDER = "#334155"
 _ACCENT = "#38bdf8"
 
 
+def service_login_enabled() -> bool:
+    """Return whether service-mode login should be shown."""
+    try:
+        with open("config/app.yaml", "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+        service_cfg = cfg.get("service", {}) or {}
+        return bool(service_cfg.get("login_enabled", True))
+    except Exception:
+        return True
+
+
 class LoginDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)

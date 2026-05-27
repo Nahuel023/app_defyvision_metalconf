@@ -2221,6 +2221,180 @@ interior. Eso inventaba un corrimiento lateral inexistente y elevaba
 
 ---
 
+#### Cambio 52 — Bypass temporal de login en Modo Servicio
+
+**Motivación:** Por pedido de operación, el Modo Servicio debe abrir sin pedir usuario
+ni contraseña por ahora.
+
+**Cambios:**
+- `config/app.yaml`:
+  - Agrega `service.login_enabled: false`.
+  - Para volver a exigir credenciales, cambiarlo a `true`.
+- `src/ui/login_dialog.py`:
+  - Nueva función `service_login_enabled()` que lee `config/app.yaml`.
+  - Si el archivo/config falla, el fallback es seguro: login habilitado.
+- `src/main.py`:
+  - El comando `service` solo muestra `LoginDialog` si `service_login_enabled()` es `true`.
+- `src/ui/operator.py`:
+  - El botón "Modo Servicio" aplica la misma regla.
+
+**Validación:**
+- `python -m compileall src/main.py src/ui/operator.py src/ui/login_dialog.py` OK.
+
+**Nota:** Es un bypass temporal de UI. No modifica PLC, solenoides ni salidas físicas.
+
+---
+
+#### Cambio 53 — Reset correcto de parada virtual cuando no hay missing
+
+**Problema:** En modo `machine_stop_track_by_grid`, cuando un frame no tenía agujeros
+faltantes, `missing_cells` llegaba vacío y el detector caía al modo pixel en lugar de
+actualizar/limpiar el estado de grilla. Eso dejaba rachas viejas colgadas; después un
+frame aislado con falsos missing, como `frame_0064`, podía heredar una racha previa y
+mostrar `DETENCION VIRTUAL DE MAQUINA` aunque no hubiera N frames consecutivos reales.
+
+**Cambios:**
+- `src/pipeline/machine_stop.py`:
+  - En tracking por grilla, `missing_cells=[]` ahora se procesa como frame válido sin
+    faltantes y resetea las columnas activas.
+  - Solo se usa fallback pixel cuando `missing_cells is None`.
+- `src/inspection.py`:
+  - Siempre pasa `report.missing_cells` al detector, incluso cuando la lista está vacía.
+- `tests/test_machine_stop.py`:
+  - Agrega tests para garantizar que un frame vacío corta la racha.
+  - Agrega test de que la parada virtual requiere frames consecutivos en la misma columna.
+
+**Validación:**
+- `python -m pytest tests/test_machine_stop.py` OK.
+- Rango `frame_0058` a `frame_0066` de `20260519_121741`:
+  - `frame_0064` mantiene el análisis de missing, pero queda `machine_stop=False`.
+  - `frame_0066` sin missing limpia todas las columnas activas.
+
+**Seguridad:** La parada sigue siendo virtual. No se modificó PLC, solenoides ni salidas físicas.
+
+---
+
+#### Cambio 54 — Frames inestables por borde de CHAPA + patrón extendido en overlay
+
+**Problema:** `frame_0031` mostraba borde externo de CHAPA con lectura débil/ondulada,
+pero no se clasificaba como `IMAGEN INESTABLE`. El criterio anterior solo miraba el
+zigzag absoluto grande; si Hough no encontraba líneas del borde y el zigzag era leve,
+el frame podía quedar como `GOOD/STABLE`. Además, las líneas de borde del PATRON se
+cortaban donde había puntos de banda, dificultando auditar visualmente la decisión.
+
+**Cambios:**
+- `config/tolerancias.yaml` modelo_B:
+  - Agrega `chapa_no_line_min_used_lines: 1`.
+  - Agrega `chapa_no_line_abs_max_px: 2.7`.
+  - Regla: si Hough no detecta al menos 1 línea confiable y la CHAPA supera 2.7px
+    de zigzag máximo, el frame se marca `LOW_QUALITY/UNSTABLE`.
+- `src/inspection.py`:
+  - Aplica la nueva regla dentro de `verticality_quality_enabled`.
+  - Los frames inestables se siguen analizando y dibujando, pero no alimentan parada.
+- `src/pipeline/machine_stop.py`:
+  - Un frame `LOW_QUALITY` conserva el historial interno, pero retorna
+    `machine_stop=False` en ese frame. Una imagen borrosa/inestable nunca muestra
+    `DETENCION VIRTUAL DE MAQUINA` por sí misma.
+- `src/pipeline/annotate.py`:
+  - El overlay de PATRON ahora dibuja también la línea ajustada de arriba a abajo
+    del frame, además de la polilínea real por bandas.
+- `src/utils/config.py`:
+  - Defaults para las nuevas claves, deshabilitados por defecto.
+- `tests/test_machine_stop.py`:
+  - Test de que `LOW_QUALITY` no reporta parada virtual.
+
+**Validación en `C:\Users\DefyC\Downloads\Imagenes_METALCONF_editadas`:**
+- `frame_0031`: `OK`, `LOW_QUALITY/UNSTABLE`, `machine_stop=False`,
+  `chapa=(std 0.59px, max 2.84px)`, `used_lines=0`.
+- `frame_0064`: sigue `OK`, `machine_stop=False`.
+- `frame_0121` y `frame_0124`: siguen `NOK` por `PATRON DESALINEADO`.
+- `frame_0127`: `LOW_QUALITY/UNSTABLE` y ya no muestra `machine_stop=True`.
+- Carpeta completa: 185 frames, `low_quality=24`, `machine_stop_count=18`.
+- `python -m compileall src` OK.
+- `python -m pytest tests` OK, 3 tests.
+
+**Seguridad:** Parada virtual únicamente; no se modificó PLC, solenoides ni salidas físicas.
+
+---
+
+#### Cambio 55 — Detección de desalineación global grande del PATRON
+
+**Problema:** La lógica de `PATRON DESALINEADO` detectaba zigzag/ondulación del patrón,
+pero podía no marcar un corrimiento global grande o una inclinación brusca cuando el
+patrón seguía siendo internamente recto. En planta esto puede pasar por golpes o cambios
+rápidos de alineación de la chapa/punzonado.
+
+**Cambios:**
+- `src/pipeline/edge_centering.py`:
+  - `CenteringResult` ahora expone:
+    - `pattern_sheet_slope_delta_left_deg`
+    - `pattern_sheet_slope_delta_right_deg`
+    - `pattern_sheet_slope_delta_max_deg`
+  - Estas métricas comparan la inclinación del borde del PATRON contra la inclinación
+    del borde real de CHAPA, lado por lado.
+- `config/tolerancias.yaml` modelo_B:
+  - `pattern_global_offset_max_px: 10.0`
+  - `pattern_slope_delta_max_deg: 2.0`
+  - Detecta desplazamiento lateral grande del patrón y/o inclinación relativa brusca
+    aunque no haya zigzag interno.
+- `src/inspection.py`:
+  - Si el frame está `STABLE`, cualquiera de estas condiciones marca `NOK`:
+    - zigzag de patrón fuera de tolerancia
+    - `abs(offset_px) > pattern_global_offset_max_px`
+    - `pattern_sheet_slope_delta_max_deg > pattern_slope_delta_max_deg`
+  - El panel NOK distingue razones:
+    - `PATRON DESCENTRADO (+/-Xpx)`
+    - `PATRON INCLINADO (X deg)`
+- `src/pipeline/annotate.py`:
+  - Agrega `dCh=` al texto de verticalidad para ver el ángulo relativo PATRON-vs-CHAPA.
+- `src/utils/config.py`:
+  - Defaults nuevos deshabilitados (`0.0`) para no afectar modelos sin override.
+
+**Validación en `C:\Users\DefyC\Downloads\Imagenes_METALCONF_editadas`:**
+- Carpeta completa: 185 frames, `raw_nok=26`, `low_quality=24`,
+  `machine_stop_count=18`.
+- `frame_0122`: ahora `NOK`, `PATRON DESALINEADO`, `dAng=2.01 deg`.
+- `frame_0126`: ahora `NOK`, `PATRON DESALINEADO`, `offset=-19.2px`,
+  `dAng=2.57 deg`.
+- `frame_0064`: sigue `OK`, `machine_stop=False`.
+- Overlays de control:
+  - `data/output/global_pattern_alignment_debug/frame_0122.png`
+  - `data/output/global_pattern_alignment_debug/frame_0126.png`
+  - `data/output/global_pattern_alignment_debug/frame_0064.png`
+- `python -m compileall src` OK.
+- `python -m pytest tests` OK, 3 tests.
+
+**Seguridad:** Sigue siendo parada virtual únicamente. No se modificó PLC, solenoides ni salidas físicas.
+
+---
+
+#### Cambio 56 — Recalibración menos brusca de IMAGEN INESTABLE
+
+**Problema:** La regla agregada en Cambio 54 (`chapa_no_line_abs_max_px: 2.7`) marcaba
+demasiados frames como `LOW_QUALITY/UNSTABLE`. En la carpeta de validación dejaba 24/185
+frames inestables, demasiado agresivo para operación.
+
+**Cambio:**
+- `config/tolerancias.yaml` modelo_B:
+  - `chapa_no_line_abs_max_px: 2.7 -> 4.5`
+  - Mantiene la condición de `used_lines < 1`, pero exige zigzag claro de CHAPA.
+
+**Validación en `C:\Users\DefyC\Downloads\Imagenes_METALCONF_editadas`:**
+- Frames inestables bajan de 24 a 7.
+- `frame_0037`: sigue `LOW_QUALITY/UNSTABLE`.
+- `frame_0064`: sigue `OK`, `machine_stop=False`.
+- `frame_0122`: sigue `NOK` por `PATRON INCLINADO`.
+- `frame_0126`: sigue `NOK` por patrón desalineado grande (`offset=-19.2px`,
+  `dAng=2.57 deg`).
+- `frame_0031`: vuelve a `GOOD/STABLE`; con las métricas actuales no se separa de forma
+  robusta de muchos frames normales sin generar demasiados falsos inestables.
+- `python -m compileall src` OK.
+- `python -m pytest tests` OK, 3 tests.
+
+**Seguridad:** Parada virtual únicamente; sin cambios en PLC, solenoides ni salidas físicas.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |

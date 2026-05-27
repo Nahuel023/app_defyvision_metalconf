@@ -200,10 +200,14 @@ def _inspect_bgr(
         tolerances.get("chapa_zigzag_abs_max_px",
                        tolerances.get("pattern_zigzag_abs_max_px", 10.0))
     )
+    chapa_no_line_min_used_lines = int(tolerances.get("chapa_no_line_min_used_lines", 0))
+    chapa_no_line_abs_max_px = float(tolerances.get("chapa_no_line_abs_max_px", 0.0))
     # PATRON edge zigzag → DETENER MAQUINA (mechanical misalignment, does not skip decisions)
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
+    pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
+    pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
     pattern_center_align_enabled    = bool(tolerances.get("pattern_center_align_enabled", False))
     pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
@@ -422,6 +426,8 @@ def _inspect_bgr(
     pattern_center_zigzag_max_px = 0.0
     frame_geometry_quality = "STABLE"
     pattern_alignment_warn = False
+    pattern_offset_warn = False
+    pattern_slope_warn = False
 
     if centering is not None:
         chapa_zigzag_std_px          = getattr(centering, "chapa_zigzag_std_px",          0.0)
@@ -436,12 +442,35 @@ def _inspect_bgr(
                     or chapa_zigzag_max_px > chapa_zigzag_abs_max_px):
                 frame_geometry_quality = "UNSTABLE"
                 frame_quality = "LOW_QUALITY"  # skip streaks + machine stop
+            elif (
+                chapa_no_line_min_used_lines > 0
+                and chapa_no_line_abs_max_px > 0.0
+                and int(align_res.used_lines) < chapa_no_line_min_used_lines
+                and chapa_zigzag_max_px > chapa_no_line_abs_max_px
+            ):
+                frame_geometry_quality = "UNSTABLE"
+                frame_quality = "LOW_QUALITY"  # weak external edge + sheet zigzag
 
         if pattern_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_zigzag_std_px > pattern_align_std_max_px
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
+            if (
+                pattern_global_offset_max_px > 0.0
+                and abs(centering.offset_px) > pattern_global_offset_max_px
+            ):
+                pattern_offset_warn = True
+                pattern_alignment_warn = True
+                final_status = "NOK"
+            if (
+                pattern_slope_delta_max_deg > 0.0
+                and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
+                > pattern_slope_delta_max_deg
+            ):
+                pattern_slope_warn = True
+                pattern_alignment_warn = True
+                final_status = "NOK"
 
         if pattern_center_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
@@ -474,7 +503,7 @@ def _inspect_bgr(
     if _ms_detector is not None:
         machine_stop, _ms_positions = _ms_detector.update(
             report.missing_points, near_miss_pairs, frame_quality, img_h,
-            missing_cells=report.missing_cells if report.missing_cells else None,
+            missing_cells=report.missing_cells,
         )
         if machine_stop:
             cols = _ms_detector.triggered_columns
@@ -493,7 +522,13 @@ def _inspect_bgr(
     if centering_nok:
         nok_reasons.append(f"CENTRADO NOK ({centering.offset_px:+.1f}px)")
     if pattern_alignment_warn:
-        nok_reasons.append("PATRON DESALINEADO")
+        if pattern_offset_warn:
+            nok_reasons.append(f"PATRON DESCENTRADO ({centering.offset_px:+.1f}px)")
+        if pattern_slope_warn:
+            delta_ang = getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
+            nok_reasons.append(f"PATRON INCLINADO ({delta_ang:.1f} deg)")
+        if not pattern_offset_warn and not pattern_slope_warn:
+            nok_reasons.append("PATRON DESALINEADO")
     if machine_stop:
         nok_reasons.append("PARADA DE MAQUINA")
     if frame_geometry_quality == "UNSTABLE":

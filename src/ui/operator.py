@@ -679,13 +679,14 @@ class OperatorWindow(QMainWindow):
         self._metrics_win.activateWindow()
 
     def _open_service(self) -> None:
-        from src.ui.login_dialog import LoginDialog
+        from src.ui.login_dialog import LoginDialog, service_login_enabled
         from src.ui.service import ServiceWindow
         from PyQt6.QtWidgets import QDialog
 
-        dlg = LoginDialog(self)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return
+        if service_login_enabled():
+            dlg = LoginDialog(self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
 
         if self._service_win is None or not self._service_win.isVisible():
             self._service_win = ServiceWindow(self._system, parent=None)

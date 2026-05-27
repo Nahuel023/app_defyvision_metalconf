@@ -497,16 +497,17 @@ def cmd_service(_: argparse.Namespace) -> int:
     from PyQt6.QtWidgets import QApplication, QDialog
     from src.utils.logger import setup_logging
     from src.controller.system import InspectionSystem
-    from src.ui.login_dialog import LoginDialog
+    from src.ui.login_dialog import LoginDialog, service_login_enabled
     from src.ui.service import ServiceWindow
 
     setup_logging()
 
     app = QApplication.instance() or QApplication(sys.argv)
 
-    dlg = LoginDialog()
-    if dlg.exec() != QDialog.DialogCode.Accepted:
-        return 0
+    if service_login_enabled():
+        dlg = LoginDialog()
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return 0
 
     system = InspectionSystem()
     system.connect_plc()

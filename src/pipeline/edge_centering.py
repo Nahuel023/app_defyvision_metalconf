@@ -103,6 +103,12 @@ class CenteringResult:
     pattern_center_zigzag_std_px: float = 0.0
     pattern_center_zigzag_max_px: float = 0.0
 
+    # Global pattern-vs-sheet alignment metrics. These catch abrupt large
+    # shifts or tilts even when the pattern itself remains straight.
+    pattern_sheet_slope_delta_left_deg: float = 0.0
+    pattern_sheet_slope_delta_right_deg: float = 0.0
+    pattern_sheet_slope_delta_max_deg: float = 0.0
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -603,6 +609,12 @@ def compute_centering(
     right_edge_slope_deg   = _slope_deg(right_pts_list)
     pattern_left_slope_deg  = _slope_deg(list(pat_left_metric.values()))
     pattern_right_slope_deg = _slope_deg(list(pat_right_metric.values()))
+    pattern_sheet_slope_delta_left_deg = pattern_left_slope_deg - left_edge_slope_deg
+    pattern_sheet_slope_delta_right_deg = pattern_right_slope_deg - right_edge_slope_deg
+    pattern_sheet_slope_delta_max_deg = max(
+        abs(pattern_sheet_slope_delta_left_deg),
+        abs(pattern_sheet_slope_delta_right_deg),
+    )
 
     def _zigzag_residuals(pts_lists: list) -> tuple[float, float]:
         """Compute (std_px, max_px) of horizontal residuals from fitted line. Returns (0,0) if insufficient data."""
@@ -674,4 +686,7 @@ def compute_centering(
         pattern_zigzag_max_px=pattern_zigzag_max_px,
         pattern_center_zigzag_std_px=pattern_center_zigzag_std_px,
         pattern_center_zigzag_max_px=pattern_center_zigzag_max_px,
+        pattern_sheet_slope_delta_left_deg=pattern_sheet_slope_delta_left_deg,
+        pattern_sheet_slope_delta_right_deg=pattern_sheet_slope_delta_right_deg,
+        pattern_sheet_slope_delta_max_deg=pattern_sheet_slope_delta_max_deg,
     )
