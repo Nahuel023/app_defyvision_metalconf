@@ -2087,6 +2087,106 @@ El parámetro `pattern_edge_min_holes_per_band: 2` compensa este efecto.
 
 ---
 
+#### Cambio 48 — Verticalidad de patrón más sensible sin recortar overlay
+
+**Motivación:** Frames editados del rango 120-140, especialmente `frame_0121`,
+`frame_0122` y `frame_0124`, tenían corrimiento leve del patrón y no siempre
+entraban como `PATRON DESALINEADO`. Además, la polilínea visual del patrón quedaba
+recortada en los extremos superior/inferior porque los mismos puntos filtrados para
+métrica se usaban también para dibujar.
+
+**Cambios:**
+- `src/pipeline/edge_centering.py`:
+  - `_pattern_bounds_by_band()` ya no recorta extremos Y; devuelve la frontera completa
+    para que el overlay muestre más borde del patrón.
+  - `compute_centering()` mantiene una copia recortada solo para las métricas numéricas
+    de verticalidad, evitando que bandas extremas con pocos datos inflen falsamente el
+    zigzag.
+  - El overlay usa puntos completos; las métricas (`pattern_zigzag_*`,
+    `pattern_center_zigzag_*`, slopes y std de márgenes) usan la serie métrica filtrada.
+- `config/tolerancias.yaml` modelo_B:
+  - `pattern_align_std_max_px: 5.0 -> 2.4`
+  - `pattern_align_abs_max_px: 30.0 -> 6.0`
+  - `pattern_center_zigzag_std_max_px: 4.0 -> 2.2`
+  - `pattern_center_zigzag_abs_max_px: 6.5 -> 6.0`
+  - `pattern_edge_smooth_window: 3 -> 1`
+
+**Validación en `20260519_121741`:**
+- Rango 120-140:
+  - `frame_0121`, `frame_0122` y `frame_0124` ahora quedan `NOK` con
+    `pattern_alignment_warn=True`.
+  - Frames 132-140 quedan mayormente `OK`, salvo defectos reales detectados por la métrica.
+- Carpeta completa: 185 frames -> `OK=162`, `NOK=23`; `pattern_warn_count=22`;
+  `LOW_QUALITY=1` (`frame_0037`).
+- Overlays de muestra guardados en `data/output/verticalidad_patron_120_140/`.
+- `python -m compileall src` OK.
+- `python -m pytest tests/`: 0 tests recolectados.
+
+**Seguridad:** la parada sigue siendo virtual. No se modificó lógica de PLC,
+solenoides ni salidas físicas.
+
+---
+
+---
+
+### Sesión 2026-05-27 (cont.) — Tadeo + Claude
+
+#### Cambio 49 — Panel de razones NOK + marcadores de agujeros faltantes numerados
+
+**Motivación:** El operador necesita saber exactamente POR QUÉ un frame es NOK y DÓNDE
+están los agujeros faltantes para verificar visualmente si la detección es correcta.
+
+**Cambios:**
+
+**`src/pipeline/annotate.py`:**
+- Nueva función `_draw_nok_reasons_panel(img, reasons)`:
+  - Panel semitransparente rojo oscuro en top-left del overlay.
+  - Header "NOK" en blanco/rojo; razones en cyan. Altura adaptativa según número de causas.
+- `draw_compare_overlay()` ahora acepta `nok_reasons: List[str] = ()`.
+  - Si NOK y hay razones: dibuja el panel en lugar del texto "STATUS: NOK".
+  - Si OK: texto pequeño verde "STATUS: OK".
+- Marcadores de missing holes rediseñados:
+  - Círculo relleno oscuro (r=18, color `(0,0,80)`) como fondo.
+  - Cruz blanca con markerSize=36 (outlin) + 34 (fill) para visibilidad.
+  - Número de orden (1, 2, 3...) sobre cada marcador para identificación.
+
+**`src/inspection.py`:**
+- Construye `nok_reasons: list[str]` antes de la llamada a `draw_compare_overlay`:
+  - `AGUJEROS FALTANTES: N`, `AGUJEROS EXTRA: N`, `CENTRADO NOK (+Xpx)`,
+    `PATRON DESALINEADO`, `PARADA DE MAQUINA`, `IMAGEN INESTABLE`, `ALINEACION FALLBACK`.
+- Pasa `nok_reasons=nok_reasons` a `draw_compare_overlay`.
+
+**Commit:** `d4b5a75`
+
+---
+
+#### Cambio 50 — Tolerancias modelo_A (Esterilla) más permisivas
+
+**Problema reportado:** El modelo de Esterilla marcaba casi todo como NOK. Los parámetros
+iniciales eran demasiado conservadores para la realidad de planta (blur de movimiento,
+variaciones de iluminación, posicionamiento no ideal).
+
+**Cambios en `config/tolerancias.yaml` — SOLO sección `modelo_A`:**
+
+| Parámetro | Antes | Después | Razón |
+|---|---|---|---|
+| `min_area` | 400.0 | 300.0 | Blur reduce área aparente de los agujeros chicos |
+| `circularity_min` | 0.80 | 0.70 | Blur de movimiento reduce circularidad aparente |
+| `min_area_small` | 350.0 | 250.0 | Captura agujeros chicos afectados por blur |
+| `max_area_small` | 1300.0 | 1500.0 | Margen ampliado |
+| `min_area_large` | 900.0 | 700.0 | Evitar perder grandes con iluminación no ideal |
+| `tol_xy_px` | 16.0 | 18.0 | Más tolerancia de posición (máximo seguro < dy/2=19) |
+| `grid_max_missing` | 10 | 15 | ~13% de 112 agujeros; más tolerante |
+| `frame_missing_nok_threshold` | 0 | 3 | Permite hasta 3 missing antes de NOK por frame |
+| `consecutive_nok_frames` | 5 | 8 | Requiere más frames consecutivos para FAULT |
+
+**Sin tocar:** `modelo_B`, PLC, solenoides, patrón de referencia, lógica de grid.
+
+**Nota:** Calibrar en planta con material real. Estos valores son estimaciones
+razonables para reducir falsos positivos sin perder defectos reales.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
