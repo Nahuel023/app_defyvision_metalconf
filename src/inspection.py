@@ -389,12 +389,14 @@ def _inspect_bgr(
     # Pass the full-frame aligned image so search windows can see the backlights
     # (which are outside the ROI crop and would be invisible in `img`).
     center_offset_tol_px = float(tolerances.get("center_offset_tol_px", 0.0))
-    _ec_bands      = int(tolerances.get("edge_centering_bands", 16))
-    _ec_min_holes  = int(tolerances.get("pattern_edge_min_holes_per_band", 1))
-    _ec_smooth     = int(tolerances.get("pattern_edge_smooth_window", 1))
+    _ec_bands        = int(tolerances.get("edge_centering_bands", 16))
+    _ec_min_holes    = int(tolerances.get("pattern_edge_min_holes_per_band", 1))
+    _ec_smooth       = int(tolerances.get("pattern_edge_smooth_window", 1))
+    _ec_boundary_tol = float(tolerances.get("pattern_edge_boundary_tol_px", 0.0))
     centering = compute_centering(
         img_aligned, holes, roi=roi, tol_px=center_offset_tol_px,
         n_bands=_ec_bands, min_holes_per_band=_ec_min_holes, smooth_window=_ec_smooth,
+        boundary_tol_px=_ec_boundary_tol,
     )
     centering_nok = (
         centering is not None

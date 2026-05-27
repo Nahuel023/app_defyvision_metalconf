@@ -254,12 +254,31 @@ def _pattern_bounds_by_band(
     img_h: int,
     n_bands: int = _N_BANDS,
     min_holes: int = 1,
+    boundary_tol_px: float = 0.0,
 ) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
     """Per-band left/right physical bounds using detected hole positions.
 
     Bands with fewer than `min_holes` holes are excluded to avoid noisy
     single-hole edge estimates in sparse regions.
+
+    boundary_tol_px > 0: restrict the left-edge measurement to holes whose
+    physical left bound (x - r) is within boundary_tol_px of the global
+    leftmost bound, and symmetrically for the right edge.  This prevents
+    interior holes from being chosen as the band edge when no outermost-column
+    hole falls in a given band — the main cause of false-positive zigzag alerts.
+    boundary_tol_px = 0 keeps legacy behaviour (all holes considered).
     """
+    if not holes:
+        return {}, {}
+
+    if boundary_tol_px > 0.0:
+        global_left  = min(hh.x - hh.r for hh in holes)
+        global_right = max(hh.x + hh.r for hh in holes)
+        left_cand  = [hh for hh in holes if (hh.x - hh.r) <= global_left  + boundary_tol_px]
+        right_cand = [hh for hh in holes if (hh.x + hh.r) >= global_right - boundary_tol_px]
+    else:
+        left_cand = right_cand = list(holes)
+
     band_h = img_h / n_bands
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
@@ -267,12 +286,15 @@ def _pattern_bounds_by_band(
     for i in range(n_bands):
         y0 = i * band_h
         y1 = (i + 1) * band_h
-        band_holes = [hh for hh in holes if y0 <= hh.y < y1]
-        if len(band_holes) < min_holes:
-            continue
         cy = (y0 + y1) / 2.0
-        left_dict[i]  = (float(min(hh.x - hh.r for hh in band_holes)), cy)
-        right_dict[i] = (float(max(hh.x + hh.r for hh in band_holes)), cy)
+
+        left_band = [hh for hh in left_cand if y0 <= hh.y < y1]
+        if len(left_band) >= min_holes:
+            left_dict[i] = (float(min(hh.x - hh.r for hh in left_band)), cy)
+
+        right_band = [hh for hh in right_cand if y0 <= hh.y < y1]
+        if len(right_band) >= min_holes:
+            right_dict[i] = (float(max(hh.x + hh.r for hh in right_band)), cy)
 
     return left_dict, right_dict
 
@@ -365,6 +387,7 @@ def compute_centering(
     n_bands: int = _N_BANDS,
     min_holes_per_band: int = 1,
     smooth_window: int = 1,
+    boundary_tol_px: float = 0.0,
 ) -> Optional[CenteringResult]:
     """Measure how centered the hole pattern is between the metal sheet edges.
 
@@ -399,6 +422,14 @@ def compute_centering(
         outlier bands without affecting the fitted-line geometry used for
         centering. Window=1 disables smoothing (backward-compatible).
         Configurable via pattern_edge_smooth_window.
+    boundary_tol_px:
+        When > 0, per-band left edge is computed only from holes whose physical
+        left bound (x - r) is within this distance of the global leftmost bound,
+        and symmetrically for the right edge. Prevents interior holes from being
+        picked as the band edge when the outermost-column hole is absent from a
+        band. Typical value: 1.5 × hole_radius, or ~half the inter-column dx.
+        0 = use all holes (backward-compatible).
+        Configurable via pattern_edge_boundary_tol_px.
 
     Returns None if no holes are provided or no edges can be detected at all.
 
@@ -463,7 +494,8 @@ def compute_centering(
 
     # Pattern bounds from actual detected holes (ROI-relative coords)
     pat_left, pat_right = _pattern_bounds_by_band(
-        holes, img_h_for_bands, n_bands=n_bands, min_holes=min_holes_per_band
+        holes, img_h_for_bands, n_bands=n_bands, min_holes=min_holes_per_band,
+        boundary_tol_px=boundary_tol_px,
     )
 
     pattern_left_x  = float(min(hh.x - hh.r for hh in holes))

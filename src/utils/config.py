@@ -39,6 +39,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "edge_centering_bands": 16,              # bandas horizontales para muestreo de bordes
     "pattern_edge_min_holes_per_band": 1,    # min agujeros por banda para incluirla en patrón
     "pattern_edge_smooth_window": 1,         # ventana de mediana para suavizar series de zigzag
+    "pattern_edge_boundary_tol_px": 0.0,     # 0 = todos los agujeros; >0 = solo los cerca del borde
     "grid_affine_refinement": False,  # True = corrección affine local post-fase-global
     "blur_score_min": 0.0,            # 0 = deshabilitado; >0 = varianza mín del Laplaciano
     "low_quality_max_streak": 10,     # frames LOW_QUALITY consecutivos antes de resetear racha
