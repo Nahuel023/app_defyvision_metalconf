@@ -566,21 +566,19 @@ class ScannerController:
             streak = self._nok_streak
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak
-            if getattr(result, "machine_stop", False) and self._state == ScannerState.RUNNING:
-                self._state     = ScannerState.FAULT
-                fault_triggered = True
+            if getattr(result, "machine_stop", False):
+                # Virtual stop only — no FSM transition, no hardware writes.
+                # Safety rule: solenoids stay blocked; only UI/overlay/log are affected.
                 machine_stop_triggered = True
-                self._fault_count += 1
-            elif streak >= consecutive_nok and self._state == ScannerState.RUNNING:
+            if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
                 self._state     = ScannerState.FAULT
                 fault_triggered = True
                 self._fault_count += 1
 
+        if machine_stop_triggered:
+            logger.warning(f"[{self._id}] DETENCION VIRTUAL — agujero faltante persistente (sin accion de hardware)")
         if fault_triggered:
-            if machine_stop_triggered:
-                logger.warning(f"[{self._id}] FAULT - DETENCION DE MAQUINA")
-            else:
-                logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
+            logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
             self._io.write(f"{self._id}.solenoid",  False)
             self._io.write(f"{self._id}.backlight", False)
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí

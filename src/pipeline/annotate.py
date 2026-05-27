@@ -152,7 +152,7 @@ def draw_machine_stop_badge(
     h, w = out.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
 
-    main_label = "! DETENER MAQUINA"
+    main_label = "! DETENCION VIRTUAL DE MAQUINA"
     main_scale, main_thick = 1.3, 3
     (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
 
