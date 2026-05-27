@@ -2187,6 +2187,40 @@ razonables para reducir falsos positivos sin perder defectos reales.
 
 ---
 
+#### Cambio 51 — Frontera de patrón por borde global para evitar falsos zigzag
+
+**Problema:** La detección de borde del patrón generaba demasiados falsos positivos.
+En bandas donde la grilla alternada no tenía agujero de la columna exterior, el código
+tomaba el agujero más externo disponible de esa banda, que podía ser una columna
+interior. Eso inventaba un corrimiento lateral inexistente y elevaba
+`pattern_zigzag_*`.
+
+**Cambio:**
+- `src/pipeline/edge_centering.py`:
+  - `_pattern_bounds_by_band()` ahora calcula `global_left/global_right`.
+  - Si `pattern_edge_boundary_tol_px > 0`, cada banda solo aporta borde izquierdo
+    si tiene agujeros cerca del borde global izquierdo, y borde derecho si tiene
+    agujeros cerca del borde global derecho.
+  - Cuando una banda cae en el espacio entre agujeros exteriores, se saltea para
+    borde en vez de usar una columna interior como falso borde.
+- `config/tolerancias.yaml` modelo_B:
+  - `pattern_edge_boundary_tol_px: 24.0`.
+
+**Validación en `20260519_121741`:**
+- Antes del fix: 185 frames -> `NOK=23`, `pattern_warn_count=22`.
+- Después del fix: 185 frames -> `OK=176`, `NOK=9`, `pattern_warn_count=8`.
+- Frames clave:
+  - `frame_0121`: sigue `NOK`, `PATRON DESALINEADO`.
+  - `frame_0124`: sigue `NOK`, `PATRON DESALINEADO`.
+  - `frame_0132` a `frame_0140`: vuelven mayormente `OK`, reduciendo falsos positivos.
+- Overlays de control guardados en `data/output/verticalidad_patron_boundary_fix/`.
+- `python -m compileall src` OK.
+- `python -m pytest tests/`: 0 tests recolectados.
+
+**Seguridad:** la parada sigue siendo virtual; no se tocó PLC, solenoides ni salidas físicas.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |

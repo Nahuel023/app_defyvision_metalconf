@@ -202,6 +202,6 @@ models:
     edge_centering_bands: 24
     pattern_edge_min_holes_per_band: 1
     pattern_edge_smooth_window: 1
-    # IQR filter (en edge_centering.py) reemplaza boundary_tol_px para manejar
-    # bandas sin agujero de columna exterior. Dejar en 0.0.
-    pattern_edge_boundary_tol_px: 0.0
+    # Solo tomar borde por banda cuando hay agujeros cerca del borde global real.
+    # Evita que los espacios entre filas alternadas se lean como borde interior.
+    pattern_edge_boundary_tol_px: 24.0

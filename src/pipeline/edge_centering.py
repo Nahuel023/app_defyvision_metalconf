@@ -303,7 +303,7 @@ def _pattern_bounds_by_band(
     img_h: int,
     n_bands: int = _N_BANDS,
     min_holes: int = 1,
-    boundary_tol_px: float = 0.0,  # kept for API compatibility; IQR filter supersedes this
+    boundary_tol_px: float = 0.0,
 ) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
     """Per-band left/right physical bounds using detected hole positions.
 
@@ -323,6 +323,8 @@ def _pattern_bounds_by_band(
         return {}, {}
 
     all_holes = list(holes)
+    global_left = float(min(hh.x - hh.r for hh in all_holes))
+    global_right = float(max(hh.x + hh.r for hh in all_holes))
     band_h = img_h / n_bands
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
@@ -333,13 +335,32 @@ def _pattern_bounds_by_band(
 
         band_holes = [hh for hh in all_holes if y0 <= hh.y < y1]
         if len(band_holes) >= min_holes:
-            # Snap y to actual hole centres, not the arbitrary band midpoint.
-            cy = float(np.mean([hh.y for hh in band_holes]))
-            left_dict[i]  = (float(min(hh.x - hh.r for hh in band_holes)), cy)
-            right_dict[i] = (float(max(hh.x + hh.r for hh in band_holes)), cy)
+            # In staggered patterns, some bands legitimately have no outer-column
+            # hole. Without this boundary gate, the nearest interior column becomes
+            # a fake edge and creates false pattern-zigzag positives.
+            if boundary_tol_px > 0.0:
+                left_holes = [
+                    hh for hh in band_holes
+                    if (hh.x - hh.r) <= global_left + boundary_tol_px
+                ]
+                right_holes = [
+                    hh for hh in band_holes
+                    if (hh.x + hh.r) >= global_right - boundary_tol_px
+                ]
+            else:
+                left_holes = band_holes
+                right_holes = band_holes
 
-    left_dict  = _trim_y_extremes(_iqr_filter_band_dict(left_dict))
-    right_dict = _trim_y_extremes(_iqr_filter_band_dict(right_dict))
+            # Snap y to actual boundary-hole centres, not the arbitrary band midpoint.
+            if len(left_holes) >= min_holes:
+                cy_left = float(np.mean([hh.y for hh in left_holes]))
+                left_dict[i] = (float(min(hh.x - hh.r for hh in left_holes)), cy_left)
+            if len(right_holes) >= min_holes:
+                cy_right = float(np.mean([hh.y for hh in right_holes]))
+                right_dict[i] = (float(max(hh.x + hh.r for hh in right_holes)), cy_right)
+
+    left_dict  = _iqr_filter_band_dict(left_dict)
+    right_dict = _iqr_filter_band_dict(right_dict)
     return left_dict, right_dict
 
 
@@ -541,6 +562,11 @@ def compute_centering(
         holes, img_h_for_bands, n_bands=n_bands, min_holes=min_holes_per_band,
         boundary_tol_px=boundary_tol_px,
     )
+    # Keep full pattern bounds for overlay, but use a trimmed copy for numeric
+    # verticality metrics. Top/bottom bands are shown because they matter to
+    # the operator, yet they are often sparse and can overdrive zigzag numbers.
+    pat_left_metric = _trim_y_extremes(pat_left)
+    pat_right_metric = _trim_y_extremes(pat_right)
 
     pattern_left_x  = float(min(hh.x - hh.r for hh in holes))
     pattern_right_x = float(max(hh.x + hh.r for hh in holes))
@@ -555,9 +581,9 @@ def compute_centering(
     band_lm: list[float] = []
     band_rm: list[float] = []
     for i in range(n_bands):
-        if i in edge_left and i in edge_right and i in pat_left and i in pat_right:
-            band_lm.append(pat_left[i][0]  - edge_left[i][0])
-            band_rm.append(edge_right[i][0] - pat_right[i][0])
+        if i in edge_left and i in edge_right and i in pat_left_metric and i in pat_right_metric:
+            band_lm.append(pat_left_metric[i][0]  - edge_left[i][0])
+            band_rm.append(edge_right[i][0] - pat_right_metric[i][0])
 
     left_margin_std  = float(np.std(band_lm)) if len(band_lm) >= 2 else 0.0
     right_margin_std = float(np.std(band_rm)) if len(band_rm) >= 2 else 0.0
@@ -575,8 +601,8 @@ def compute_centering(
 
     left_edge_slope_deg    = _slope_deg(left_pts_list)
     right_edge_slope_deg   = _slope_deg(right_pts_list)
-    pattern_left_slope_deg  = _slope_deg(list(pattern_left_points))
-    pattern_right_slope_deg = _slope_deg(list(pattern_right_points))
+    pattern_left_slope_deg  = _slope_deg(list(pat_left_metric.values()))
+    pattern_right_slope_deg = _slope_deg(list(pat_right_metric.values()))
 
     def _zigzag_residuals(pts_lists: list) -> tuple[float, float]:
         """Compute (std_px, max_px) of horizontal residuals from fitted line. Returns (0,0) if insufficient data."""
@@ -601,14 +627,18 @@ def compute_centering(
     )
 
     # PATRON (hole pattern edge) zigzag — smooth before computing to suppress sparse-band outliers
-    pat_left_pts_s  = _smooth_points_x(list(pattern_left_points),  smooth_window)
-    pat_right_pts_s = _smooth_points_x(list(pattern_right_points), smooth_window)
+    pat_left_pts_s  = _smooth_points_x(
+        sorted(pat_left_metric.values(), key=lambda p: p[1]), smooth_window
+    )
+    pat_right_pts_s = _smooth_points_x(
+        sorted(pat_right_metric.values(), key=lambda p: p[1]), smooth_window
+    )
     pattern_zigzag_std_px, pattern_zigzag_max_px = _zigzag_residuals(
         [pat_left_pts_s, pat_right_pts_s]
     )
 
     # PATRON CENTER zigzag — smooth before computing; catches internal lateral waviness
-    center_pts = _pattern_center_by_band(pat_left, pat_right)
+    center_pts = _pattern_center_by_band(pat_left_metric, pat_right_metric)
     center_pts_s = _smooth_points_x(center_pts, smooth_window)
     pattern_center_zigzag_std_px, pattern_center_zigzag_max_px = _zigzag_residuals(
         [center_pts_s]
