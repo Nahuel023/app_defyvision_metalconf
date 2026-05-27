@@ -887,43 +887,65 @@ class _AnalysisWorker(QThread):
         from src.patterns.pattern_io import load_pattern, find_pattern_path
         from src.patterns.roi import load_roi
         from src.utils.config import load_tolerances
+        from src.pipeline.machine_stop import MachineStopDetector
 
         try:
             n = len(self._paths)
+            tols = load_tolerances(self._model)
 
             # Pre-load shared read-only resources once (eliminates N×3 disk reads).
-            # These objects are only read inside _inspect_bgr — safe to share across threads.
             _pre: dict = {
-                "tolerances": load_tolerances(self._model),
+                "tolerances": tols,
                 "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
                 "roi":        load_roi(self._model, self._scanner_id),
             }
 
             results: list = [None] * n
-            done = 0
 
-            # OpenCV and numpy release the GIL, so ThreadPoolExecutor gives real parallelism.
-            # Cap at 6 workers to avoid excessive memory use (each frame = full BGR image).
-            n_workers = min(os.cpu_count() or 2, 6)
+            machine_stop_enabled = bool(tols.get("machine_stop_enabled", False))
 
-            def _worker(args):
-                idx, path = args
-                return idx, inspect_image(
-                    self._model, path,
-                    scanner_id=self._scanner_id,
-                    _preloaded=_pre,
+            if machine_stop_enabled:
+                # Sequential processing required: MachineStopDetector is stateful and
+                # must see frames in order to accumulate streaks correctly.
+                ms_det = MachineStopDetector(
+                    missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                    min_missing=int(tols.get("machine_stop_min_missing", 1)),
+                    same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
+                    ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
+                    track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
+                    same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
                 )
+                _pre["machine_stop_detector"] = ms_det
+                for i, path in enumerate(self._paths):
+                    results[i] = inspect_image(
+                        self._model, path,
+                        scanner_id=self._scanner_id,
+                        _preloaded=_pre,
+                    )
+                    self.progress.emit(i + 1, n)
+            else:
+                done = 0
+                # OpenCV and numpy release the GIL — parallel is safe when no stateful detector.
+                n_workers = min(os.cpu_count() or 2, 6)
 
-            with ThreadPoolExecutor(max_workers=n_workers) as executor:
-                futures = {
-                    executor.submit(_worker, (i, p)): i
-                    for i, p in enumerate(self._paths)
-                }
-                for future in as_completed(futures):
-                    idx, result = future.result()
-                    results[idx] = result
-                    done += 1
-                    self.progress.emit(done, n)
+                def _worker(args):
+                    idx, path = args
+                    return idx, inspect_image(
+                        self._model, path,
+                        scanner_id=self._scanner_id,
+                        _preloaded=_pre,
+                    )
+
+                with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                    futures = {
+                        executor.submit(_worker, (i, p)): i
+                        for i, p in enumerate(self._paths)
+                    }
+                    for future in as_completed(futures):
+                        idx, result = future.result()
+                        results[idx] = result
+                        done += 1
+                        self.progress.emit(done, n)
 
             self.finished.emit(results)
         except Exception as exc:
@@ -1064,6 +1086,7 @@ class RecordingTab(QWidget):
         self._results: list           = []
         self._current_idx: int        = 0
         self._worker: Optional[_AnalysisWorker] = None
+        self._live_ms_detector = None   # persistent detector for live inspection mode
 
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
@@ -1589,6 +1612,7 @@ class RecordingTab(QWidget):
     def _on_stop(self) -> None:
         self._rec_timer.stop()
         self._recording = False
+        self._live_ms_detector = None
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._btn_load.setEnabled(True)
@@ -1622,8 +1646,31 @@ class RecordingTab(QWidget):
         if self._live_chk.isChecked():
             try:
                 from src.inspection import inspect_image
-                result = inspect_image(self._active_model(), path,
-                                       scanner_id=self._scanner_combo.currentText() or None)
+                from src.utils.config import load_tolerances
+                from src.pipeline.machine_stop import MachineStopDetector
+
+                model      = self._active_model()
+                scanner_id = self._scanner_combo.currentText() or None
+
+                # Create a persistent detector once per recording session.
+                if self._live_ms_detector is None:
+                    tols = load_tolerances(model)
+                    if bool(tols.get("machine_stop_enabled", False)):
+                        self._live_ms_detector = MachineStopDetector(
+                            missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                            min_missing=int(tols.get("machine_stop_min_missing", 1)),
+                            same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
+                            ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
+                            track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
+                            same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
+                        )
+
+                _pre_live: dict = {}
+                if self._live_ms_detector is not None:
+                    _pre_live["machine_stop_detector"] = self._live_ms_detector
+
+                result = inspect_image(model, path, scanner_id=scanner_id,
+                                       _preloaded=_pre_live if _pre_live else None)
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok

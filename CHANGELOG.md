@@ -1859,6 +1859,59 @@ use_hungarian_matching: false           # activar si scipy disponible y hay stea
 
 ---
 
+#### Cambio 44 — Parada de máquina virtual: sin acciones de hardware
+
+**Motivación / regla de seguridad:**
+Hay personas cerca de la máquina. `machine_stop=True` debe ser puramente informativo:
+visible en UI/overlay/log, pero **no debe accionar solenoides, backlight ni cambios de estado FSM**.
+La regla es: solenoides bloqueados siempre; la parada solo es virtual hasta que se apruebe
+el control automático de pistones.
+
+**Cambios:**
+
+**`src/pipeline/annotate.py`** — texto del badge:
+- `"! DETENER MAQUINA"` → `"! DETENCION VIRTUAL DE MAQUINA"`
+
+**`src/controller/scanner_controller.py`** — FSM y hardware:
+- Antes: `machine_stop=True` → `ScannerState.FAULT` + escribe solenoid=False + backlight=False + luz roja.
+- Ahora: `machine_stop=True` → solo log warning `"DETENCION VIRTUAL — sin accion de hardware"`.
+  `ScannerState.FAULT` sigue disparando solo por `consecutive_nok_frames` (lógica de streak).
+  Los `elif` se separan: machine_stop y fault son caminos independientes.
+
+**`src/ui/service.py`** — `_AnalysisWorker`:
+- Cuando `machine_stop_enabled=True`, el análisis de carpeta pasa de paralelo (ThreadPoolExecutor)
+  a **secuencial** con un único `MachineStopDetector` compartido entre frames.
+  Motivo: el detector es stateful; con threads los frames llegan fuera de orden y la racha
+  nunca se acumula correctamente.
+- Cuando `machine_stop_enabled=False` (default): sigue usando ThreadPoolExecutor (sin cambio de rendimiento).
+
+**`src/ui/service.py`** — `RecordingTab` (live inspection):
+- `__init__`: agrega `self._live_ms_detector = None`.
+- `_on_stop()`: resetea `_live_ms_detector = None` al detener la grabación.
+- `_grab_frame()`: si `machine_stop_enabled=True`, crea el detector solo en el primer frame
+  y lo reutiliza en todos los siguientes (detector persistente por sesión de grabación).
+  Pasa el detector vía `_preloaded={"machine_stop_detector": self._live_ms_detector}`.
+
+**`config/tolerancias.yaml`** — modelo_A:
+- `consecutive_nok_frames: 9999` → `5` (habilitado: 5 NOK consecutivos = FAULT)
+- Agrega bloque `machine_stop_*` para esterilla:
+  ```yaml
+  machine_stop_enabled: true
+  machine_stop_missing_frames: 5
+  machine_stop_min_missing: 1
+  machine_stop_same_zone_px: 35.0
+  machine_stop_ignore_near_miss: true
+  machine_stop_track_by_grid: true
+  machine_stop_same_column_tol_cells: 0
+  ```
+
+**Prueba con carpeta `20260519_121741` (modelo_B):**
+- `MACHINE_STOP` aparece correctamente en frames 185–196 con missing=2 persistente.
+- El badge del overlay dice `"! DETENCION VIRTUAL DE MAQUINA"`.
+- No se escriben salidas de hardware en ningún momento.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -1881,7 +1934,8 @@ use_hungarian_matching: false           # activar si scipy disponible y hay stea
 | Extras falsos | Filtro `extra_min_dist_factor=2.0` en modelo_B: solo detecciones a >44px de todo expected cuentan como extras. |
 | Verticalidad bordes | `CenteringResult` expone `pattern_left_slope_deg`, `pattern_right_slope_deg`. Mostrado en overlay: "Vert pat: Izq=±X.X° Der=±Y.Y°". |
 | Machine stop — tracking | Tracking por columna de grilla (ci). El mismo punzón roto se reconoce aunque la chapa avance en Y entre frames. Badge muestra columna: `"EN COLUMNA 13"`. |
-| FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
+| Machine stop — acción | **VIRTUAL únicamente.** Badge `"! DETENCION VIRTUAL DE MAQUINA"`. No actúa sobre PLC, solenoides ni FSM. Solo UI/overlay/log. |
+| FAULT automático | `consecutive_nok_frames: 40` (modelo_B), `5` (modelo_A). FAULT = solo por streak NOK, nunca por machine_stop. |
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |
 | modelo_A (Esterilla) | Grid fitting. dx=68, dy=38. Filas alt. 4 small / 5 large holes. tol_xy_px=16 (<dy/2). grid_max_missing=10 conservador. FAULT deshabilitado (9999). Sin patron scanner_2 aun. |

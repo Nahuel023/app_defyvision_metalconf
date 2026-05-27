@@ -75,10 +75,16 @@ models:
     # ── Extras ────────────────────────────────────────────────────────────────
     extra_min_dist_factor: 2.0  # extras deben estar >2×16px=32px de todo expected
     # ── Temporal / produccion ─────────────────────────────────────────────────
-    # CALIBRACION: deshabilita FAULT hasta validar en planta cuantos frames
-    # consecutivos NOK corresponden a un defecto real vs transicion de material.
-    consecutive_nok_frames: 9999
+    consecutive_nok_frames: 5
     continuous_position_threshold: 0.0  # inspeccionar cada frame
+    # ── Parada virtual de máquina ──────────────────────────────────────────
+    machine_stop_enabled: true
+    machine_stop_missing_frames: 5
+    machine_stop_min_missing: 1
+    machine_stop_same_zone_px: 35.0
+    machine_stop_ignore_near_miss: true
+    machine_stop_track_by_grid: true
+    machine_stop_same_column_tol_cells: 0
 
   modelo_B:
     # ── Detección ──────────────────────────────────────────────────────────
