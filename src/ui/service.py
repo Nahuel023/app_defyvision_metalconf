@@ -25,6 +25,7 @@ from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal, QPointF, QRec
 from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPixmap, QImage, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QFormLayout,
@@ -116,6 +117,8 @@ class PLCIOTab(QWidget):
         self._system  = system
         self._signals = sorted(system.io.signals().items())
         self._value_items: dict[str, QTableWidgetItem] = {}
+        self._last_connected: bool | None = None
+        self._last_vals: dict[str, object] = {}
         self._build_ui()
         self._populate_table()
 
@@ -191,25 +194,27 @@ class PLCIOTab(QWidget):
 
     def refresh(self) -> None:
         connected = self._system.plc.connected
-        self._plc_status.setText("PLC: Conectado" if connected else "PLC: Desconectado")
-        self._plc_status.setStyleSheet(
-            f"color:{_OK if connected else _NOK};font-size:11px;font-weight:600;"
-        )
+        if connected != self._last_connected:
+            self._last_connected = connected
+            self._plc_status.setText("PLC: Conectado" if connected else "PLC: Desconectado")
+            self._plc_status.setStyleSheet(
+                f"color:{_OK if connected else _NOK};font-size:11px;font-weight:600;"
+            )
 
         for name, (sig_type, _addr) in self._signals:
             item = self._value_items.get(name)
             if item is None:
                 continue
             val = self._system.io.read(name)
+            if name in self._last_vals and self._last_vals[name] == val:
+                continue
+            self._last_vals[name] = val
             if val is None:
                 item.setText("—")
                 item.setForeground(QBrush(QColor(_MUTED)))
             else:
                 item.setText("ON" if val else "OFF")
-                if val:
-                    color = _OK if sig_type == "output" else _ACCENT
-                else:
-                    color = _MUTED
+                color = (_OK if sig_type == "output" else _ACCENT) if val else _MUTED
                 item.setForeground(QBrush(QColor(color)))
 
     def _toggle_output(self, name: str) -> None:
@@ -242,6 +247,8 @@ class PLCDiagTab(QWidget):
         self._y_leds: list[QLabel] = []
         self._y_btns: list[QPushButton] = []
         self._y_vals: list[bool] = [False] * self._COUNT
+        self._x_cache: list[object] = [None] * self._COUNT
+        self._y_cache: list[object] = [None] * self._COUNT
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -334,12 +341,18 @@ class PLCDiagTab(QWidget):
         x_vals = self._plc.read_inputs_batch(0, self._COUNT)
         if x_vals:
             for i, v in enumerate(x_vals):
+                if v == self._x_cache[i]:
+                    continue
+                self._x_cache[i] = v
                 c = "#22c55e" if v else _BORDER
                 self._x_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
 
         y_vals = self._plc.read_coils_batch(0, self._COUNT)
         if y_vals:
             for i, v in enumerate(y_vals):
+                if v == self._y_cache[i]:
+                    continue
+                self._y_cache[i] = v
                 self._y_vals[i] = v
                 c = "#f97316" if v else _BORDER
                 self._y_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
@@ -509,6 +522,8 @@ class SystemTab(QWidget):
         self._scanner_btns: dict[str, dict[str, QPushButton]] = {}
         self._plc_ip_lbl: Optional[QLabel]   = None
         self._plc_conn_lbl: Optional[QLabel] = None
+        self._last_plc_connected: bool | None = None
+        self._last_scanner_states: dict[str, dict] = {}
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -651,13 +666,23 @@ class SystemTab(QWidget):
         plc_cfg   = self._system.io.plc_config
         connected = self._system.plc.connected
 
-        self._plc_ip_lbl.setText(f"{plc_cfg['ip']}:{plc_cfg.get('port', 502)}")
-        self._plc_conn_lbl.setText("Conectado" if connected else "Desconectado")
-        self._plc_conn_lbl.setStyleSheet(
-            f"font-size:12px;font-weight:700;"
-            f"color:{_OK if connected else _NOK};"
-        )
-        self._plc_poll_lbl.setText(f"{plc_cfg.get('poll_interval_ms', 50)} ms")
+        if connected != self._last_plc_connected:
+            self._last_plc_connected = connected
+            self._plc_ip_lbl.setText(f"{plc_cfg['ip']}:{plc_cfg.get('port', 502)}")
+            self._plc_conn_lbl.setText("Conectado" if connected else "Desconectado")
+            self._plc_conn_lbl.setStyleSheet(
+                f"font-size:12px;font-weight:700;"
+                f"color:{_OK if connected else _NOK};"
+            )
+            self._plc_poll_lbl.setText(f"{plc_cfg.get('poll_interval_ms', 50)} ms")
+
+        _state_colors = {
+            ScannerState.IDLE:    _MUTED,
+            ScannerState.RUNNING: _OK,
+            ScannerState.FAULT:   _NOK,
+            ScannerState.STOPPED: "#475569",
+            ScannerState.ERROR:   _WARN,
+        }
 
         for sid, wdg in self._scanner_labels.items():
             s   = self._system.scanner(sid).get_status()
@@ -666,14 +691,32 @@ class SystemTab(QWidget):
             state: ScannerState       = s["state"]
             mode:  OperationMode      = s["mode"]
             start: Optional[datetime] = s.get("session_start")
+            cam_running = cam.is_running
 
-            _state_colors = {
-                ScannerState.IDLE:    _MUTED,
-                ScannerState.RUNNING: _OK,
-                ScannerState.FAULT:   _NOK,
-                ScannerState.STOPPED: "#475569",
-                ScannerState.ERROR:   _WARN,
+            last = self._last_scanner_states.get(sid, {})
+            changed = (
+                state                        != last.get("state") or
+                mode                         != last.get("mode") or
+                s["nok_streak"]              != last.get("nok_streak") or
+                s.get("max_nok_streak", 0)   != last.get("max_nok_streak") or
+                s.get("total_inspections", 0) != last.get("total_inspections") or
+                s.get("ok_count", 0)         != last.get("ok_count") or
+                s.get("nok_count", 0)        != last.get("nok_count") or
+                cam_running                  != last.get("cam_running")
+            )
+            if not changed:
+                continue
+
+            self._last_scanner_states[sid] = {
+                "state": state, "mode": mode,
+                "nok_streak": s["nok_streak"],
+                "max_nok_streak": s.get("max_nok_streak", 0),
+                "total_inspections": s.get("total_inspections", 0),
+                "ok_count": s.get("ok_count", 0),
+                "nok_count": s.get("nok_count", 0),
+                "cam_running": cam_running,
             }
+
             wdg["state"].setText(state.value.upper())
             wdg["state"].setStyleSheet(
                 f"font-size:12px;font-weight:700;color:{_state_colors[state]};"
@@ -688,7 +731,7 @@ class SystemTab(QWidget):
                 start.strftime("%H:%M:%S") if start else "—"
             )
             wdg["camera"].setText(
-                f"#{cam.index} {'activa' if cam.is_running else 'inactiva'}"
+                f"#{cam.index} {'activa' if cam_running else 'inactiva'}"
             )
 
             # Button states
@@ -701,7 +744,7 @@ class SystemTab(QWidget):
                 btns["stop"].setEnabled(is_running or is_fault)
                 btns["reset"].setEnabled(is_fault)
                 btns["sim"].setEnabled(is_running)
-                btns["cap"].setEnabled(self._system.camera(sid).is_running)
+                btns["cap"].setEnabled(cam_running)
 
     def _capture_frame(self, scanner_id: str) -> None:
         import cv2
@@ -976,6 +1019,7 @@ class ZoomableImageView(QWidget):
             f"background:{_DARK};border:1px solid {_BORDER};border-radius:6px;"
         )
         self.setMouseTracking(True)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     # ------------------------------------------------------------------
     # Public API
@@ -1069,6 +1113,7 @@ class ZoomableImageView(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self.setFocus()
             self._drag_start = QPointF(event.position())
             self._drag_offset = QPointF(self._offset)
 
@@ -1112,9 +1157,13 @@ class RecordingTab(QWidget):
         # Track last result-card state to skip redundant setStyleSheet calls.
         self._last_card_state: str | None = None
 
+        # Indices of NOK frames for quick navigation.
+        self._nok_indices: list[int] = []
+
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
         self._build_ui()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1153,6 +1202,8 @@ class RecordingTab(QWidget):
         self._btn_next.clicked.connect(lambda: self._show_frame(self._current_idx + 1))
         self._btn_next10.clicked.connect(lambda: self._show_frame(self._current_idx + 10))
         self._btn_last.clicked.connect(lambda: self._show_frame(len(self._frame_paths) - 1))
+        self._btn_prev_nok.clicked.connect(self._go_prev_nok)
+        self._btn_next_nok.clicked.connect(self._go_next_nok)
         self._btn_fit.clicked.connect(self._img_view.fit)
         self._btn_save_current.clicked.connect(self._save_current_frame)
         self._btn_export.clicked.connect(self._export_range)
@@ -1190,20 +1241,49 @@ class RecordingTab(QWidget):
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
         cfg.addWidget(self._scanner_combo)
 
-        cfg.addSpacing(12)
-        cfg.addWidget(_chip("MODELO"))
+        cfg.addSpacing(16)
+
+        # ── Model selector: two large toggle buttons (exclusive) ──────
+        self._btn_model_esterilla = QPushButton("● ESTERILLA")
+        self._btn_model_esterilla.setCheckable(True)
+        self._btn_model_esterilla.setFixedHeight(38)
+        self._btn_model_esterilla.setMinimumWidth(148)
+        self._btn_model_microperf = QPushButton("● MICROPERFORADO")
+        self._btn_model_microperf.setCheckable(True)
+        self._btn_model_microperf.setFixedHeight(38)
+        self._btn_model_microperf.setMinimumWidth(178)
+
+        self._model_btn_group = QButtonGroup(self)
+        self._model_btn_group.setExclusive(True)
+        self._model_btn_group.addButton(self._btn_model_esterilla, 0)
+        self._model_btn_group.addButton(self._btn_model_microperf, 1)
+
+        # Hidden combo keeps all downstream logic intact
         self._model_combo = QComboBox()
         self._model_combo.addItems(DISPLAY_NAMES)
-        self._model_combo.setStyleSheet(
-            f"background:{_DARK};color:{_ACCENT};border:1px solid {_BORDER};"
-            "border-radius:5px;padding:4px 10px;font-size:12px;font-weight:700;min-width:150px;"
-        )
+        self._model_combo.setVisible(False)
+
         sids = self._system.scanner_ids()
+        _initial = "Esterilla"
         if sids:
             _m = self._system.io.scanner_config(sids[0]).get("model", "")
             if _m:
-                self._model_combo.setCurrentText(to_display(_m))
-        cfg.addWidget(self._model_combo)
+                _initial = to_display(_m)
+        self._model_combo.setCurrentText(_initial)
+
+        self._btn_model_esterilla.toggled.connect(
+            lambda checked: self._on_model_btn_toggled("Esterilla", checked)
+        )
+        self._btn_model_microperf.toggled.connect(
+            lambda checked: self._on_model_btn_toggled("Microperforado", checked)
+        )
+
+        self._sync_model_buttons()
+
+        cfg.addWidget(self._btn_model_esterilla)
+        cfg.addSpacing(4)
+        cfg.addWidget(self._btn_model_microperf)
+        cfg.addWidget(self._model_combo)  # hidden; kept in layout for enable/disable cycle
 
         cfg.addSpacing(12)
         cfg.addWidget(_chip("FPS"))
@@ -1435,6 +1515,32 @@ class RecordingTab(QWidget):
         nav.addWidget(sep)
         nav.addSpacing(10)
 
+        # ── NOK navigator ─────────────────────────────────────────────
+        self._btn_prev_nok = _nav_btn("◀ NOK", w=72, tooltip="Frame NOK anterior",
+                                      bg="#3b0f0f", bd="#7f1d1d", hv="#5c1515", fs=11)
+        self._btn_next_nok = _nav_btn("NOK ▶", w=72, tooltip="Frame NOK siguiente",
+                                      bg="#3b0f0f", bd="#7f1d1d", hv="#5c1515", fs=11)
+        self._nok_nav_lbl = QLabel("NOK —")
+        self._nok_nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._nok_nav_lbl.setFixedWidth(80)
+        self._nok_nav_lbl.setStyleSheet(
+            f"color:{_NOK};font-size:11px;font-weight:700;"
+            f"background:#1a0a0a;border:1px solid #7f1d1d;"
+            "border-radius:7px;padding:4px 8px;"
+        )
+        self._btn_prev_nok.setEnabled(False)
+        self._btn_next_nok.setEnabled(False)
+        for w in (self._btn_prev_nok, self._nok_nav_lbl, self._btn_next_nok):
+            nav.addWidget(w)
+        nav.addSpacing(10)
+
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.VLine)
+        sep2.setFixedWidth(1)
+        sep2.setStyleSheet(f"color:{_BORDER};")
+        nav.addWidget(sep2)
+        nav.addSpacing(10)
+
         # Overlay toggle — pill style
         self._overlay_toggle = QPushButton("◉  OVERLAY")
         self._overlay_toggle.setCheckable(True)
@@ -1645,7 +1751,8 @@ class RecordingTab(QWidget):
         self._btn_analyze.setEnabled(False)
         self._btn_load.setEnabled(False)
         self._scanner_combo.setEnabled(False)
-        self._model_combo.setEnabled(False)
+        self._btn_model_esterilla.setEnabled(False)
+        self._btn_model_microperf.setEnabled(False)
         self._fps_spin.setEnabled(False)
         self._live_chk.setEnabled(False)
 
@@ -1665,7 +1772,8 @@ class RecordingTab(QWidget):
         self._btn_stop.setEnabled(False)
         self._btn_load.setEnabled(True)
         self._scanner_combo.setEnabled(True)
-        self._model_combo.setEnabled(True)
+        self._btn_model_esterilla.setEnabled(True)
+        self._btn_model_microperf.setEnabled(True)
         self._fps_spin.setEnabled(True)
         self._live_chk.setEnabled(True)
 
@@ -1815,6 +1923,7 @@ class RecordingTab(QWidget):
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
         self._update_model_chip()
         self._update_export_range_max()
+        self._rebuild_nok_index()
         self._show_frame(0)
         logger.info(f"[Grabación] análisis completo — OK={ok} NOK={nok}")
 
@@ -1928,6 +2037,7 @@ class RecordingTab(QWidget):
         self._btn_next.setEnabled(self._current_idx < n - 1)
         self._btn_next10.setEnabled(self._current_idx < n - 1)
         self._btn_last.setEnabled(self._current_idx < n - 1)
+        self._update_nok_nav_label()
 
     # ------------------------------------------------------------------
     # Save / Export
@@ -2055,6 +2165,46 @@ class RecordingTab(QWidget):
     def _active_model(self) -> str:
         return to_internal(self._model_combo.currentText())
 
+    # ── Model toggle buttons ──────────────────────────────────────────
+
+    _MODEL_BTN_STYLES = {
+        "Esterilla": {
+            "on":  ("background:#052e16;color:#4ade80;border-color:#16a34a;", "● ESTERILLA"),
+            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "○ ESTERILLA"),
+        },
+        "Microperforado": {
+            "on":  ("background:#0c2a3e;color:#38bdf8;border-color:#0284c7;", "● MICROPERFORADO"),
+            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "○ MICROPERFORADO"),
+        },
+    }
+    _MODEL_BTN_BASE = (
+        "QPushButton {{ {style} border-radius:8px;font-size:12px;font-weight:700;"
+        "  padding:0 18px;letter-spacing:1px; }}"
+        "QPushButton:hover {{ border-color:#64748b; }}"
+        "QPushButton:disabled {{ background:#131e2e;color:#374151;border-color:#1e293b; }}"
+    )
+
+    def _sync_model_buttons(self) -> None:
+        current = self._model_combo.currentText()
+        for name, btn in (("Esterilla", self._btn_model_esterilla),
+                          ("Microperforado", self._btn_model_microperf)):
+            selected = (name == current)
+            btn.blockSignals(True)
+            btn.setChecked(selected)
+            btn.blockSignals(False)
+            style_str, label = self._MODEL_BTN_STYLES[name]["on" if selected else "off"]
+            btn.setText(label)
+            btn.setStyleSheet(self._MODEL_BTN_BASE.format(style=style_str))
+
+    def _on_model_btn_toggled(self, name: str, checked: bool) -> None:
+        if not checked:
+            return
+        self._model_combo.blockSignals(True)
+        self._model_combo.setCurrentText(name)
+        self._model_combo.blockSignals(False)
+        self._sync_model_buttons()
+        self._update_model_chip(name)
+
     def _on_scanner_changed(self, sid: str) -> None:
         if self._recording:
             return
@@ -2063,6 +2213,7 @@ class RecordingTab(QWidget):
             self._model_combo.blockSignals(True)
             self._model_combo.setCurrentText(to_display(model_internal))
             self._model_combo.blockSignals(False)
+            self._sync_model_buttons()
 
     def _on_load_recording(self) -> None:
         """Load an existing recording folder for analysis."""
@@ -2084,9 +2235,13 @@ class RecordingTab(QWidget):
         self._rec_dir      = folder_path
         self._frame_paths  = frames
         self._results.clear()
+        self._nok_indices  = []
         self._current_idx  = 0
         self._px_cache.clear()
         self._last_card_state = None
+        self._nok_nav_lbl.setText("NOK —")
+        self._btn_prev_nok.setEnabled(False)
+        self._btn_next_nok.setEnabled(False)
         self._summary_lbl.setText("")
         self._stats_lbl.setText("")
         self._ana_progress.setText("")
@@ -2099,6 +2254,7 @@ class RecordingTab(QWidget):
                 model_display = meta.get("model_display", "")
                 if model_display:
                     self._model_combo.setCurrentText(model_display)
+                    self._sync_model_buttons()
                 fps_saved = meta.get("fps")
                 if fps_saved:
                     self._fps_spin.setValue(fps_saved)
@@ -2158,6 +2314,60 @@ class RecordingTab(QWidget):
         f.setFixedWidth(1)
         f.setStyleSheet(f"color:{_BORDER};")
         return f
+
+    # ------------------------------------------------------------------
+    # NOK navigation
+    # ------------------------------------------------------------------
+
+    def _rebuild_nok_index(self) -> None:
+        self._nok_indices = [i for i, r in enumerate(self._results) if r.status == "NOK"]
+        has_nok = bool(self._nok_indices)
+        self._btn_prev_nok.setEnabled(has_nok)
+        self._btn_next_nok.setEnabled(has_nok)
+        total = len(self._nok_indices)
+        self._nok_nav_lbl.setText(f"NOK {total}" if total else "NOK —")
+
+    def _go_prev_nok(self) -> None:
+        if not self._nok_indices:
+            return
+        candidates = [i for i in self._nok_indices if i < self._current_idx]
+        target = candidates[-1] if candidates else self._nok_indices[-1]
+        self._show_frame(target)
+
+    def _go_next_nok(self) -> None:
+        if not self._nok_indices:
+            return
+        candidates = [i for i in self._nok_indices if i > self._current_idx]
+        target = candidates[0] if candidates else self._nok_indices[0]
+        self._show_frame(target)
+
+    def _update_nok_nav_label(self) -> None:
+        if not self._nok_indices:
+            return
+        total = len(self._nok_indices)
+        # Find position of current frame in NOK list (1-based), or nearest
+        if self._current_idx in self._nok_indices:
+            pos = self._nok_indices.index(self._current_idx) + 1
+            self._nok_nav_lbl.setText(f"NOK {pos}/{total}")
+        else:
+            self._nok_nav_lbl.setText(f"NOK {total}")
+
+    def keyPressEvent(self, event) -> None:
+        key  = event.key()
+        ctrl = event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        if not self._frame_paths:
+            super().keyPressEvent(event)
+            return
+        if key == Qt.Key.Key_Right and ctrl:
+            self._go_next_nok()
+        elif key == Qt.Key.Key_Left and ctrl:
+            self._go_prev_nok()
+        elif key == Qt.Key.Key_Right:
+            self._show_frame(self._current_idx + 1)
+        elif key == Qt.Key.Key_Left:
+            self._show_frame(self._current_idx - 1)
+        else:
+            super().keyPressEvent(event)
 
     def _grp_style(self) -> str:
         return (
@@ -2465,12 +2675,16 @@ class CameraCalibTab(QWidget):
             pass
 
     def _update_preview(self) -> None:
+        if not self.isVisible():
+            return
         scanner_id = self._scanner_combo.currentText()
         if not scanner_id:
             return
         try:
             cam = self._system.camera(scanner_id)
         except KeyError:
+            return
+        if not cam.is_running:
             return
         frame = cam.get_frame()
         if frame is None:
@@ -2482,7 +2696,7 @@ class CameraCalibTab(QWidget):
         target = self._preview_lbl.size()
         self._preview_lbl.setPixmap(
             pix.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
-                       Qt.TransformationMode.SmoothTransformation)
+                       Qt.TransformationMode.FastTransformation)
         )
 
     def _read_from_camera(self) -> None:
@@ -2792,6 +3006,7 @@ class ServiceWindow(QMainWindow):
 
         self._log_handler = QtLogHandler()
         logging.getLogger().addHandler(self._log_handler)
+        self._last_plc_connected: bool | None = None
 
         self._build_ui()
 
@@ -2946,13 +3161,15 @@ class ServiceWindow(QMainWindow):
 
     def _refresh(self) -> None:
         connected = self._system.plc.connected
-        self._header_plc.setText(
-            "● PLC: Conectado" if connected else "● PLC: Desconectado"
-        )
-        self._header_plc.setStyleSheet(
-            f"color:{_OK if connected else _NOK};"
-            "font-size:11px;font-weight:600;background:transparent;"
-        )
+        if connected != self._last_plc_connected:
+            self._last_plc_connected = connected
+            self._header_plc.setText(
+                "● PLC: Conectado" if connected else "● PLC: Desconectado"
+            )
+            self._header_plc.setStyleSheet(
+                f"color:{_OK if connected else _NOK};"
+                "font-size:11px;font-weight:600;background:transparent;"
+            )
         idx = self._tabs.currentIndex()
         if idx == 0:
             self._plc_tab.refresh()
