@@ -32,6 +32,9 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "selftest_timeout_s": 10.0,
     "max_inspection_hz": 0,
     "grid_min_spacing": 30.0,
+    # Frame-level visual decision: when missing > this value, result.status is NOK.
+    # None means use the production compare threshold (grid_max_missing).
+    "frame_missing_nok_threshold": None,
     "center_offset_tol_px": 0.0,   # 0 = medir y mostrar, nunca NOK; >0 = tolerancia activa
     "grid_affine_refinement": False,  # True = corrección affine local post-fase-global
     "blur_score_min": 0.0,            # 0 = deshabilitado; >0 = varianza mín del Laplaciano
@@ -54,6 +57,13 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pattern_center_align_enabled": False,
     "pattern_center_zigzag_std_max_px": 4.0,
     "pattern_center_zigzag_abs_max_px": 6.5,
+    # Per-type hole classification (models with two distinct hole sizes, e.g. modelo_A)
+    # 0 = disabled (single-type mode); >0 = area threshold (px²) between small/large holes
+    "hole_type_split_area": 0.0,
+    "min_area_small": 0.0,    # 0 = fall back to global min_area
+    "max_area_small": 0.0,    # 0 = no upper limit for small holes
+    "min_area_large": 0.0,    # 0 = fall back to global min_area
+    "max_area_large": 0.0,    # 0 = no upper limit for large holes
 }
 
 

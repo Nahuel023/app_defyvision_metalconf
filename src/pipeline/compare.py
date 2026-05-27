@@ -27,6 +27,10 @@ class CompareReport:
     # instead of pixel X — so the same broken punch is recognised across
     # frames even as the sheet advances vertically.
     missing_cells: List[Tuple[int, int]] = field(default_factory=list)
+    # Hole type ("small" | "large") for each missing expected hole.
+    # Populated when expected_types is passed to compare_missing_only.
+    # Allows distinguishing broken punches by size category.
+    missing_types: List[str] = field(default_factory=list)
 
 
 def compare_missing_only(
@@ -38,6 +42,8 @@ def compare_missing_only(
     extra_min_dist_factor: float = 0.0,
     expected_cells: List[Tuple[int, int]] | None = None,
     use_hungarian: bool = False,
+    expected_types: List[str] | None = None,
+    detected_types: List[str] | None = None,
 ) -> CompareReport:
     """
     Match each expected hole to the nearest free detected hole within tol_xy_px.
@@ -53,6 +59,11 @@ def compare_missing_only(
     expected_cells: optional (ci, cj) list parallel to expected_points.
       When provided, missing_cells in the returned report contains the cell
       coordinates of each missing expected hole.
+
+    expected_types / detected_types: optional parallel lists of "small" | "large".
+      When both are provided, cross-type matches are blocked (distance set to inf),
+      so a large detected blob cannot steal the position of a small expected hole.
+      missing_types in the returned report reflects the type of each missing hole.
 
     extra = detected holes with no expected match (spurious / reflections).
     max_extra=-1 disables the extra criterion.
@@ -82,6 +93,14 @@ def compare_missing_only(
     diff  = exp[:, None, :] - det[None, :, :]           # (n_exp, n_det, 2)
     dist2 = (diff * diff).sum(axis=2)                   # (n_exp, n_det)
     tol2  = tol_xy_px * tol_xy_px
+
+    # Type-aware matching: cross-type pairs get infinite distance so they are
+    # never matched (a large blob cannot steal a small expected hole's position).
+    if expected_types is not None and detected_types is not None:
+        exp_t = np.array(expected_types)
+        det_t = np.array(detected_types)
+        cross_type = (exp_t[:, None] != det_t[None, :])   # (n_exp, n_det) bool
+        dist2 = np.where(cross_type, np.inf, dist2)
 
     matched_detected_idx: List[int] = []
     missing_points: List[Tuple[float, float]] = []
@@ -154,6 +173,9 @@ def compare_missing_only(
     missing_cells_out: List[Tuple[int, int]] = (
         [expected_cells[i] for i in missing_exp_idx] if expected_cells else []
     )
+    missing_types_out: List[str] = (
+        [expected_types[i] for i in missing_exp_idx] if expected_types else []
+    )
 
     return CompareReport(
         expected=n_exp,
@@ -165,4 +187,5 @@ def compare_missing_only(
         extra=extra,
         extra_points=extra_points,
         missing_cells=missing_cells_out,
+        missing_types=missing_types_out,
     )

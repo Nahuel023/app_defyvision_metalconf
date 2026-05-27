@@ -1912,6 +1912,124 @@ el control automático de pistones.
 
 ---
 
+#### Cambio 45 — Parametro frame_missing_nok_threshold (infraestructura, no activado)
+
+**Motivacion:** Separar el umbral productivo conservador (`grid_max_missing`) del umbral
+visual estricto para marcar un frame como NOK en el overlay. Util para modelos donde
+cualquier agujero faltante es un defecto visible, independientemente del umbral de FAULT.
+
+**Cambios en infraestructura:**
+- `src/utils/config.py`: nuevo parametro `frame_missing_nok_threshold` (default `None`).
+  - `None` = usa `grid_max_missing` como antes (sin cambio de comportamiento).
+  - `0` = marca el frame como `NOK` en cuanto `missing > 0`.
+  - Cualquier entero positivo = umbral de missing para NOK de visualizacion.
+- `src/inspection.py`: `final_status` considera `frame_missing_nok_threshold` ademas de
+  `report.status`, centrado y parada virtual.
+
+**Reversion de config (evitar regresion 185/185):**
+- El parametro fue inicialmente activado (`=0`) en modelo_A y modelo_B.
+- Con `frame_missing_nok_threshold=0` en modelo_B, `raw_ok` cae de 185 a 155 en
+  `20260519_121741` (frames con blur de movimiento tienen 1-5 missing → todos NOK).
+- Decision: no activar en ninguno de los dos modelos hasta calibrar con material real.
+  - `modelo_B`: parametro eliminado de la seccion (hereda default `None`).
+  - `modelo_A`: parametro eliminado (sin imagenes reales de Esterilla para calibrar).
+- Para activar en el futuro: agregar `frame_missing_nok_threshold: 0` en el modelo deseado.
+
+---
+
+#### Cambio 46 — Clasificacion por tipo de agujero para Esterilla (modelo_A)
+
+**Motivacion:** Esterilla tiene dos tamanos de agujeros claramente distintos:
+- Agujeros chicos (cj impar): r≈14px, area≈627px² — 4 por fila
+- Agujeros grandes (cj par): r≈25px, area≈2023px² — 5 por fila
+
+Sin clasificacion, el matcher podia asignar un blob grande (ruido/reflejo) a la posicion
+de un agujero chico esperado, o viceversa. Los agujeros faltantes tampoco se etiquetaban
+por tipo, dificultando el diagnostico (punzon chico vs punzon grande roto).
+
+**Cambios:**
+
+**`src/utils/config.py`** — 5 nuevos defaults:
+```python
+"hole_type_split_area": 0.0,  # 0 = deshabilitado; >0 = umbral en px² entre chico/grande
+"min_area_small":       0.0,  # 0 = usar min_area global; >0 = piso para agujeros chicos
+"max_area_small":       0.0,  # 0 = sin techo; >0 = techo para agujeros chicos
+"min_area_large":       0.0,  # 0 = usar min_area global; >0 = piso para agujeros grandes
+"max_area_large":       0.0,  # 0 = sin techo; >0 = techo para agujeros grandes
+```
+
+**`src/pipeline/compare.py`** — `CompareReport` + `compare_missing_only()`:
+- `CompareReport` agrega campo `missing_types: List[str]` (default `[]`).
+  Contiene `"small"` o `"large"` para cada agujero faltante.
+- `compare_missing_only()` agrega parametros `expected_types` y `detected_types`.
+  Cuando ambos se proveen, pares de tipo cruzado (chico-expected vs grande-detected)
+  reciben distancia infinita → nunca se asignan entre si (hard constraint).
+
+**`src/inspection.py`** — `_inspect_bgr()`:
+- Lee nuevos parametros (`hole_type_split_area`, `min_area_small`, etc.).
+- Post-deteccion: cuando `hole_type_split_area > 0`, clasifica cada `Hole` en
+  `"small"` / `"large"` por area, aplica filtros de area por tipo, y descarta
+  agujeros fuera del rango esperado para su categoria.
+- Deriva `expected_types` de `pattern.radii` + `compare_cells`:
+  `split_r = sqrt(hole_type_split_area / pi)` — punto de corte en el gap natural.
+  Para cada celda `(ci,cj)` en `compare_cells`, busca el radio en el patron y
+  clasifica como `"small"` o `"large"`.
+- Bbox filter: mantiene `detected_types` sincronizado con `detected_in_bbox`.
+- Pasa `expected_types` y `detected_types` a `compare_missing_only`.
+- `report.missing_types` refleja el tipo de cada agujero faltante.
+
+**`config/tolerancias.yaml`** — modelo_A:
+```yaml
+hole_type_split_area: 1000.0  # gap natural entre 627px² (chico) y 2023px² (grande)
+min_area_small: 350.0         # chico real ≈627px²; noise << 350
+max_area_small: 1300.0        # excluye grandes y ruido grande intermedio
+min_area_large: 900.0         # grande real ≈2023px²; excluye chicos
+max_area_large: 5000.0        # excluye suciedad / reflejo muy grande
+```
+
+**modelo_B:** `hole_type_split_area=0.0` (no en config → hereda default 0 = deshabilitado).
+El codigo nuevo es completamente inerte para modelo_B.
+
+**Diagnostico del patron modelo_A (holes.json):**
+- 117 puntos totales, 113 celdas unicas (4 duplicados por redondeo en build)
+- dx=68px, dy=38px — grilla rectangular
+- Filas cj impar: 4 agujeros chicos, r≈14px (media 14.13px)
+- Filas cj par: 5 agujeros grandes, r≈25px (media 25.38px)
+- Bimodalidad clara: gap entre 14px y 25px con punto de corte r≈17.8px (area=1000px²)
+
+**Prueba de logica (no hay imagenes Esterilla disponibles):**
+- Test 1: matching mismo tipo → 0 missing ✓
+- Test 2: tipo cruzado (small expected vs large detected) → ambos missing ✓
+- Test 3: un match + un faltante grande → missing_types=['large'] ✓
+- Test 4: sin tipos → backward compatible ✓
+- `python -m compileall src` OK
+
+**Limitacion:** No hay imagenes de Esterilla (scanner_2/modelo_A) disponibles para
+validar los umbrales de area en planta. Los parametros `min_area_small` etc. son
+estimaciones basadas en los radios del patron existente. Calibrar en planta con
+histograma de areas cuando se tengan imagenes reales de Esterilla.
+
+**Sin tocar:** modelo_B (tipo deshabilitado), PLC, solenoides, logica temporal,
+patron de referencia, grid_max_missing.
+
+#### Cambio 46b — Activar frame_missing_nok_threshold: 0 para modelo_A
+
+**Motivacion:** Con la clasificacion por tipo implementada, el usuario quiere que
+cualquier agujero faltante en Esterilla marque el frame como NOK inmediatamente,
+habilitando el seguimiento frame-a-frame para la parada virtual de maquina.
+
+**Cambio:** `config/tolerancias.yaml` modelo_A — agrega:
+```yaml
+frame_missing_nok_threshold: 0  # cualquier missing → NOK inmediato
+```
+Esto complementa `grid_max_missing: 10` (que solo marca NOK cuando faltan >10).
+Con `frame_missing_nok_threshold: 0`, UN solo agujero faltante ya marca NOK y
+alimenta el contador de racha para `machine_stop_missing_frames: 5`.
+
+**Sin tocar:** modelo_B (hereda default `None` = solo `grid_max_missing` aplica).
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
