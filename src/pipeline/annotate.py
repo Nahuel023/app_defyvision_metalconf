@@ -47,14 +47,22 @@ def draw_holes(img_bgr: np.ndarray, holes: Sequence[Hole]) -> np.ndarray:
     return out
 
 
+# Estimated pixel height of one machine-stop badge (used to offset the NOK panel).
+# Derived from draw_machine_stop_badge geometry: ~86px banner + 3px gap = 89px per badge.
+_BADGE_H = 92
+
+
 def _draw_nok_reasons_panel(
     img: np.ndarray,
     reasons: list[str],
+    y_start: int = 0,
 ) -> None:
-    """Draw a semi-transparent NOK reasons panel in the top-left corner.
+    """Draw a semi-transparent NOK reasons panel anchored at y_start in the top-left corner.
 
-    Each reason is listed as a bullet line.  Panel height adapts to the number
-    of reasons.  Drawn in-place on `img`.
+    y_start: top Y of the panel (pixels from top of image).  Pass badge_count * _BADGE_H
+    to keep the panel below any machine-stop badges that will be drawn on the same image.
+    Each reason is listed as a bullet line.  Panel height adapts to the number of reasons.
+    Drawn in-place on `img`.
     """
     if not reasons:
         return
@@ -78,17 +86,19 @@ def _draw_nok_reasons_panel(
                + len(reasons) * (row_h_max + row_gap)
                + pad)
 
+    y0, y1 = y_start, y_start + panel_h
+
     # Semi-transparent dark-red background
     layer = img.copy()
-    cv2.rectangle(layer, (0, 0), (panel_w, panel_h), (0, 0, 100), -1)
+    cv2.rectangle(layer, (0, y0), (panel_w, y1), (0, 0, 100), -1)
     cv2.addWeighted(layer, 0.80, img, 0.20, 0, img)
 
     # Red border (bottom + right)
-    cv2.line(img, (0, panel_h), (panel_w, panel_h), (0, 0, 220), 2)
-    cv2.line(img, (panel_w, 0), (panel_w, panel_h), (0, 0, 220), 2)
+    cv2.line(img, (0, y1), (panel_w, y1), (0, 0, 220), 2)
+    cv2.line(img, (panel_w, y0), (panel_w, y1), (0, 0, 220), 2)
 
     # Header "NOK"
-    y = pad + hh
+    y = y0 + pad + hh
     cv2.putText(img, header, (pad, y), font, hdr_scale, (50, 50, 255), hdr_thick + 2, cv2.LINE_AA)
     cv2.putText(img, header, (pad, y), font, hdr_scale, (255, 255, 255), hdr_thick, cv2.LINE_AA)
 
