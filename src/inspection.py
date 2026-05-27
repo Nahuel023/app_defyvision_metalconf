@@ -171,6 +171,10 @@ def _inspect_bgr(
     close_ksize         = int(tolerances.get("close_ksize", 5))
     edge_margin_px        = float(tolerances.get("edge_margin_px", 0.0))
     grid_max_missing      = int(tolerances.get("grid_max_missing", 0))
+    frame_missing_nok_raw = tolerances.get("frame_missing_nok_threshold", None)
+    frame_missing_nok_threshold = (
+        None if frame_missing_nok_raw is None else int(frame_missing_nok_raw)
+    )
     min_detection_ratio   = float(tolerances.get("min_detection_ratio", 0.30))
     quality_ratio_min     = float(tolerances.get("quality_ratio_min", 0.0))
     max_extra             = int(tolerances.get("max_extra", -1))
@@ -180,6 +184,12 @@ def _inspect_bgr(
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
     use_hungarian_matching = bool(tolerances.get("use_hungarian_matching", False))
+    # Per-type hole classification (models with two distinct hole sizes, e.g. modelo_A)
+    hole_type_split_area = float(tolerances.get("hole_type_split_area", 0.0))
+    min_area_small = float(tolerances.get("min_area_small", 0.0))
+    max_area_small = float(tolerances.get("max_area_small", 0.0))
+    min_area_large = float(tolerances.get("min_area_large", 0.0))
+    max_area_large = float(tolerances.get("max_area_large", 0.0))
     # CHAPA edge zigzag → IMAGEN INESTABLE (frame quality issue, skip decisions)
     verticality_quality_enabled = bool(tolerances.get("verticality_quality_enabled", False))
     chapa_zigzag_std_max_px = float(
@@ -219,6 +229,26 @@ def _inspect_bgr(
     mask  = preprocess_for_holes(img, **preprocess_kw)
     holes = detect_holes_from_mask(mask, **detect_kw)
     detected_points = [(h.x, h.y) for h in holes]
+
+    # Per-type filtering: when hole_type_split_area > 0, classify detected holes into
+    # small/large by area and apply per-type min/max area bounds. Prevents large blobs
+    # (noise/reflections) from being matched as large expected holes, and allows
+    # tuning min_area independently for small vs large holes.
+    _det_types_full: list[str] | None = None
+    if hole_type_split_area > 0.0:
+        _filtered_holes: list = []
+        _types: list[str] = []
+        for _h in holes:
+            _ht = "small" if _h.area < hole_type_split_area else "large"
+            _lo = (min_area_small if _ht == "small" else min_area_large) or min_area
+            _hi = (max_area_small if _ht == "small" else max_area_large)
+            if _h.area < _lo or (_hi > 0.0 and _h.area > _hi):
+                continue
+            _filtered_holes.append(_h)
+            _types.append(_ht)
+        holes = _filtered_holes
+        detected_points = [(h.x, h.y) for h in holes]
+        _det_types_full = _types
 
     # Blur score: Laplacian variance on the inspection ROI.
     # Skip entirely when blur_score_min == 0 (not configured) to save ~3ms/frame.
@@ -300,19 +330,43 @@ def _inspect_bgr(
                 if y_clip_min <= y <= y_clip_max
             ]
 
+    # Derive expected hole types from pattern radii (when type classification is active).
+    # Split radius = sqrt(hole_type_split_area / π) — midpoint between small and large.
+    expected_types: list[str] | None = None
+    if hole_type_split_area > 0.0 and compare_cells and pattern.cells and pattern.radii:
+        _split_r = (hole_type_split_area / 3.14159) ** 0.5
+        _cell_to_r: dict = {
+            (int(c[0]), int(c[1])): float(r)
+            for c, r in zip(pattern.cells, pattern.radii)
+        }
+        expected_types = [
+            "small" if _cell_to_r.get((int(c[0]), int(c[1])), 0.0) < _split_r else "large"
+            for c in compare_cells
+        ]
+
     # Filtrar detecciones al bounding box del patrón esperado para eliminar agujeros
     # reales del material fuera de la ventana del patrón (reducen extra y costo de matching).
     # Los holes originales se mantienen intactos para el cálculo de centrado.
+    detected_types: list[str] | None = None
     if compare_points and bbox_filter_margin_px >= 0:
         xs = [p[0] for p in compare_points]
         ys = [p[1] for p in compare_points]
         m = bbox_filter_margin_px
         bx1, bx2 = min(xs) - m, max(xs) + m
         by1, by2 = min(ys) - m, max(ys) + m
-        detected_in_bbox = [(x, y) for x, y in detected_points
-                            if bx1 <= x <= bx2 and by1 <= y <= by2]
+        if _det_types_full is not None:
+            _bbox_pairs = [
+                (pt, dt) for pt, dt in zip(detected_points, _det_types_full)
+                if bx1 <= pt[0] <= bx2 and by1 <= pt[1] <= by2
+            ]
+            detected_in_bbox = [p for p, _ in _bbox_pairs]
+            detected_types   = [t for _, t in _bbox_pairs]
+        else:
+            detected_in_bbox = [(x, y) for x, y in detected_points
+                                if bx1 <= x <= bx2 and by1 <= y <= by2]
     else:
         detected_in_bbox = detected_points
+        detected_types   = _det_types_full
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
     report  = compare_missing_only(compare_points, detected_in_bbox,
@@ -320,7 +374,9 @@ def _inspect_bgr(
                                    max_extra=max_extra,
                                    extra_min_dist_factor=extra_min_dist_factor,
                                    expected_cells=compare_cells if compare_cells else None,
-                                   use_hungarian=use_hungarian_matching)
+                                   use_hungarian=use_hungarian_matching,
+                                   expected_types=expected_types,
+                                   detected_types=detected_types)
 
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
     capture_quality_degraded = (
@@ -339,7 +395,13 @@ def _inspect_bgr(
         and not centering.within_tol
         and center_offset_tol_px > 0
     )
-    final_status = "NOK" if (report.status == "NOK" or centering_nok) else report.status
+    missing_frame_nok = (
+        frame_missing_nok_threshold is not None
+        and report.missing > frame_missing_nok_threshold
+    )
+    final_status = "NOK" if (
+        report.status == "NOK" or centering_nok or missing_frame_nok
+    ) else report.status
 
     # --- Frame geometry quality ---
     # CHAPA zigzag: high → IMAGEN INESTABLE (camera/sheet vibration) → skip all decisions.

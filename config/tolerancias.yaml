@@ -50,9 +50,19 @@ models:
     #
     # ── Deteccion ─────────────────────────────────────────────────────────────
     polarity: bright            # backlight encendido → agujeros brillantes
-    min_area: 400.0             # captura small holes (area≈627px²); rechaza ruido
+    min_area: 400.0             # fallback si hole_type_split_area=0; captura small holes (area≈627px²)
     circularity_min: 0.80       # agujeros bien circulares (igual que global)
     aspect_ratio_max: 2.0
+    # ── Clasificacion por tipo (chico / grande) ────────────────────────────────
+    # Umbral de area para distinguir agujeros chicos (cj impar, r≈14px, area≈627px²)
+    # de agujeros grandes (cj par, r≈25px, area≈2023px²).
+    # Punto de corte elegido en el gap natural entre los dos clusters (627-2023px²).
+    hole_type_split_area: 1000.0
+    # Limites por tipo. Calibrar con histograma de areas en planta.
+    min_area_small: 350.0        # chico real ≈627px²; noise << 350
+    max_area_small: 1300.0       # excluye grandes (>2023px²) y ruido grande intermedio
+    min_area_large: 900.0        # grande real ≈2023px²; excluye chicos
+    max_area_large: 5000.0       # excluye suciedad / reflejo muy grande
     # ── Matching ──────────────────────────────────────────────────────────────
     # tol_xy_px DEBE ser < dy/2 = 19px para evitar ambigüedad entre filas adyacentes
     tol_xy_px: 16.0             # ~42% de dy=38; margen amplio sin solapamiento
@@ -77,6 +87,9 @@ models:
     # ── Temporal / produccion ─────────────────────────────────────────────────
     consecutive_nok_frames: 5
     continuous_position_threshold: 0.0  # inspeccionar cada frame
+    # Cualquier agujero faltante → NOK inmediato (para seguimiento y parada virtual).
+    # 0 = NOK si missing > 0. None = solo grid_max_missing aplica.
+    frame_missing_nok_threshold: 0
     # ── Parada virtual de máquina ──────────────────────────────────────────
     machine_stop_enabled: true
     machine_stop_missing_frames: 5
