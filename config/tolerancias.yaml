@@ -200,9 +200,8 @@ models:
     # (mediana deslizante de smooth_window bandas) reduce sensibilidad a outliers
     # aislados sin afectar la geometría de la línea ajustada.
     edge_centering_bands: 24
-    pattern_edge_min_holes_per_band: 2
+    pattern_edge_min_holes_per_band: 1
     pattern_edge_smooth_window: 3
-    # Solo medir borde del patron con agujeros realmente en el borde exterior.
-    # dx≈28px → 20px incluye solo la primera columna (evita falsos positivos
-    # de zigzag cuando una banda no tiene agujero en la columna exterior).
-    pattern_edge_boundary_tol_px: 20.0
+    # IQR filter (en edge_centering.py) reemplaza boundary_tol_px para manejar
+    # bandas sin agujero de columna exterior. Dejar en 0.0.
+    pattern_edge_boundary_tol_px: 0.0

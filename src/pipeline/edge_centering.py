@@ -249,36 +249,80 @@ def _detect_edges_by_band(
     return left_dict, right_dict
 
 
+def _iqr_filter_band_dict(
+    d: dict[int, tuple[float, float]],
+    iqr_factor: float = 2.5,
+) -> dict[int, tuple[float, float]]:
+    """Remove bands whose measured edge x is an IQR outlier.
+
+    Bands where no outermost-column hole fell (e.g. due to staggered grid
+    row gaps) occasionally pick an interior hole as the edge; those produce
+    x positions far from the median and are safely rejected here.
+    Returns the original dict unchanged when fewer than 4 bands exist (not
+    enough data for a meaningful IQR estimate).
+    """
+    if len(d) < 4:
+        return d
+    xs = np.array([v[0] for v in d.values()], dtype=np.float64)
+    q1 = float(np.percentile(xs, 25))
+    q3 = float(np.percentile(xs, 75))
+    iqr = q3 - q1
+    if iqr < 1.0:
+        return d  # all very similar — nothing to filter
+    lo = q1 - iqr_factor * iqr
+    hi = q3 + iqr_factor * iqr
+    return {k: v for k, v in d.items() if lo <= v[0] <= hi}
+
+
+def _trim_y_extremes(
+    d: dict[int, tuple[float, float]],
+    trim_frac: float = 0.10,
+) -> dict[int, tuple[float, float]]:
+    """Drop bands in the outer trim_frac of the measured y range.
+
+    The top and bottom of the pattern have fewer hole rows per band and are
+    more sensitive to the staggered-column alternation, producing noisy edge
+    estimates that inflate the zigzag metric even on a good frame.  Trimming
+    the outer 10 % of y extent removes these without affecting the main body
+    of the pattern.  Does nothing when fewer than 4 bands exist.
+    """
+    if len(d) < 4:
+        return d
+    ys = [v[1] for v in d.values()]
+    y_min, y_max = min(ys), max(ys)
+    y_range = y_max - y_min
+    if y_range < 1.0:
+        return d
+    lo = y_min + trim_frac * y_range
+    hi = y_max - trim_frac * y_range
+    return {k: v for k, v in d.items() if lo <= v[1] <= hi}
+
+
 def _pattern_bounds_by_band(
     holes: Sequence,
     img_h: int,
     n_bands: int = _N_BANDS,
     min_holes: int = 1,
-    boundary_tol_px: float = 0.0,
+    boundary_tol_px: float = 0.0,  # kept for API compatibility; IQR filter supersedes this
 ) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
     """Per-band left/right physical bounds using detected hole positions.
 
-    Bands with fewer than `min_holes` holes are excluded to avoid noisy
-    single-hole edge estimates in sparse regions.
+    Y coordinate of each band point is the mean Y of actual holes in that
+    band (not the band centre), so measurements always land on real hole rows
+    and never between two rows.
 
-    boundary_tol_px > 0: restrict the left-edge measurement to holes whose
-    physical left bound (x - r) is within boundary_tol_px of the global
-    leftmost bound, and symmetrically for the right edge.  This prevents
-    interior holes from being chosen as the band edge when no outermost-column
-    hole falls in a given band — the main cause of false-positive zigzag alerts.
-    boundary_tol_px = 0 keeps legacy behaviour (all holes considered).
+    After collection two filters run in sequence:
+    1. IQR filter: removes bands where an interior hole was picked as edge
+       (x-position outlier) — common when no outermost-column hole falls in
+       a band for staggered grids.
+    2. Y-extremes trim: drops the outer 10 % of the y range (top and bottom)
+       where sparse row coverage produces noisy single-point estimates that
+       inflate the zigzag metric even on good frames.
     """
     if not holes:
         return {}, {}
 
-    if boundary_tol_px > 0.0:
-        global_left  = min(hh.x - hh.r for hh in holes)
-        global_right = max(hh.x + hh.r for hh in holes)
-        left_cand  = [hh for hh in holes if (hh.x - hh.r) <= global_left  + boundary_tol_px]
-        right_cand = [hh for hh in holes if (hh.x + hh.r) >= global_right - boundary_tol_px]
-    else:
-        left_cand = right_cand = list(holes)
-
+    all_holes = list(holes)
     band_h = img_h / n_bands
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
@@ -286,16 +330,16 @@ def _pattern_bounds_by_band(
     for i in range(n_bands):
         y0 = i * band_h
         y1 = (i + 1) * band_h
-        cy = (y0 + y1) / 2.0
 
-        left_band = [hh for hh in left_cand if y0 <= hh.y < y1]
-        if len(left_band) >= min_holes:
-            left_dict[i] = (float(min(hh.x - hh.r for hh in left_band)), cy)
+        band_holes = [hh for hh in all_holes if y0 <= hh.y < y1]
+        if len(band_holes) >= min_holes:
+            # Snap y to actual hole centres, not the arbitrary band midpoint.
+            cy = float(np.mean([hh.y for hh in band_holes]))
+            left_dict[i]  = (float(min(hh.x - hh.r for hh in band_holes)), cy)
+            right_dict[i] = (float(max(hh.x + hh.r for hh in band_holes)), cy)
 
-        right_band = [hh for hh in right_cand if y0 <= hh.y < y1]
-        if len(right_band) >= min_holes:
-            right_dict[i] = (float(max(hh.x + hh.r for hh in right_band)), cy)
-
+    left_dict  = _trim_y_extremes(_iqr_filter_band_dict(left_dict))
+    right_dict = _trim_y_extremes(_iqr_filter_band_dict(right_dict))
     return left_dict, right_dict
 
 
