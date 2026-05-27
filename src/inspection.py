@@ -484,10 +484,28 @@ def _inspect_bgr(
     if machine_stop:
         final_status = "NOK"
 
+    # Build NOK cause list for the overlay panel (shown whenever final_status == "NOK")
+    nok_reasons: list[str] = []
+    if report.missing > 0:
+        nok_reasons.append(f"AGUJEROS FALTANTES: {report.missing}")
+    if report.extra_points:
+        nok_reasons.append(f"AGUJEROS EXTRA: {len(report.extra_points)}")
+    if centering_nok:
+        nok_reasons.append(f"CENTRADO NOK ({centering.offset_px:+.1f}px)")
+    if pattern_alignment_warn:
+        nok_reasons.append("PATRON DESALINEADO")
+    if machine_stop:
+        nok_reasons.append("PARADA DE MAQUINA")
+    if frame_geometry_quality == "UNSTABLE":
+        nok_reasons.append("IMAGEN INESTABLE")
+    if not alignment_ok:
+        nok_reasons.append("ALINEACION FALLBACK")
+
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                        extra_points=report.extra_points,
-                                       near_miss_pairs=near_miss_pairs)
+                                       near_miss_pairs=near_miss_pairs,
+                                       nok_reasons=nok_reasons)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
                                  min_detection_ratio, capture_quality_degraded,
                                  frame_quality, frame_geometry_quality)

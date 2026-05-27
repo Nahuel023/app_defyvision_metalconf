@@ -47,6 +47,60 @@ def draw_holes(img_bgr: np.ndarray, holes: Sequence[Hole]) -> np.ndarray:
     return out
 
 
+def _draw_nok_reasons_panel(
+    img: np.ndarray,
+    reasons: list[str],
+) -> None:
+    """Draw a semi-transparent NOK reasons panel in the top-left corner.
+
+    Each reason is listed as a bullet line.  Panel height adapts to the number
+    of reasons.  Drawn in-place on `img`.
+    """
+    if not reasons:
+        return
+
+    font       = cv2.FONT_HERSHEY_SIMPLEX
+    hdr_scale  = 0.90
+    hdr_thick  = 2
+    row_scale  = 0.65
+    row_thick  = 2
+    pad        = 8
+    row_gap    = 4
+
+    header = "  NOK"
+    (hw, hh), hbl = cv2.getTextSize(header, font, hdr_scale, hdr_thick)
+
+    row_sizes = [cv2.getTextSize(f"  {r}", font, row_scale, row_thick) for r in reasons]
+    row_h_max = max((s[0][1] + s[1]) for s in row_sizes) if row_sizes else 0
+
+    panel_w = max(hw, max(s[0][0] for s in row_sizes)) + pad * 2
+    panel_h = (pad + hh + hbl + pad // 2
+               + len(reasons) * (row_h_max + row_gap)
+               + pad)
+
+    # Semi-transparent dark-red background
+    layer = img.copy()
+    cv2.rectangle(layer, (0, 0), (panel_w, panel_h), (0, 0, 100), -1)
+    cv2.addWeighted(layer, 0.80, img, 0.20, 0, img)
+
+    # Red border (bottom + right)
+    cv2.line(img, (0, panel_h), (panel_w, panel_h), (0, 0, 220), 2)
+    cv2.line(img, (panel_w, 0), (panel_w, panel_h), (0, 0, 220), 2)
+
+    # Header "NOK"
+    y = pad + hh
+    cv2.putText(img, header, (pad, y), font, hdr_scale, (50, 50, 255), hdr_thick + 2, cv2.LINE_AA)
+    cv2.putText(img, header, (pad, y), font, hdr_scale, (255, 255, 255), hdr_thick, cv2.LINE_AA)
+
+    # Reason rows
+    y += hbl + pad // 2
+    for r in reasons:
+        (_, rh), rbl = cv2.getTextSize(f"  {r}", font, row_scale, row_thick)
+        y += rh
+        cv2.putText(img, f"  {r}", (pad, y), font, row_scale, (0, 180, 255), row_thick, cv2.LINE_AA)
+        y += rbl + row_gap
+
+
 def draw_compare_overlay(
     img_bgr: np.ndarray,
     detected: Sequence[Hole],
@@ -54,12 +108,14 @@ def draw_compare_overlay(
     status: str,
     extra_points: Sequence[Tuple[float, float]] = (),
     near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
+    nok_reasons: List[str] = (),
 ) -> np.ndarray:
     """Draw inspection overlay.
 
     near_miss_pairs: list of ((exp_x, exp_y), (det_x, det_y)) for expected points
     that have a detected hole nearby but outside tol_xy_px. A thin cyan line
     connects them so the operator can see the gap at a glance.
+    nok_reasons: list of human-readable cause strings drawn as a panel when NOK.
     """
     out = img_bgr.copy()
 
@@ -72,33 +128,38 @@ def draw_compare_overlay(
     for h in detected:
         cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (0, 255, 0), 2)
 
-    # Missing esperados: rojo
-    # cruz roja = posición esperada sin match dentro de tol_xy_px
-    for (x, y) in missing_points:
-        cv2.drawMarker(out, (int(x), int(y)), (0, 0, 255),
-                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=25, thickness=3)
+    # Missing esperados: rojo brillante con fondo oscuro para visibilidad máxima
+    for i, (x, y) in enumerate(missing_points):
+        ix, iy = int(x), int(y)
+        # Glow: círculo relleno oscuro de fondo
+        cv2.circle(out, (ix, iy), 18, (0, 0, 80), -1)
+        # Cruz grande roja
+        cv2.drawMarker(out, (ix, iy), (0, 0, 255),
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=34, thickness=3)
+        # Borde blanco fino para contraste sobre fondo oscuro
+        cv2.drawMarker(out, (ix, iy), (200, 200, 200),
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=36, thickness=1)
+        # Número de faltante sobre la cruz
+        label = str(i + 1)
+        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
 
     # Extra detectados (espurios): naranja diamante
-    # diamante naranja = detectado sin posición esperada asignada
     for (x, y) in extra_points:
         cv2.drawMarker(out, (int(x), int(y)), (0, 165, 255),
                        markerType=cv2.MARKER_DIAMOND, markerSize=20, thickness=2)
 
-    # Color de texto según estado
-    if status == "OK":
-        status_color = (0, 220, 0)
-    elif status == "NOK":
-        status_color = (0, 0, 255)
+    # Panel de causas NOK (siempre visible cuando es NOK)
+    if status == "NOK" and nok_reasons:
+        _draw_nok_reasons_panel(out, list(nok_reasons))
     else:
-        status_color = (0, 200, 255)
-
-    cv2.putText(out, f"STATUS: {status}", (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, status_color, 2, cv2.LINE_AA)
-    cv2.putText(out, f"Missing: {len(missing_points)}", (10, 65),
-                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 255), 2, cv2.LINE_AA)
-    if extra_points:
-        cv2.putText(out, f"Extra: {len(extra_points)}", (10, 100),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 165, 255), 2, cv2.LINE_AA)
+        # Status compacto cuando es OK o sin razones
+        color = (0, 220, 0) if status == "OK" else (0, 200, 255)
+        cv2.putText(out, f"STATUS: {status}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, cv2.LINE_AA)
 
     return out
 
