@@ -536,11 +536,14 @@ def _inspect_bgr(
     if not alignment_ok:
         nok_reasons.append("ALINEACION FALLBACK")
 
+    badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
+
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs,
-                                       nok_reasons=nok_reasons)
+                                       nok_reasons=nok_reasons,
+                                       nok_panel_badge_count=badge_count)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
                                  min_detection_ratio, capture_quality_degraded,
                                  frame_quality, frame_geometry_quality)
