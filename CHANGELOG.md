@@ -1766,6 +1766,99 @@ del microperforado, aun cuando el patrÃ³n fÃ­sico estÃ¡ correcto.
 
 ---
 
+---
+
+### Sesión 2026-05-27 — Tadeo + Claude
+
+#### Cambio 43 — Tracking de agujero faltante por identidad de grilla (ci/cj)
+
+**Problema:** El `MachineStopDetector` anterior rastreaba zonas por píxel X (`same_zone_px`).
+Cuando la chapa avanza en Y entre frames, el mismo agujero faltante (mismo punzón roto) aparece
+en píxeles distintos → el tracker no reconocía el defecto como persistente y no disparaba parada.
+
+**Causa raíz confirmada con diagnóstico:**
+```
+frame_0002: ci=13, cj=46  → missing=1, no trigger (acumulando)
+frame_0006: ci=13, cj=38  → machine_stop=True  (cj cambió 8 posiciones — chapa avanzó)
+frame_0007: ci=13, cj=36  → machine_stop=True
+frame_0008: ci=13, cj=36  → machine_stop=True
+frame_0009: ci=13, cj=33  → machine_stop=True
+```
+La columna del punzón (ci=13) es invariante. La fila (cj) cambia con el avance de la cinta.
+El pixel Y cambia ~4–8 filas entre frames. Con el tracker por pixel X esto funcionaba solo si
+el drift era menor que `same_zone_px=35px`. Con tracking por ci: coincidencia exacta siempre.
+
+**Implementación:**
+
+**`src/pipeline/grid_fitting.py`** — `grid_compare_points()`:
+- Cambio de retorno: `list[tuple[float,float]]` → `tuple[list[...], list[tuple[int,int]]]`
+- Segundo elemento: lista paralela de `(ci, cj)` para cada punto esperado generado.
+- Permite que la capa de inspección propague la identidad de celda hasta el detector.
+
+**`src/pipeline/compare.py`** — `compare_missing_only()` + `CompareReport`:
+- `CompareReport` agrega campo `missing_cells: List[Tuple[int,int]]` (default `[]`).
+  Contiene las coordenadas de grilla `(ci, cj)` de cada agujero esperado sin match.
+- Nuevo parámetro `expected_cells: List[Tuple[int,int]] | None = None`:
+  cuando se provee, los missing_cells se popula en paralelo con missing_points.
+- Nuevo parámetro `use_hungarian: bool = False`:
+  matching óptimo via `scipy.optimize.linear_sum_assignment`. Resuelve el problema de
+  "robo" de detectados cuando `tol_xy_px ≈ dy` (dos expected compiten por el mismo detected).
+  Si scipy no está instalado: fallback automático a greedy con warning implícito.
+- Tracking de índices de missing en ambos paths (greedy y Hungarian) para poblar `missing_cells`.
+
+**`src/pipeline/machine_stop.py`** — `MachineStopDetector`:
+- Nuevos parámetros:
+  - `track_by_grid: bool = True` — activa tracking por columna ci
+  - `same_column_tol_cells: int = 0` — tolerancia en celdas (0=exacto)
+- Nueva estructura interna `_grid_zones: dict[int, dict]` keyed by ci.
+  Cada zona: `{streak, count, x, y}`.
+- `update()` acepta `missing_cells: Sequence[tuple[int,int]] | None = None`.
+  Cuando `track_by_grid=True` y `missing_cells` disponible → usa `_update_grid()`.
+  Si no (path no-grid o cells vacíos) → fallback a `_update_pixel()` (comportamiento anterior).
+- Nueva property `triggered_columns: list[int]` → ci valores de zonas disparadas.
+  Usada para construir el mensaje del badge: `"AGUJERO FALTANTE PERSISTENTE EN COLUMNA 13"`.
+- `reset()` limpia también `_grid_zones`.
+
+**`src/inspection.py`** — `_inspect_bgr()`:
+- Desempaca `(compare_points, compare_cells)` del retorno de `grid_compare_points`.
+- Y-clip mantiene `compare_cells` sincronizado con `compare_points` (filtrado en paralelo).
+- Pasa `expected_cells=compare_cells` y `use_hungarian=use_hungarian_matching` a `compare_missing_only`.
+- Pasa `missing_cells=report.missing_cells` a `_ms_detector.update()`.
+- Usa `_ms_detector.triggered_columns` para construir el texto de razón del badge.
+  Ejemplo de mensaje generado: `"AGUJERO FALTANTE PERSISTENTE EN COLUMNA 13"`.
+- Lee nuevo param `use_hungarian_matching` desde tolerancias.
+- `inspect_folder()`: pasa `track_by_grid` y `same_column_tol_cells` al constructor del detector.
+
+**`src/vision/inspector.py`** — `_get_detector()`:
+- Pasa `track_by_grid` y `same_column_tol_cells` al constructor de `MachineStopDetector`.
+
+**`src/utils/config.py`** — nuevos defaults:
+```python
+"machine_stop_track_by_grid": True,
+"machine_stop_same_column_tol_cells": 0,
+"use_hungarian_matching": False,
+```
+
+**`config/tolerancias.yaml`** — modelo_B:
+```yaml
+machine_stop_track_by_grid: true
+machine_stop_same_column_tol_cells: 0  # coincidencia exacta de ci
+use_hungarian_matching: false           # activar si scipy disponible y hay stealing
+```
+
+**Resultados de prueba — carpeta `20260519_121741` (Imagenes_METALCONF_editadas):**
+- Detector activa `MACHINE_STOP` en frames con agujeros tapados en el medio del patrón.
+- El badge muestra la columna específica: `"AGUJERO FALTANTE PERSISTENTE EN COLUMNA 13"`.
+- El mismo ci=13 se reconoce a través de 4+ frames aunque cj varía (cinta avanzando).
+- `machine_stop_frames=28` en 185 frames analizados (imágenes con defectos intencionales).
+- Los frames sin defecto (material limpio) mantienen `MACHINE_STOP=False` correctamente.
+
+**Invariante preservado:** 185/185 raw OK en material original limpio (no editado) mantenido.
+
+**Sin tocar:** PLC, solenoides, lógica de comparación base, patrón de referencia, `grid_max_missing`, `consecutive_nok_frames`.
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
@@ -1787,6 +1880,7 @@ del microperforado, aun cuando el patrÃ³n fÃ­sico estÃ¡ correcto.
 | modelo_B — Grabación 185f | **185/185 raw OK**, avg_ratio=104%, 0 NOK, 0 temporal NOK. missing medio=0.81, 160/185 frames sin missing. Extras filtrados: ~180/185 frames con extra=0. |
 | Extras falsos | Filtro `extra_min_dist_factor=2.0` en modelo_B: solo detecciones a >44px de todo expected cuentan como extras. |
 | Verticalidad bordes | `CenteringResult` expone `pattern_left_slope_deg`, `pattern_right_slope_deg`. Mostrado en overlay: "Vert pat: Izq=±X.X° Der=±Y.Y°". |
+| Machine stop — tracking | Tracking por columna de grilla (ci). El mismo punzón roto se reconoce aunque la chapa avance en Y entre frames. Badge muestra columna: `"EN COLUMNA 13"`. |
 | FAULT automático | `consecutive_nok_frames: 40` en modelo_B. Global: 9999 (calibración). |
 | Control automático pistones | Planificado, NO implementado. |
 | Tests | Solo `tests/test_io_map.py`. Sin cobertura del pipeline de visión aún. |
