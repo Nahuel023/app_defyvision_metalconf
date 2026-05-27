@@ -253,8 +253,13 @@ def _pattern_bounds_by_band(
     holes: Sequence,
     img_h: int,
     n_bands: int = _N_BANDS,
+    min_holes: int = 1,
 ) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
-    """Per-band left/right physical bounds using detected hole positions."""
+    """Per-band left/right physical bounds using detected hole positions.
+
+    Bands with fewer than `min_holes` holes are excluded to avoid noisy
+    single-hole edge estimates in sparse regions.
+    """
     band_h = img_h / n_bands
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
@@ -263,7 +268,7 @@ def _pattern_bounds_by_band(
         y0 = i * band_h
         y1 = (i + 1) * band_h
         band_holes = [hh for hh in holes if y0 <= hh.y < y1]
-        if not band_holes:
+        if len(band_holes) < min_holes:
             continue
         cy = (y0 + y1) / 2.0
         left_dict[i]  = (float(min(hh.x - hh.r for hh in band_holes)), cy)
@@ -289,6 +294,32 @@ def _pattern_center_by_band(
         rx, ry = right_by_band[i]
         points.append(((lx + rx) / 2.0, (ly + ry) / 2.0))
     return points
+
+
+def _smooth_points_x(
+    pts: list[tuple[float, float]],
+    window: int,
+) -> list[tuple[float, float]]:
+    """Sliding median of `window` over the x-values of (x, y) points sorted by y.
+
+    Applied to pattern edge/center series before computing zigzag residuals so
+    that isolated outlier bands (e.g. a band with very few holes near the top
+    or bottom of the ROI) don't inflate the metric.  The y positions are kept
+    unchanged so the line-fit geometry is not disturbed.
+
+    Returns the original list unchanged when window <= 1 or len(pts) < window.
+    """
+    if window <= 1 or len(pts) < window:
+        return pts
+    xs = np.array([p[0] for p in pts], dtype=np.float64)
+    ys = [p[1] for p in pts]
+    half = window // 2
+    xs_out = np.empty_like(xs)
+    for k in range(len(xs)):
+        lo = max(0, k - half)
+        hi = min(len(xs), k + half + 1)
+        xs_out[k] = float(np.median(xs[lo:hi]))
+    return [(float(x), float(y)) for x, y in zip(xs_out, ys)]
 
 
 def _fit_line_robust(
@@ -331,6 +362,9 @@ def compute_centering(
     holes: Sequence,
     roi=None,
     tol_px: float = 0.0,
+    n_bands: int = _N_BANDS,
+    min_holes_per_band: int = 1,
+    smooth_window: int = 1,
 ) -> Optional[CenteringResult]:
     """Measure how centered the hole pattern is between the metal sheet edges.
 
@@ -349,6 +383,22 @@ def compute_centering(
         ROI boundaries so that the backlights (outside the ROI) are visible.
     tol_px:
         Tolerance in pixels. 0 = measure only, never triggers NOK.
+    n_bands:
+        Number of horizontal bands for edge/pattern sampling. More bands give
+        finer spatial resolution but each band covers fewer hole rows. If a
+        band ends up below min_holes_per_band it is silently excluded.
+        Default 16 (backward-compatible). Configurable via edge_centering_bands.
+    min_holes_per_band:
+        Minimum detected holes required in a band to include it in the pattern
+        edge/center series. Bands with fewer holes produce noisy single-point
+        estimates; excluding them reduces zigzag false positives.
+        Configurable via pattern_edge_min_holes_per_band.
+    smooth_window:
+        Sliding-median window size (in bands) applied to pattern edge and center
+        point series BEFORE computing zigzag residuals. Suppresses isolated
+        outlier bands without affecting the fitted-line geometry used for
+        centering. Window=1 disables smoothing (backward-compatible).
+        Configurable via pattern_edge_smooth_window.
 
     Returns None if no holes are provided or no edges can be detected at all.
 
@@ -371,7 +421,7 @@ def compute_centering(
         mid_y = roi_h / 2.0
 
         edge_left, edge_right = _detect_sheet_edges_in_windows(
-            img_bgr, roi_x, roi_w, roi_y, roi_h
+            img_bgr, roi_x, roi_w, roi_y, roi_h, n_bands=n_bands
         )
         # Values are already in ROI-relative coords
         left_pts_list  = list(edge_left.values())
@@ -380,7 +430,7 @@ def compute_centering(
 
     else:
         mid_y = h / 2.0
-        edge_left, edge_right = _detect_edges_by_band(img_bgr)
+        edge_left, edge_right = _detect_edges_by_band(img_bgr, n_bands=n_bands)
         left_pts_list  = list(edge_left.values())
         right_pts_list = list(edge_right.values())
         img_h_for_bands = h
@@ -412,7 +462,9 @@ def compute_centering(
     holes_center_x = float(np.mean([hh.x for hh in holes]))
 
     # Pattern bounds from actual detected holes (ROI-relative coords)
-    pat_left, pat_right = _pattern_bounds_by_band(holes, img_h_for_bands)
+    pat_left, pat_right = _pattern_bounds_by_band(
+        holes, img_h_for_bands, n_bands=n_bands, min_holes=min_holes_per_band
+    )
 
     pattern_left_x  = float(min(hh.x - hh.r for hh in holes))
     pattern_right_x = float(max(hh.x + hh.r for hh in holes))
@@ -426,7 +478,7 @@ def compute_centering(
     # Per-band margin statistics
     band_lm: list[float] = []
     band_rm: list[float] = []
-    for i in range(_N_BANDS):
+    for i in range(n_bands):
         if i in edge_left and i in edge_right and i in pat_left and i in pat_right:
             band_lm.append(pat_left[i][0]  - edge_left[i][0])
             band_rm.append(edge_right[i][0] - pat_right[i][0])
@@ -434,7 +486,7 @@ def compute_centering(
     left_margin_std  = float(np.std(band_lm)) if len(band_lm) >= 2 else 0.0
     right_margin_std = float(np.std(band_rm)) if len(band_rm) >= 2 else 0.0
 
-    # Per-band point tuples for overlay (all ROI-relative)
+    # Per-band point tuples for overlay (all ROI-relative, raw — not smoothed)
     left_edge_points  = tuple(sorted(edge_left.values(),  key=lambda p: p[1]))
     right_edge_points = tuple(sorted(edge_right.values(), key=lambda p: p[1]))
     pattern_left_points  = tuple(sorted(pat_left.values(),  key=lambda p: p[1]))
@@ -467,18 +519,23 @@ def compute_centering(
             return float(arr.std()), float(arr.max())
         return 0.0, 0.0
 
-    # CHAPA (sheet edge) zigzag — camera/sheet vibration indicator
+    # CHAPA (sheet edge) zigzag — uses raw points; outliers here ARE the signal (vibration)
     chapa_zigzag_std_px, chapa_zigzag_max_px = _zigzag_residuals(
         [left_pts_list, right_pts_list]
     )
-    # PATRON (hole pattern edge) zigzag — mechanical misalignment indicator
+
+    # PATRON (hole pattern edge) zigzag — smooth before computing to suppress sparse-band outliers
+    pat_left_pts_s  = _smooth_points_x(list(pattern_left_points),  smooth_window)
+    pat_right_pts_s = _smooth_points_x(list(pattern_right_points), smooth_window)
     pattern_zigzag_std_px, pattern_zigzag_max_px = _zigzag_residuals(
-        [list(pattern_left_points), list(pattern_right_points)]
+        [pat_left_pts_s, pat_right_pts_s]
     )
-    # PATRON CENTER zigzag — median X of all holes per band; catches internal zigzag
+
+    # PATRON CENTER zigzag — smooth before computing; catches internal lateral waviness
     center_pts = _pattern_center_by_band(pat_left, pat_right)
+    center_pts_s = _smooth_points_x(center_pts, smooth_window)
     pattern_center_zigzag_std_px, pattern_center_zigzag_max_px = _zigzag_residuals(
-        [center_pts]
+        [center_pts_s]
     )
 
     return CenteringResult(

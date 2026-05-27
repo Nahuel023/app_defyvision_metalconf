@@ -2030,6 +2030,63 @@ alimenta el contador de racha para `machine_stop_missing_frames: 5`.
 
 ---
 
+#### Cambio 47 — Bandas de muestreo de bordes configurables + suavizado antes de zigzag
+
+**Motivacion:** Con `_N_BANDS=16` fijo, variaciones leves en la frontera del patron
+(patron corrido 1-2px) podian pasar desapercibidas porque cada banda abarca muchas filas
+y el ruido de una sola banda vacía/escasa disparaba el metric. Se necesitaba:
+1. Mayor resolución espacial (más bandas).
+2. Descarte de bandas con muy pocos agujeros (outliers por zona vacía).
+3. Suavizado previo al calculo de zigzag para no reaccionar a un outlier aislado.
+
+**Cambios:**
+
+**`src/pipeline/edge_centering.py`:**
+- Nueva función `_smooth_points_x(pts, window)`: mediana deslizante sobre los valores X
+  de una serie de puntos (x,y) ordenados por Y. Usada SOLO para las series de patron
+  (no para la chapa, donde los outliers SI son la señal de vibración).
+- `_pattern_bounds_by_band()`: nuevo parámetro `min_holes=1`. Bandas con menos agujeros
+  que `min_holes` se descartan → evita estimaciones de borde basadas en 1 agujero.
+- `compute_centering()`: 3 nuevos parámetros opcionales con defaults backward-compatible:
+  - `n_bands=16` — sustituye la constante `_N_BANDS` en todo el flujo.
+  - `min_holes_per_band=1` — pasado a `_pattern_bounds_by_band`.
+  - `smooth_window=1` — aplicado a `pattern_left_points`, `pattern_right_points` y
+    `center_pts` antes de `_zigzag_residuals`. El overlay sigue mostrando puntos crudos.
+- Corregido bug: `for i in range(_N_BANDS)` en el calculo de band_lm/band_rm usaba la
+  constante global en vez del parametro local. Ahora usa `n_bands`.
+
+**`src/inspection.py`:**
+- Lee `edge_centering_bands`, `pattern_edge_min_holes_per_band`, `pattern_edge_smooth_window`
+  de tolerancias y los pasa a `compute_centering()`.
+
+**`src/utils/config.py`:**
+- 3 nuevos defaults: `edge_centering_bands=16`, `pattern_edge_min_holes_per_band=1`,
+  `pattern_edge_smooth_window=1`. Los defaults mantienen comportamiento anterior para modelos
+  sin configuración explícita.
+
+**`config/tolerancias.yaml` — modelo_B:**
+```yaml
+edge_centering_bands: 24          # 24 > 16 → más resolución espacial
+pattern_edge_min_holes_per_band: 2 # descarta bandas con 1 solo agujero (outliers de borde)
+pattern_edge_smooth_window: 3      # mediana de 3 bandas antes del calculo de zigzag
+```
+
+**Resultado en 20260519_121741 (primeros 10 frames):**
+- Con 16 bandas: raw_ok=6, raw_nok=4
+- Con 24 bandas: raw_ok=4, raw_nok=6 — frames 0001 y 0004 ahora NOK (antes pasaban)
+  Frame 0001 (missing=0): detectado por zigzag de patron con mayor resolución.
+  Frame 0004 (missing=3): alineacion levemente degradada que 16 bandas no capturaba.
+- MACHINE_STOP frames 6-9: sin cambio (correcto).
+- Tiempo: ~50ms/frame (sin cambio respecto a 16 bandas).
+
+**Calibrar si se necesita más sensibilidad:** subir a `edge_centering_bands: 32`.
+Precaución: con muchas bandas y pocos agujeros por fila, más bandas quedan vacías.
+El parámetro `pattern_edge_min_holes_per_band: 2` compensa este efecto.
+
+**Sin tocar:** modelo_A (hereda defaults de config.py = comportamiento anterior).
+
+---
+
 ## Estado actual del sistema
 
 | Componente | Estado |
