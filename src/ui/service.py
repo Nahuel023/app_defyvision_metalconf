@@ -1411,8 +1411,9 @@ class RecordingTab(QWidget):
         url_row.addWidget(url_lbl)
 
         self._ip_url_edit = QLineEdit()
+        self._ip_url_edit.setText("http://192.168.1.17/mjpg/video.cgi")
         self._ip_url_edit.setPlaceholderText(
-            "rtsp://192.168.1.100:554/stream  ó  http://192.168.1.100:8080/video  ó  0 (índice USB)"
+            "http://ip/mjpg/video.cgi  ó  rtsp://ip:554/axis-media/media.amp  ó  0 (USB)"
         )
         self._ip_url_edit.setStyleSheet(
             f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
