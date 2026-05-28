@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
+import numpy as np
 
 from PyQt6.QtCore import Qt, QTimer, QThread, QObject, pyqtSignal, QPointF, QRectF
 from PyQt6.QtGui import QBrush, QColor, QFont, QIcon, QPixmap, QImage, QPainter
@@ -123,6 +124,104 @@ class PLCIOTab(QWidget):
         self._build_ui()
         self._populate_table()
 
+    def _on_ip_connect(self) -> None:
+        url = self._ip_url_edit.text().strip()
+        if not url:
+            self._ip_status_lbl.setText("Ingrese una URL")
+            return
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText("Conectando...")
+        source = int(url) if url.isdigit() else url
+        if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
+            auth = self._ip_auth_settings()
+            self._ip_worker = _MJPEGReader(
+                source,
+                self,
+                username=auth.get("username"),
+                password=auth.get("password"),
+            )
+            self._ip_worker.frame_ready.connect(self._on_ip_frame_ready)
+            self._ip_worker.error_occurred.connect(self._on_ip_error)
+            self._ip_worker.start()
+            self._btn_ip_connect.setEnabled(False)
+            self._btn_ip_disconnect.setEnabled(True)
+            self._ip_url_edit.setEnabled(False)
+            self._ip_preview.setText("")
+            return
+
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            self._ip_status_lbl.setText("No se pudo conectar")
+            cap.release()
+            return
+        self._ip_cap = cap
+        self._ip_timer.start(200)
+        self._btn_ip_connect.setEnabled(False)
+        self._btn_ip_disconnect.setEnabled(True)
+        self._ip_url_edit.setEnabled(False)
+        self._ip_preview.setText("")
+        self._ip_status_lbl.setText("Conectado")
+
+    def _on_ip_disconnect(self) -> None:
+        self._ip_timer.stop()
+        if self._ip_worker is not None:
+            self._ip_worker.stop()
+            self._ip_worker = None
+        if self._ip_cap is not None:
+            self._ip_cap.release()
+            self._ip_cap = None
+        if hasattr(self, "_ip_preview"):
+            self._ip_preview.setPixmap(QPixmap())
+            self._ip_preview.setText("Sin senal")
+        self._btn_ip_connect.setEnabled(True)
+        self._btn_ip_disconnect.setEnabled(False)
+        self._ip_url_edit.setEnabled(True)
+        self._ip_status_lbl.setText("-")
+
+    def _on_ip_error(self, msg: str) -> None:
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText(f"Error: {msg}")
+
+    def _on_ip_frame_ready(self, frame) -> None:
+        self._ip_status_lbl.setText("Conectado")
+        self._show_ip_frame(frame)
+
+    def _ip_auth_settings(self) -> dict:
+        scanner_id = self._scanner_combo.currentText() if hasattr(self, "_scanner_combo") else ""
+        if scanner_id:
+            settings = camera_config.load_camera_settings(scanner_id)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        for sid in self._system.scanner_ids():
+            settings = camera_config.load_camera_settings(sid)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        return {}
+
+    def _refresh_ip_camera(self) -> None:
+        if self._ip_cap is None or not self._ip_cap.isOpened():
+            self._on_ip_disconnect()
+            return
+        ret, frame = self._ip_cap.read()
+        if not ret:
+            return
+        self._show_ip_frame(frame)
+
+    def _show_ip_frame(self, frame) -> None:
+        rect = self._ip_preview.contentsRect()
+        w = max(640, rect.width() - 4)
+        h = max(420, rect.height() - 4)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        fh, fw = rgb.shape[:2]
+        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        pxm = QPixmap.fromImage(qi).scaled(
+            w,
+            h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._ip_preview.setPixmap(pxm)
+
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -139,6 +238,7 @@ class PLCIOTab(QWidget):
         self._plc_status.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;")
         top.addWidget(self._plc_status)
         root.addLayout(top)
+        root.addWidget(self._build_ip_camera_section(), stretch=3)
 
         self._table = QTableWidget(0, len(self._COLS))
         self._table.setHorizontalHeaderLabels(self._COLS)
@@ -1145,20 +1245,36 @@ class _MJPEGReader(QThread):
     frame_ready     = pyqtSignal(object)  # np.ndarray BGR
     error_occurred  = pyqtSignal(str)
 
-    def __init__(self, url: str, parent=None) -> None:
+    def __init__(
+        self,
+        url: str,
+        parent=None,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> None:
         super().__init__(parent)
         self._url        = url
         self._stop_flag  = False
+        self._username   = username or ""
+        self._password   = password or ""
 
     def stop(self) -> None:
         self._stop_flag = True
         self.wait(3000)
 
     def run(self) -> None:
+        import base64
         import urllib.request
         self._stop_flag = False
         try:
-            req = urllib.request.urlopen(self._url, timeout=10)
+            headers = {}
+            if self._username and self._password:
+                token = base64.b64encode(
+                    f"{self._username}:{self._password}".encode("utf-8")
+                ).decode("ascii")
+                headers["Authorization"] = f"Basic {token}"
+            request = urllib.request.Request(self._url, headers=headers)
+            req = urllib.request.urlopen(request, timeout=10)
             buf = b""
             while not self._stop_flag:
                 chunk = req.read(4096)
@@ -1246,7 +1362,6 @@ class RecordingTab(QWidget):
         root.setSpacing(10)
 
         root.addWidget(self._build_recording_section())
-        root.addWidget(self._build_ip_camera_section())
         root.addWidget(self._build_analysis_section())
         root.addWidget(self._build_browser_section(), stretch=1)
 
@@ -1464,7 +1579,7 @@ class RecordingTab(QWidget):
         url_row.addWidget(url_lbl)
 
         self._ip_url_edit = QLineEdit()
-        self._ip_url_edit.setText("http://192.168.1.17/mjpg/video.cgi")
+        self._ip_url_edit.setText("http://192.168.1.17/axis-cgi/mjpg/video.cgi")
         self._ip_url_edit.setPlaceholderText(
             "http://ip/mjpg/video.cgi  ó  rtsp://ip:554/axis-media/media.amp  ó  0 (USB)"
         )
@@ -1517,7 +1632,13 @@ class RecordingTab(QWidget):
         # Accept integer index (e.g. "0") or full URL string
         source = int(url) if url.isdigit() else url
         if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
-            self._ip_worker = _MJPEGReader(source, self)
+            auth = self._ip_auth_settings()
+            self._ip_worker = _MJPEGReader(
+                source,
+                self,
+                username=auth.get("username"),
+                password=auth.get("password"),
+            )
             self._ip_worker.frame_ready.connect(self._on_ip_frame_ready)
             self._ip_worker.error_occurred.connect(self._on_ip_error)
             self._ip_worker.start()
@@ -1561,6 +1682,18 @@ class RecordingTab(QWidget):
     def _on_ip_frame_ready(self, frame) -> None:
         self._ip_status_lbl.setText("Conectado")
         self._show_ip_frame(frame)
+
+    def _ip_auth_settings(self) -> dict:
+        scanner_id = self._scanner_combo.currentText() if hasattr(self, "_scanner_combo") else ""
+        if scanner_id:
+            settings = camera_config.load_camera_settings(scanner_id)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        for sid in self._system.scanner_ids():
+            settings = camera_config.load_camera_settings(sid)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        return {}
 
     def _refresh_ip_camera(self) -> None:
         if self._ip_cap is None or not self._ip_cap.isOpened():
@@ -2618,6 +2751,11 @@ class CameraCalibTab(QWidget):
         self._auto_checks: dict[str, QCheckBox] = {}
         self._block_apply = False  # avoid feedback loops while populating UI
 
+        self._ip_worker: Optional[_MJPEGReader] = None
+        self._ip_cap: Optional[cv2.VideoCapture] = None
+        self._ip_timer = QTimer(self)
+        self._ip_timer.timeout.connect(self._refresh_ip_camera)
+
         self._preview_timer = QTimer(self)
         self._preview_timer.timeout.connect(self._update_preview)
         self._preview_timer.setInterval(200)
@@ -2739,7 +2877,72 @@ class CameraCalibTab(QWidget):
         params_outer.addLayout(btn_lay)
 
         main.addWidget(params_grp, stretch=2)
-        root.addLayout(main, stretch=1)
+        root.addLayout(main, stretch=2)
+
+    def _build_ip_camera_section(self) -> QGroupBox:
+        grp = QGroupBox("Camara IP")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(12, 18, 12, 12)
+        lay.setSpacing(8)
+
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+
+        url_lbl = QLabel("URL")
+        url_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;"
+        )
+        url_row.addWidget(url_lbl)
+
+        self._ip_url_edit = QLineEdit()
+        self._ip_url_edit.setText("http://192.168.1.17/axis-cgi/mjpg/video.cgi")
+        self._ip_url_edit.setPlaceholderText(
+            "http://ip/axis-cgi/mjpg/video.cgi  o  rtsp://ip:554/axis-media/media.amp"
+        )
+        self._ip_url_edit.setStyleSheet(
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:7px 10px;font-size:12px;font-family:Consolas,monospace;"
+            f"selection-background-color:{_ACCENT};"
+        )
+        self._ip_url_edit.returnPressed.connect(self._on_ip_connect)
+        url_row.addWidget(self._ip_url_edit, stretch=1)
+
+        self._btn_ip_connect = QPushButton("Conectar")
+        self._btn_ip_disconnect = QPushButton("Desconectar")
+        self._btn_ip_disconnect.setEnabled(False)
+        for btn, color in (
+            (self._btn_ip_connect, "#15803d"),
+            (self._btn_ip_disconnect, "#991b1b"),
+        ):
+            btn.setFixedHeight(34)
+            btn.setStyleSheet(
+                f"QPushButton {{ background:{color};color:white;border:none;"
+                "border-radius:6px;padding:0 14px;font-size:12px;font-weight:700; }}"
+                "QPushButton:disabled { background:#334155;color:#94a3b8; }"
+            )
+        self._btn_ip_connect.clicked.connect(self._on_ip_connect)
+        self._btn_ip_disconnect.clicked.connect(self._on_ip_disconnect)
+        url_row.addWidget(self._btn_ip_connect)
+        url_row.addWidget(self._btn_ip_disconnect)
+
+        self._ip_status_lbl = QLabel("-")
+        self._ip_status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;font-family:Consolas;")
+        url_row.addWidget(self._ip_status_lbl)
+        lay.addLayout(url_row)
+
+        self._ip_preview = QLabel("Sin senal - ingrese la URL de la camara y presione Conectar")
+        self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._ip_preview.setMinimumHeight(520)
+        self._ip_preview.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._ip_preview.setStyleSheet(
+            f"background:{_DARK};color:{_MUTED};border:1px solid {_BORDER};"
+            "border-radius:8px;font-size:14px;"
+        )
+        lay.addWidget(self._ip_preview, stretch=1)
+        return grp
 
     def _add_param_row(self, form: QFormLayout, pd: _ParamDef) -> None:
         row = QWidget()
