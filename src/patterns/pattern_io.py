@@ -16,6 +16,10 @@ class Pattern:
     phase_x: Optional[float] = None        # fractional x-origin (px, 0…dx)
     phase_y: Optional[float] = None        # fractional y-origin (px, 0…dy)
     cells: Optional[List[Tuple[int, int]]] = None  # (col, row) per hole
+    # Staggered-grid support: if odd-cj rows have a different X-origin than even-cj
+    # rows (e.g. Esterilla large/small hole alternation), store the signed X-phase
+    # offset so grid_compare_points can generate correct expected positions for both.
+    stagger_x_odd: Optional[float] = None        # odd-cj X-phase offset (px); 0 = no stagger
 
     @property
     def has_grid(self) -> bool:
@@ -51,13 +55,16 @@ def save_pattern(p: Pattern, path: Path) -> None:
     if p.radii is not None:
         payload["radii"] = [float(r) for r in p.radii]
     if p.has_grid:
-        payload["grid"] = {
+        grid: dict = {
             "dx": round(float(p.dx), 3),
             "dy": round(float(p.dy), 3),
             "phase_x": round(float(p.phase_x), 3),
             "phase_y": round(float(p.phase_y), 3),
             "cells": [[ci, cj] for ci, cj in p.cells],
         }
+        if p.stagger_x_odd is not None and p.stagger_x_odd != 0.0:
+            grid["stagger_x_odd"] = round(float(p.stagger_x_odd), 3)
+        payload["grid"] = grid
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
@@ -70,14 +77,16 @@ def load_pattern(path: Path) -> Pattern:
 
     grid_data = payload.get("grid")
     if grid_data:
-        dx      = float(grid_data["dx"])
-        dy      = float(grid_data["dy"])
-        phase_x = float(grid_data["phase_x"])
-        phase_y = float(grid_data["phase_y"])
-        cells   = [(int(c[0]), int(c[1])) for c in grid_data["cells"]]
+        dx           = float(grid_data["dx"])
+        dy           = float(grid_data["dy"])
+        phase_x      = float(grid_data["phase_x"])
+        phase_y      = float(grid_data["phase_y"])
+        cells        = [(int(c[0]), int(c[1])) for c in grid_data["cells"]]
+        stagger_x_odd = float(grid_data["stagger_x_odd"]) if "stagger_x_odd" in grid_data else None
     else:
         dx = dy = phase_x = phase_y = None
         cells = None
+        stagger_x_odd = None
 
     return Pattern(
         model=str(payload.get("model", "")),
@@ -85,4 +94,5 @@ def load_pattern(path: Path) -> Pattern:
         points=pts,
         radii=None if radii is None else [float(r) for r in radii],
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
+        stagger_x_odd=stagger_x_odd,
     )

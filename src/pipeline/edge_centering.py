@@ -109,6 +109,13 @@ class CenteringResult:
     pattern_sheet_slope_delta_right_deg: float = 0.0
     pattern_sheet_slope_delta_max_deg: float = 0.0
 
+    # Per-band real center lines in ROI coords (tuple of (x, y) sorted by y).
+    # sheet_center_points: midpoint between left and right CHAPA edges per band.
+    # pattern_center_points: midpoint between left and right PATRON bounds per band.
+    # Both are polylines — if the sheet/pattern is tilted they will slant visibly.
+    sheet_center_points: tuple = field(default_factory=tuple)
+    pattern_center_points: tuple = field(default_factory=tuple)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -656,6 +663,16 @@ def compute_centering(
         [center_pts_s]
     )
 
+    # Real per-band center polylines for overlay drawing.
+    # Sheet center: midpoint between left/right CHAPA edges per band.
+    # Pattern center: midpoint between left/right PATRON bounds per band (full, not metric).
+    sheet_center_pts = sorted([
+        ((edge_left[i][0] + edge_right[i][0]) / 2.0,
+         (edge_left[i][1] + edge_right[i][1]) / 2.0)
+        for i in sorted(set(edge_left) & set(edge_right))
+    ], key=lambda p: p[1])
+    pattern_center_pts_full = _pattern_center_by_band(pat_left, pat_right)
+
     return CenteringResult(
         left_x=left_x,
         right_x=right_x,
@@ -689,4 +706,6 @@ def compute_centering(
         pattern_sheet_slope_delta_left_deg=pattern_sheet_slope_delta_left_deg,
         pattern_sheet_slope_delta_right_deg=pattern_sheet_slope_delta_right_deg,
         pattern_sheet_slope_delta_max_deg=pattern_sheet_slope_delta_max_deg,
+        sheet_center_points=tuple(sheet_center_pts),
+        pattern_center_points=tuple(pattern_center_pts_full),
     )
