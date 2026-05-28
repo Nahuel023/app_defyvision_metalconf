@@ -60,6 +60,7 @@ def _fit_affine_to_grid(
     margin: float,
     img_w: int,
     img_h: int,
+    stagger_x_odd: float = 0.0,
 ) -> np.ndarray | None:
     """
     Refine grid expected positions with a lightweight affine correction.
@@ -69,8 +70,12 @@ def _fit_affine_to_grid(
     drift can leave holes in the border zones consistently outside tol_xy_px.
 
     This function matches detected holes to the initial expected positions
-    (within tol_affine), fits a 2-D affine map:
-        detected_xy ≈ W[:2].T @ [ci*dx, cj*dy] + W[2]
+    (within tol_affine), fits a 2-D affine map using stagger-adjusted source
+    coordinates so that staggered grids (where odd-cj rows have a shifted X
+    origin) are handled correctly:
+        source_x = ci*dx + (cj%2)*stagger_x_odd
+        source_y = cj*dy
+        detected_xy ≈ W[:2].T @ [source_x, source_y] + W[2]
     via least squares, sanity-checks the result, and returns corrected expected
     positions for all cells as a (n_cells, 2) float32 array.
 
@@ -84,7 +89,12 @@ def _fit_affine_to_grid(
 
     ci_arr = np.array([ci for ci, _ in cells], dtype=np.float32)
     cj_arr = np.array([cj for _, cj in cells], dtype=np.float32)
-    init_x = origin_x + ci_arr * dx
+    parity = (cj_arr % 2).astype(np.float32)
+
+    # init positions account for stagger on odd-cj rows
+    origins_x = (origin_x + parity * stagger_x_odd) % dx if stagger_x_odd != 0.0 \
+        else np.full(n_cells, origin_x, dtype=np.float32)
+    init_x = origins_x + ci_arr * dx
     init_y = origin_y + cj_arr * dy
 
     # Only consider in-frame cells for the matching
@@ -115,19 +125,22 @@ def _fit_affine_to_grid(
             used_exp[best_j] = True
             src_det.append(detected_xy[det_i])
             ci, cj = cells[in_frame_idx[best_j]]
-            src_cell.append([ci * dx, cj * dy])
+            # Stagger-adjusted source: absorbs the cj-parity X offset so
+            # even and odd rows fit the same affine without spurious shear.
+            src_cell.append([ci * dx + (cj % 2) * stagger_x_odd, cj * dy])
 
     if len(src_det) < min_matches:
         return None
 
-    # Least-squares affine: detected_xy ≈ X_aug @ W  where X_aug = [ci*dx, cj*dy, 1]
+    # Least-squares affine: detected_xy ≈ X_aug @ W
+    # where X_aug = [ci*dx + (cj%2)*stagger, cj*dy, 1]
     X = np.array(src_cell, dtype=np.float64)
     Y = np.array(src_det,  dtype=np.float64)
     X_aug = np.hstack([X, np.ones((len(X), 1), dtype=np.float64)])
     W, _, _, _ = np.linalg.lstsq(X_aug, Y, rcond=None)  # (3, 2)
 
-    # W[0,:] = how ci*dx maps to [out_x, out_y] → W[0,0] ≈ 1, W[0,1] ≈ 0
-    # W[1,:] = how cj*dy maps to [out_x, out_y] → W[1,0] ≈ 0, W[1,1] ≈ 1
+    # W[0,:] = how (ci*dx + stagger*parity) maps to [out_x, out_y] → W[0,0] ≈ 1
+    # W[1,:] = how cj*dy maps to [out_x, out_y] → W[1,1] ≈ actual_dy/stored_dy
     scale_x  = float(W[0, 0])
     scale_y  = float(W[1, 1])
     shear_xy = float(W[0, 1])
@@ -136,8 +149,8 @@ def _fit_affine_to_grid(
             and abs(shear_xy) < 0.15 and abs(shear_yx) < 0.15):
         return None
 
-    # Apply affine to ALL cells; margin filter is applied by the caller
-    all_ci = np.array([ci * dx for ci, _ in cells], dtype=np.float64)
+    # Apply affine to ALL cells using stagger-adjusted source
+    all_ci = np.array([ci * dx + (cj % 2) * stagger_x_odd for ci, cj in cells], dtype=np.float64)
     all_cj = np.array([cj * dy for _, cj in cells], dtype=np.float64)
     all_aug = np.column_stack([all_ci, all_cj, np.ones(n_cells, dtype=np.float64)])
     corrected = (all_aug @ W).astype(np.float32)  # (n_cells, 2)
@@ -157,6 +170,7 @@ def grid_compare_points(
     margin: float,
     tol_affine: float = 0.0,
     min_affine_matches: int = 12,
+    stagger_x_odd: float = 0.0,
 ) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Return expected hole positions in the CURRENT frame.
@@ -187,36 +201,54 @@ def grid_compare_points(
         return []
 
     # ── Step 1: global X-phase ──────────────────────────────────────────────
-    ci_arr = np.array([ci for ci, _ in cells], dtype=np.float32)
+    ci_arr  = np.array([ci for ci, _ in cells], dtype=np.float32)
+    cj_arr  = np.array([cj for _, cj in cells], dtype=np.float32)
+    parity  = (cj_arr % 2).astype(np.float32)         # 0=even, 1=odd
     det_xs  = detected_xy[:, 0]
-    tol_x   = max(dx * 0.45, 4.0)
+    # For staggered grids, use tight scan tolerance so even/odd row phases don't
+    # cross-contaminate each other during the phase search.  The stagger places
+    # the two row types ~|stagger_x_odd| px apart; using |stagger|/4 keeps
+    # the tolerance well below the half-separation threshold (~|stagger|/2).
+    if stagger_x_odd != 0.0:
+        tol_x = max(abs(stagger_x_odd) / 4.0, 5.0)
+    else:
+        tol_x = max(dx * 0.45, 4.0)
 
     best_phase_x = estimate_phase(detected_xy[:, 0], dx)
     best_count_x = -1
+    best_dist_x = float("inf")
     for px_cand in np.arange(0.0, dx, 1.0):
-        exp_xs = px_cand + ci_arr * dx
+        # Even-cj rows use px_cand; odd-cj rows have origin (px_cand+stagger)%dx
+        origins = (px_cand + parity * stagger_x_odd) % dx
+        exp_xs = origins + ci_arr * dx
         valid_x = (exp_xs >= margin) & (exp_xs <= img_w - margin)
         if not valid_x.any():
             continue
         exp_xs_v = exp_xs[valid_x]
         diffs_x = np.abs(det_xs[:, None] - exp_xs_v[None, :])
-        count_x = int((diffs_x.min(axis=1) <= tol_x).sum())
-        if count_x > best_count_x:
+        min_diffs = diffs_x.min(axis=1)
+        count_x = int((min_diffs <= tol_x).sum())
+        total_dist = float(min_diffs[min_diffs <= tol_x].sum())
+        # Primary: maximize match count; secondary: minimize total distance
+        if count_x > best_count_x or (count_x == best_count_x and total_dist < best_dist_x):
             best_count_x = count_x
+            best_dist_x = total_dist
             best_phase_x = px_cand
 
     origin_x = best_phase_x
 
     # ── Step 1: global Y-phase (2-D scan using already-fixed origin_x) ─────
-    cj_arr = np.array([cj for _, cj in cells], dtype=np.float32)
     tol_y   = max(dy * 0.45, 4.0)
 
-    exp_xs_all  = best_phase_x + ci_arr * dx          # (n_cells,)
+    # Per-cell expected X, accounting for stagger on odd-cj rows (with modulo)
+    origins_all = (best_phase_x + parity * stagger_x_odd) % dx
+    exp_xs_all  = origins_all + ci_arr * dx                            # (n_cells,)
     det_xs_col  = detected_xy[:, 0:1]                 # (n_det, 1)
     x_match     = np.abs(det_xs_col - exp_xs_all[None, :]) <= tol_x  # (n_det, n_cells)
 
     best_phase_y = estimate_phase(detected_xy[:, 1], dy)
     best_count   = -1
+    best_dist_y  = float("inf")
     for phase_candidate in np.arange(0.0, dy, 1.0):
         exp_ys = phase_candidate + cj_arr * dy
         valid  = (exp_ys >= margin) & (exp_ys <= img_h - margin)
@@ -225,9 +257,19 @@ def grid_compare_points(
         det_ys_col = detected_xy[:, 1:2]
         y_match    = np.abs(det_ys_col - exp_ys[None, :]) <= tol_y
         both  = x_match & y_match & valid[None, :]
-        count = int(both.any(axis=1).sum())
-        if count > best_count:
+        matched = both.any(axis=1)
+        count = int(matched.sum())
+        # For tied counts, prefer phase that minimises total matched distance
+        if count > 0:
+            # matched_min_dist: for each matched detected hole, min dist to any matching expected
+            exp_ys_valid = exp_ys[valid]
+            y_diffs_matched = np.abs(detected_xy[matched, 1:2] - exp_ys_valid[None, :])
+            total_dist_y = float(y_diffs_matched.min(axis=1).sum())
+        else:
+            total_dist_y = float("inf")
+        if count > best_count or (count == best_count and total_dist_y < best_dist_y):
             best_count   = count
+            best_dist_y  = total_dist_y
             best_phase_y = phase_candidate
 
     origin_y = best_phase_y
@@ -240,6 +282,7 @@ def grid_compare_points(
             origin_x, origin_y,
             tol_affine, min_affine_matches,
             margin, img_w, img_h,
+            stagger_x_odd=stagger_x_odd,
         )
 
     # ── Build final expected positions (with deduplication + margin filter) ─
@@ -251,7 +294,9 @@ def grid_compare_points(
             ex = float(corrected_xy[k, 0])
             ey = float(corrected_xy[k, 1])
         else:
-            ex = origin_x + ci * dx
+            # Apply X-stagger for odd-cj rows (modular phase)
+            x_origin = (origin_x + stagger_x_odd) % dx if cj % 2 == 1 else origin_x
+            ex = x_origin + ci * dx
             ey = origin_y + cj * dy
         key = (round(ex), round(ey))
         if key in seen:

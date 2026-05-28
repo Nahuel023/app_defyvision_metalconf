@@ -43,6 +43,59 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-05-28 — Tadeo + Claude
+
+#### Contexto de la sesión
+Continuación de sesión anterior. Trabajo sobre modelo_A / Esterilla scanner_2.
+Problema raíz: grilla escalonada (stagger_x_odd=26px) + dy_real≈37px vs dy_stored=38px.
+
+---
+
+#### Cambio 51 — Esterilla: soporte de grilla escalonada (stagger_x_odd)
+
+**Archivos:** `src/patterns/pattern_io.py`, `src/patterns/pattern_build.py`,
+`src/pipeline/grid_fitting.py`, `src/inspection.py`, `data/patterns/scanner_2/modelo_A/roi.json`,
+`config/tolerancias.yaml`
+
+**Motivación:** El patrón Esterilla tiene filas impares (cj=1,3,...) con 5 agujeros grandes
+y filas pares (cj=2,4,...) con 4 agujeros pequeños, con un desfase X de ~26px entre orígenes
+de fila. Con un grid rectangular sin stagger, la búsqueda de fase X no podía distinguir ambos
+tipos y devolvía una fase incorrecta → todos los frames NOK.
+
+**Cambios:**
+- `pattern_io.py`: campo `stagger_x_odd` en `Pattern` dataclass; guardado/lectura en holes.json
+- `pattern_build.py`: detección automática de stagger al construir el patrón; override `grid_dx/dy`
+  desde config para evitar que `estimate_spacing` devuelva 64 en lugar de 66
+- `grid_fitting.py`: `grid_compare_points` acepta `stagger_x_odd`; búsqueda de fase X usa
+  tolerancia ajustada `tol_x = max(stagger/4, 5)` para evitar saturación; aplica módulo al origen
+- `inspection.py`: extrae `stagger_x_odd` del patrón y lo pasa a `grid_compare_points`
+- `roi.json`: ajustado a `{x:870, y:0, w:380, h:1080}` (zona del patrón)
+- `tolerancias.yaml`: `grid_dx:66, grid_dy:38, edge_margin_px:5, frame_missing_nok_threshold:8`
+
+**Resultado:** frame_0162 pasó de 200 missing → 13 missing. Todos los frames aún NOK
+por threshold=8 y deriva Y acumulada en filas inferiores.
+
+---
+
+#### Cambio 52 — Esterilla: affine refinement estagger-aware
+
+**Archivos:** `src/pipeline/grid_fitting.py`, `config/tolerancias.yaml`
+
+**Motivación:** Las filas inferiores (cj=20+) tienen posiciones reales ~15-25px por encima
+de las esperadas (acumulación de deriva Y: dy_real≈37px vs dy_stored=38px, 19 rows → 16px).
+Con `grid_affine_refinement:false`, 13 holes missing en frame_0162. Con el affine original
+(sin stagger), el fit devolvía shear incorrecto porque even/odd rows tienen distinto origen X,
+resultando en 28 missing (peor).
+
+**Fix:** `_fit_affine_to_grid` ahora acepta `stagger_x_odd` y usa coordenadas fuente
+stagger-ajustadas: `src_x = ci*dx + (cj%2)*stagger_x_odd`. Esto permite que el affine
+corrija scale_y ≈ 0.934 (actual_dy/stored_dy) sin generar shear espurio entre filas.
+`grid_compare_points` pasa `stagger_x_odd` al llamar `_fit_affine_to_grid`.
+
+**Resultado:** frame_0162: 13→9 missing. `grid_affine_refinement:true` habilitado.
+
+---
+
 ### Sesión 2026-05-22 — Tadeo + Claude
 
 #### Contexto de la sesión
@@ -2416,6 +2469,92 @@ tapado/solapado por el banner superior.
 - En `frame_0126`, con dos banners arriba, el panel NOK queda debajo y visible.
 - `python -m compileall src` OK.
 - `python -m pytest tests` OK, 3 tests.
+
+---
+
+### Sesión 2026-05-28 (centro real) — Tadeo + Claude
+
+#### Cambio 59 — Líneas de centro reales (polilínea por banda, no X fija)
+
+**Problema reportado:** La línea de centro de chapa (naranja) y la línea de centro del patrón
+(blanca) eran líneas verticales fijas dibujadas en `cx = round(sheet_center_x)` y
+`hx = round(holes_center_x)` — un solo valor X para toda la altura. Si la chapa venía
+inclinada o el patrón desplazado no se reflejaba visualmente: las líneas siempre aparecían
+perfectamente verticales y en el "centro promedio" de la pantalla.
+
+**Causa raíz:** Los puntos por banda ya existían para los bordes del patrón y de la chapa
+(`pattern_left_points`, `pattern_right_points`, `left_edge_points`, `right_edge_points`),
+pero el **centro** de cada uno nunca se calculaba ni se almacenaba. El overlay dibujaba
+líneas ficticias.
+
+**Cambios:**
+
+**`src/pipeline/edge_centering.py`:**
+- `CenteringResult` agrega dos campos nuevos (frozen dataclass, default vacío):
+  - `sheet_center_points: tuple` — per-band midpoint entre borde izquierdo y derecho de CHAPA.
+    `x = (edge_left[i].x + edge_right[i].x) / 2`, solo bandas donde ambos bordes se detectaron.
+  - `pattern_center_points: tuple` — per-band midpoint entre borde izquierdo y derecho del PATRON.
+    Calculado con `_pattern_center_by_band(pat_left, pat_right)` sobre los datos COMPLETOS
+    (no sobre la versión trimmed que se usa para métricas zigzag).
+- En `compute_centering()`: calcula `sheet_center_pts` y `pattern_center_pts_full`, los almacena
+  en el nuevo CenteringResult.
+
+**`src/pipeline/annotate.py`:**
+- Import directo de `_fit_line_robust, _line_x_at_y` desde `edge_centering`.
+- En `draw_centering_overlay()`:
+  - Agrega `sheet_ctr_pts` y `pat_ctr_pts` al bloque de `_shift()`.
+  - Reemplaza la línea naranja fija por:
+    - Extensión de línea ajustada full-height (alpha=0.30, 1px)
+    - Polilínea real por bandas (alpha=0.80, 2px)
+    - Fallback a línea punteada si hay <2 puntos.
+  - Reemplaza la línea blanca fija por:
+    - Extensión de línea ajustada full-height (alpha=0.20, 1px)
+    - Polilínea real por bandas (alpha=0.85, 1px)
+    - Fallback a línea vertical si hay <2 puntos.
+  - La flecha de offset ahora apunta entre los centros REALES evaluados en mid_y
+    (cada polilínea se ajusta con `_fit_line_robust` y se evalúa en `mid_y`),
+    no entre los centros promedio.
+
+**Resultado visual:**
+- Si la chapa está derecha: ambas polilíneas son verticales → igual que antes.
+- Si la chapa está inclinada: la línea de CHAPA sigue el eje real de la chapa.
+- Si el patrón está desplazado/inclinado: la línea de PATRON muestra la inclinación real.
+- La flecha de offset muestra la diferencia real entre los centros en el plano medio.
+
+**Sin tocar:** lógica de detección, `offset_px`, `margin_*`, PLC, solenoides, modelo_B/A params.
+
+---
+
+### Sesión 2026-05-28 — Tadeo + Claude
+
+#### Cambio 58 — Tolerancias modelo_A (Esterilla) más permisivas + fix bug min_area/min_area_small
+
+**Problema reportado:** Esterilla tomaba pocos agujeros y el overlay mostraba casi todos como cruces (missing). Los parámetros del Cambio 50 seguían siendo demasiado estrictos.
+
+**Bug identificado:**
+`min_area=300` (piso global de `detect_holes_from_mask`) era MAYOR que `min_area_small=250` (piso del filtro de tipo). Los agujeros chicos con blur (area≈200-300px²) eran rechazados por la primera barrera antes de llegar al filtro de tipo. El floor efectivo real era `max(min_area, min_area_small)`, no `min_area_small`.
+
+**Cambios en `config/tolerancias.yaml` — SOLO sección `modelo_A`:**
+
+| Parámetro | Antes | Después | Razón |
+|---|---|---|---|
+| `min_area` | 300.0 | 150.0 | Piso global debe ser ≤ min_area_small; blur baja area chico a ~200px² |
+| `circularity_min` | 0.70 | 0.55 | Blur severo reduce circularidad a 0.5-0.6 |
+| `aspect_ratio_max` | 2.0 | 2.5 | Agujeros levemente deformados |
+| `min_area_small` | 250.0 | 150.0 | Alineado con nuevo min_area; fix del bug de piso |
+| `max_area_small` | 1500.0 | 2000.0 | Margen ampliado |
+| `min_area_large` | 700.0 | 400.0 | Iluminación no ideal en scanner_2 |
+| `max_area_large` | 5000.0 | 7000.0 | Margen ampliado |
+| `edge_margin_px` | 15.0 | 5.0 | 15px descartaba agujeros reales cerca del borde de ROI |
+| `align_match_tol_px` | 100.0 | 150.0 | Más permisivo para fallback RANSAC |
+| `min_match_count` | 5 | 4 | Patrón puede estar muy parcialmente en frame |
+| `grid_max_missing` | 15 | 25 | ~22% de 112 agujeros; permisivo durante calibración |
+| `bbox_filter_margin_px` | 20.0 | 30.0 | Grilla dispersa dy=38 necesita más margen |
+| `frame_missing_nok_threshold` | 3 | 8 | Permisivo hasta calibrar con material real |
+
+**Sin tocar:** `modelo_B`, PLC, solenoides, patrón de referencia, lógica de grid.
+
+**Nota de calibración:** Los valores actuales son permisivos a propósito. Una vez que haya imágenes reales de scanner_2/modelo_A en planta, ejecutar `scripts/_debug_areas.py` para ver el histograma de áreas y ajustar `min_area_small`, `min_area_large` al gap real entre ruido y agujeros válidos.
 
 ---
 

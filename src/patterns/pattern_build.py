@@ -73,8 +73,10 @@ def build_pattern_from_image(
     xs = np.array([p[0] for p in points])
     ys = np.array([p[1] for p in points])
     grid_min_sp = float(tolerances.get("grid_min_spacing", 30.0))
-    dx = estimate_spacing(xs, min_spacing=grid_min_sp)
-    dy = estimate_spacing(ys, min_spacing=grid_min_sp)
+    # Use hardcoded dx/dy from config if provided (avoids estimate_spacing bias
+    # when the mixed large+small hole sample shifts the mode away from true spacing).
+    dx = float(tolerances["grid_dx"]) if "grid_dx" in tolerances else estimate_spacing(xs, min_spacing=grid_min_sp)
+    dy = float(tolerances["grid_dy"]) if "grid_dy" in tolerances else estimate_spacing(ys, min_spacing=grid_min_sp)
     phase_x = estimate_phase(xs, dx)
     phase_y = estimate_phase(ys, dy)
     cells = assign_cells(points, dx, dy, phase_x, phase_y)
@@ -84,6 +86,20 @@ def build_pattern_from_image(
     print(f"[build-pattern] {len(points)} puntos  dx={dx:.1f} dy={dy:.1f}"
           f"  phase=({phase_x:.1f},{phase_y:.1f})")
     print(f"[build-pattern] Celdas totales: {n_total}  Unicas: {n_unique}  Duplicadas: {n_dup}")
+
+    # Stagger detection: if even-cj and odd-cj rows have different X-origins
+    # (e.g. Esterilla large/small hole alternation), compute the signed offset.
+    even_xs = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 0])
+    odd_xs  = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 1])
+    stagger_x_odd: float | None = None
+    if len(even_xs) >= 4 and len(odd_xs) >= 4:
+        ph_even = estimate_phase(even_xs, dx)
+        ph_odd  = estimate_phase(odd_xs, dx)
+        stagger = float(((ph_odd - ph_even) + dx / 2.0) % dx - dx / 2.0)
+        if abs(stagger) > 2.0:  # only store if meaningful (>2px)
+            stagger_x_odd = stagger
+            print(f"[build-pattern] Stagger detectado: phase_even={ph_even:.1f} phase_odd={ph_odd:.1f}"
+                  f" stagger_x_odd={stagger:.1f}px")
     if n_dup > 0:
         from collections import Counter
         dup_cells = sorted(
@@ -99,6 +115,7 @@ def build_pattern_from_image(
     pat = Pattern(
         model=model, image_size=(w, h), points=points, radii=radii,
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
+        stagger_x_odd=stagger_x_odd,
     )
     out = pattern_path(model, scanner_id)
     save_pattern(pat, out)

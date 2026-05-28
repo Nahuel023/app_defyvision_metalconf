@@ -5,6 +5,7 @@ import numpy as np
 from typing import TYPE_CHECKING, Sequence, Tuple, List
 
 from .detect_holes import Hole
+from .edge_centering import _fit_line_robust, _line_x_at_y
 
 if TYPE_CHECKING:
     from .edge_centering import CenteringResult
@@ -327,10 +328,12 @@ def draw_centering_overlay(
     # Offset per-band point lists to full-frame space
     _off = (roi_x, roi_y)
     _shift = lambda pts: tuple((x + _off[0], y + _off[1]) for x, y in pts)  # noqa: E731
-    left_pts  = _shift(getattr(centering, "left_edge_points",   ()))
-    right_pts = _shift(getattr(centering, "right_edge_points",  ()))
-    pat_l_pts = _shift(getattr(centering, "pattern_left_points",  ()))
-    pat_r_pts = _shift(getattr(centering, "pattern_right_points", ()))
+    left_pts        = _shift(getattr(centering, "left_edge_points",     ()))
+    right_pts       = _shift(getattr(centering, "right_edge_points",    ()))
+    pat_l_pts       = _shift(getattr(centering, "pattern_left_points",  ()))
+    pat_r_pts       = _shift(getattr(centering, "pattern_right_points", ()))
+    sheet_ctr_pts   = _shift(getattr(centering, "sheet_center_points",  ()))
+    pat_ctr_pts     = _shift(getattr(centering, "pattern_center_points", ()))
 
     _font_sm = cv2.FONT_HERSHEY_SIMPLEX
 
@@ -392,20 +395,40 @@ def draw_centering_overlay(
                          (fallback_x, min(yy + 12, h - 1)), pat_color, 1)
         cv2.putText(out, pat_label, (x_vis, 44), _font_sm, 0.45, pat_color, pat_lw, cv2.LINE_AA)
 
-    # --- Sheet center: orange dashed line ---
-    for y in range(0, h, 20):
-        cv2.line(out, (cx, y), (cx, min(y + 10, h - 1)), (0, 165, 255), 2)
+    # --- Sheet center: real per-band polyline + fitted extension, or dashed fallback ---
+    _shc_color = (0, 165, 255)   # orange
+    if len(sheet_ctr_pts) >= 2:
+        _draw_full_height_fit_line(out, sheet_ctr_pts, _shc_color, thickness=1, alpha=0.30)
+        _draw_edge_polyline(out, sheet_ctr_pts, _shc_color, thickness=2, alpha=0.80, dot_radius=0)
+    else:
+        for y in range(0, h, 20):
+            cv2.line(out, (cx, y), (cx, min(y + 10, h - 1)), _shc_color, 2)
 
-    # --- Holes center: white line ---
-    cv2.line(out, (hx, 0), (hx, h - 1), (255, 255, 255), 1)
+    # --- Pattern center: real per-band polyline + fitted extension, or single line fallback ---
+    _ptc_color = (255, 255, 255)   # white
+    if len(pat_ctr_pts) >= 2:
+        _draw_full_height_fit_line(out, pat_ctr_pts, _ptc_color, thickness=1, alpha=0.20)
+        _draw_edge_polyline(out, pat_ctr_pts, _ptc_color, thickness=1, alpha=0.85, dot_radius=0)
+    else:
+        cv2.line(out, (hx, 0), (hx, h - 1), _ptc_color, 1)
 
-    # --- Offset arrow from sheet center to holes center ---
+    # --- Offset arrow: from sheet-center to pattern-center at mid-frame height ---
+    # Evaluate each center polyline at mid_y to get a single X per line.
+    # If per-band data is available use its fitted line; otherwise fall back to scalars.
     color = (0, 200, 0) if centering.within_tol else (0, 0, 255)
     mid_y = h // 2
-    if abs(hx - cx) >= 3:
-        cv2.arrowedLine(out, (cx, mid_y), (hx, mid_y), color, 3, tipLength=0.3)
+    def _pts_x_at_y(pts, fallback: int) -> int:
+        if len(pts) >= 4:
+            c = _fit_line_robust([(x - roi_x, y - roi_y) for x, y in pts])
+            if c is not None:
+                return int(round(_line_x_at_y(c, mid_y - roi_y) + roi_x))
+        return fallback
+    cx_real = _pts_x_at_y(sheet_ctr_pts, cx)
+    hx_real = _pts_x_at_y(pat_ctr_pts,  hx)
+    if abs(hx_real - cx_real) >= 3:
+        cv2.arrowedLine(out, (cx_real, mid_y), (hx_real, mid_y), color, 3, tipLength=0.3)
     else:
-        cv2.circle(out, (cx, mid_y), 6, (0, 200, 0), -1)
+        cv2.circle(out, (cx_real, mid_y), 6, (0, 200, 0), -1)
 
     # --- Text: margins, delta, offset, verticality ---
     lm = centering.left_margin_px

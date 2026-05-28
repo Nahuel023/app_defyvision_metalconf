@@ -276,6 +276,7 @@ def _inspect_bgr(
     if pattern.has_grid and detected_points:
         detected_arr = np.array(detected_points, dtype=np.float32)
         tol_affine = tol_xy_px * 1.5 if grid_affine_refinement else 0.0
+        stagger_x_odd = float(pattern.stagger_x_odd) if pattern.stagger_x_odd is not None else 0.0
         compare_points, compare_cells = grid_compare_points(
             detected_arr,
             pattern.cells,
@@ -287,6 +288,7 @@ def _inspect_bgr(
             img_w, img_h,
             edge_margin_px,
             tol_affine=tol_affine,
+            stagger_x_odd=stagger_x_odd,
         )
     else:
         transform = _estimate_alignment_transform(
