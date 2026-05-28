@@ -45,6 +45,53 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-05-28 - Codex
 
+#### Cambio 62 - Camara IP movida a tab Camara con preview grande
+
+**Problema:** La conexion de camara IP estaba dentro de la tab "Grabacion", aunque
+conceptualmente pertenece a diagnostico/configuracion de camara. Ademas el preview era
+chico para inspeccionar bien la imagen.
+
+**Cambios:**
+- `src/ui/service.py`:
+  - La seccion "CAMARA IP EN VIVO" deja de agregarse al layout de `RecordingTab`.
+  - `CameraCalibTab` ahora incluye una seccion "Camara IP" con URL, Conectar,
+    Desconectar, estado y preview grande.
+  - El preview IP queda con alto minimo 520px y escalado suave.
+  - Se reutiliza `_MJPEGReader` con credenciales de `config/camera.yaml`.
+
+**Validacion:**
+- `python -m compileall src` OK.
+
+---
+
+#### Cambio 61 - Autenticacion Axis en visor IP de Grabacion
+
+**Problema:** La prueba directa de `Camera` con `root/defy2026` abria el stream Axis,
+pero el boton "Conectar" de la seccion "CAMARA IP EN VIVO" seguia mostrando "Sin
+senal". La causa era doble: `_MJPEGReader` en `src/ui/service.py` no recibia
+credenciales, entonces la camara respondia `HTTP 401 Unauthorized`; ademas el lector
+usaba `np.frombuffer(...)` sin importar `numpy as np`, por lo que fallaba dentro del
+hilo Qt aun con credenciales correctas.
+
+**Cambios:**
+- `src/ui/service.py`:
+  - Agrega `import numpy as np`.
+  - `_MJPEGReader` acepta `username` / `password` y envia Basic Auth.
+  - El boton "Conectar" toma credenciales desde `config/camera.yaml` para el scanner
+    seleccionado; si ese scanner no tiene credenciales, usa las de cualquier scanner
+    configurado.
+  - URL por defecto corregida a `http://192.168.1.17/axis-cgi/mjpg/video.cgi`.
+- `config/camera.yaml`:
+  - Agregadas credenciales locales Axis (`username`, `password`, `open_timeout_s`)
+    para los scanners existentes.
+
+**Validacion:**
+- Prueba directa con `Camera(..., username=root, password=...)`: `open=True`,
+  frame `480x640`.
+- Prueba directa de `_MJPEGReader` con `QCoreApplication`: emite frame `(480, 640, 3)`.
+
+---
+
 #### Cambio 60 - Soporte de camara IP/MJPEG en produccion
 
 **Problema:** El sistema de produccion solo aceptaba indices USB (`0`, `1`) y abria
