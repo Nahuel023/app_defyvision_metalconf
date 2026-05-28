@@ -1133,6 +1133,58 @@ class ZoomableImageView(QWidget):
         self.fit()
 
 
+class _MJPEGReader(QThread):
+    """Lee un stream MJPEG/HTTP frame a frame y emite cada imagen como np.ndarray.
+
+    cv2.VideoCapture no puede abrir streams MJPEG sobre HTTP en Windows.
+    Este hilo usa urllib para leer el stream en crudo y detecta los marcadores
+    JPEG (SOI 0xFF 0xD8 … EOI 0xFF 0xD9) directamente en el flujo de bytes.
+    Funciona con cámaras Axis y cualquier stream MJPEG estándar.
+    """
+
+    frame_ready     = pyqtSignal(object)  # np.ndarray BGR
+    error_occurred  = pyqtSignal(str)
+
+    def __init__(self, url: str, parent=None) -> None:
+        super().__init__(parent)
+        self._url        = url
+        self._stop_flag  = False
+
+    def stop(self) -> None:
+        self._stop_flag = True
+        self.wait(3000)
+
+    def run(self) -> None:
+        import urllib.request
+        self._stop_flag = False
+        try:
+            req = urllib.request.urlopen(self._url, timeout=10)
+            buf = b""
+            while not self._stop_flag:
+                chunk = req.read(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                # Scan for JPEG SOI … EOI boundaries
+                start = buf.find(b"\xff\xd8")
+                if start == -1:
+                    continue
+                end = buf.find(b"\xff\xd9", start + 2)
+                if end == -1:
+                    # Keep from start to avoid losing a partial frame
+                    buf = buf[start:]
+                    continue
+                jpg = buf[start : end + 2]
+                buf = buf[end + 2:]
+                arr   = np.frombuffer(jpg, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is not None:
+                    self.frame_ready.emit(frame)
+        except Exception as exc:
+            if not self._stop_flag:
+                self.error_occurred.emit(str(exc))
+
+
 class RecordingTab(QWidget):
     """Grabación continua de frames, análisis offline y navegador de resultados."""
 
@@ -1161,8 +1213,9 @@ class RecordingTab(QWidget):
         # Indices of NOK frames for quick navigation.
         self._nok_indices: list[int] = []
 
-        # IP camera live view
-        self._ip_cap: Optional[cv2.VideoCapture] = None
+        # IP camera live view — MJPEG worker (HTTP) or cv2 fallback (RTSP/USB)
+        self._ip_worker: Optional[_MJPEGReader] = None
+        self._ip_cap:    Optional[cv2.VideoCapture] = None
         self._ip_timer = QTimer(self)
         self._ip_timer.timeout.connect(self._refresh_ip_camera)
 
@@ -1463,6 +1516,16 @@ class RecordingTab(QWidget):
         self._ip_status_lbl.setText("Conectando…")
         # Accept integer index (e.g. "0") or full URL string
         source = int(url) if url.isdigit() else url
+        if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
+            self._ip_worker = _MJPEGReader(source, self)
+            self._ip_worker.frame_ready.connect(self._on_ip_frame_ready)
+            self._ip_worker.error_occurred.connect(self._on_ip_error)
+            self._ip_worker.start()
+            self._btn_ip_connect.setEnabled(False)
+            self._btn_ip_disconnect.setEnabled(True)
+            self._ip_url_edit.setEnabled(False)
+            self._ip_preview.setText("")
+            return
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
             self._ip_status_lbl.setText("⚠  No se pudo conectar")
@@ -1478,6 +1541,9 @@ class RecordingTab(QWidget):
 
     def _on_ip_disconnect(self) -> None:
         self._ip_timer.stop()
+        if self._ip_worker is not None:
+            self._ip_worker.stop()
+            self._ip_worker = None
         if self._ip_cap is not None:
             self._ip_cap.release()
             self._ip_cap = None
@@ -1488,6 +1554,14 @@ class RecordingTab(QWidget):
         self._ip_url_edit.setEnabled(True)
         self._ip_status_lbl.setText("—")
 
+    def _on_ip_error(self, msg: str) -> None:
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText(f"Error: {msg}")
+
+    def _on_ip_frame_ready(self, frame) -> None:
+        self._ip_status_lbl.setText("Conectado")
+        self._show_ip_frame(frame)
+
     def _refresh_ip_camera(self) -> None:
         if self._ip_cap is None or not self._ip_cap.isOpened():
             self._on_ip_disconnect()
@@ -1495,6 +1569,9 @@ class RecordingTab(QWidget):
         ret, frame = self._ip_cap.read()
         if not ret:
             return
+        self._show_ip_frame(frame)
+
+    def _show_ip_frame(self, frame) -> None:
         rect = self._ip_preview.contentsRect()
         w = max(320, rect.width() - 4)
         h = max(180, rect.height() - 4)
