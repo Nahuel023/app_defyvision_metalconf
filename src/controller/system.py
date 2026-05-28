@@ -46,17 +46,10 @@ class InspectionSystem:
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
-            camera_index = _FIXED_CAMERA_BY_SCANNER.get(
-                scanner_id, int(cfg["camera_index"])
-            )
-            if camera_index != int(cfg["camera_index"]):
-                logger.warning(
-                    "%s: camera_index fijo=%s (config decia %s)",
-                    scanner_id, camera_index, cfg["camera_index"],
-                )
+            camera_source = self._camera_source_for_scanner(scanner_id, cfg)
             cam_settings = load_camera_settings(scanner_id)
             camera = Camera(
-                camera_index,
+                camera_source,
                 retry_interval_s=cam_cfg.get("retry_interval_s", 1.0),
                 settings=cam_settings,
             )
@@ -179,3 +172,27 @@ class InspectionSystem:
         with _APP_CONFIG_PATH.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         return data.get("camera", {})
+
+    @staticmethod
+    def _camera_source_for_scanner(scanner_id: str, cfg: dict) -> int | str:
+        """Resolve camera source from io_map.
+
+        USB cameras keep the fixed scanner mapping (scanner_1 -> 0,
+        scanner_2 -> 1). IP/RTSP/MJPEG cameras must be configured explicitly
+        with camera_source so they are not overwritten by the fixed USB mapping.
+        """
+        if "camera_source" in cfg:
+            source = cfg["camera_source"]
+            if isinstance(source, str) and source.isdigit():
+                return int(source)
+            return source
+
+        raw_index = cfg.get("camera_index", 0)
+        configured_index = int(raw_index)
+        fixed_index = _FIXED_CAMERA_BY_SCANNER.get(scanner_id, configured_index)
+        if fixed_index != configured_index:
+            logger.warning(
+                "%s: camera_index fijo=%s (config decia %s)",
+                scanner_id, fixed_index, configured_index,
+            )
+        return fixed_index

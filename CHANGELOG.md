@@ -43,6 +43,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-05-28 - Codex
+
+#### Cambio 60 - Soporte de camara IP/MJPEG en produccion
+
+**Problema:** El sistema de produccion solo aceptaba indices USB (`0`, `1`) y abria
+siempre con `cv2.CAP_DSHOW`. Una URL Axis como
+`http://192.168.1.17/axis-cgi/mjpg/video.cgi` no aparecia en la UI porque DirectShow no
+abre streams HTTP/MJPEG y `InspectionSystem` ademas forzaba `scanner_1 -> 0` y
+`scanner_2 -> 1`.
+
+**Cambios:**
+- `src/vision/camera.py`:
+  - `Camera` acepta ahora fuente `int | str`.
+  - Para USB mantiene DirectShow y negociacion MJPG.
+  - Para RTSP/otras URLs deja que OpenCV elija backend.
+  - Para HTTP/HTTPS MJPEG usa lector propio por `urllib`, detectando frames JPEG por
+    marcadores SOI/EOI.
+  - Soporta `username` / `password` en `config/camera.yaml` para Basic Auth de camaras Axis.
+  - Mantiene reconexion automatica, `get_frame()`, `fps`, `is_connected` y validacion anti-bleed.
+- `src/controller/system.py`:
+  - Nuevo `camera_source` opcional por scanner en `config/io_map.yaml`.
+  - Si `camera_source` existe, se respeta y no se pisa con el mapeo fijo USB.
+  - Si no existe, se mantiene el comportamiento anterior: `scanner_1 -> 0`,
+    `scanner_2 -> 1`.
+- `src/ui/service.py`:
+  - La seccion "CAMARA IP EN VIVO" ahora usa el lector MJPEG propio para URLs
+    HTTP/HTTPS, en vez de `cv2.VideoCapture`, que no abria Axis MJPEG en Windows.
+
+**Validacion:**
+- `python -m compileall src` OK.
+- Prueba directa contra `http://192.168.1.17/axis-cgi/mjpg/video.cgi` responde
+  `HTTP 401 Unauthorized`, por lo que falta configurar credenciales o habilitar
+  stream anonimo en la camara.
+
+---
+
 ### Sesión 2026-05-28 — Tadeo + Claude
 
 #### Contexto de la sesión
