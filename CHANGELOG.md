@@ -51,6 +51,11 @@ PLC (Modbus TCP) ←→ InspectionSystem
 conceptualmente pertenece a diagnostico/configuracion de camara. Ademas el preview era
 chico para inspeccionar bien la imagen.
 
+**Fix posterior:** El primer parche agrego accidentalmente una llamada a
+`_build_ip_camera_section()` dentro de `PLCIOTab`, provocando `AttributeError` al abrir
+`python -m src.main service`. Se removio esa referencia de `PLCIOTab` y se dejo la
+seccion IP solo en `CameraCalibTab`.
+
 **Cambios:**
 - `src/ui/service.py`:
   - La seccion "CAMARA IP EN VIVO" deja de agregarse al layout de `RecordingTab`.
@@ -61,6 +66,7 @@ chico para inspeccionar bien la imagen.
 
 **Validacion:**
 - `python -m compileall src` OK.
+- Construccion de `ServiceWindow` en modo offscreen OK.
 
 ---
 

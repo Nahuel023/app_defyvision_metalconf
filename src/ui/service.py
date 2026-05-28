@@ -124,104 +124,6 @@ class PLCIOTab(QWidget):
         self._build_ui()
         self._populate_table()
 
-    def _on_ip_connect(self) -> None:
-        url = self._ip_url_edit.text().strip()
-        if not url:
-            self._ip_status_lbl.setText("Ingrese una URL")
-            return
-        self._on_ip_disconnect()
-        self._ip_status_lbl.setText("Conectando...")
-        source = int(url) if url.isdigit() else url
-        if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
-            auth = self._ip_auth_settings()
-            self._ip_worker = _MJPEGReader(
-                source,
-                self,
-                username=auth.get("username"),
-                password=auth.get("password"),
-            )
-            self._ip_worker.frame_ready.connect(self._on_ip_frame_ready)
-            self._ip_worker.error_occurred.connect(self._on_ip_error)
-            self._ip_worker.start()
-            self._btn_ip_connect.setEnabled(False)
-            self._btn_ip_disconnect.setEnabled(True)
-            self._ip_url_edit.setEnabled(False)
-            self._ip_preview.setText("")
-            return
-
-        cap = cv2.VideoCapture(source)
-        if not cap.isOpened():
-            self._ip_status_lbl.setText("No se pudo conectar")
-            cap.release()
-            return
-        self._ip_cap = cap
-        self._ip_timer.start(200)
-        self._btn_ip_connect.setEnabled(False)
-        self._btn_ip_disconnect.setEnabled(True)
-        self._ip_url_edit.setEnabled(False)
-        self._ip_preview.setText("")
-        self._ip_status_lbl.setText("Conectado")
-
-    def _on_ip_disconnect(self) -> None:
-        self._ip_timer.stop()
-        if self._ip_worker is not None:
-            self._ip_worker.stop()
-            self._ip_worker = None
-        if self._ip_cap is not None:
-            self._ip_cap.release()
-            self._ip_cap = None
-        if hasattr(self, "_ip_preview"):
-            self._ip_preview.setPixmap(QPixmap())
-            self._ip_preview.setText("Sin senal")
-        self._btn_ip_connect.setEnabled(True)
-        self._btn_ip_disconnect.setEnabled(False)
-        self._ip_url_edit.setEnabled(True)
-        self._ip_status_lbl.setText("-")
-
-    def _on_ip_error(self, msg: str) -> None:
-        self._on_ip_disconnect()
-        self._ip_status_lbl.setText(f"Error: {msg}")
-
-    def _on_ip_frame_ready(self, frame) -> None:
-        self._ip_status_lbl.setText("Conectado")
-        self._show_ip_frame(frame)
-
-    def _ip_auth_settings(self) -> dict:
-        scanner_id = self._scanner_combo.currentText() if hasattr(self, "_scanner_combo") else ""
-        if scanner_id:
-            settings = camera_config.load_camera_settings(scanner_id)
-            if settings.get("username") and settings.get("password"):
-                return settings
-        for sid in self._system.scanner_ids():
-            settings = camera_config.load_camera_settings(sid)
-            if settings.get("username") and settings.get("password"):
-                return settings
-        return {}
-
-    def _refresh_ip_camera(self) -> None:
-        if self._ip_cap is None or not self._ip_cap.isOpened():
-            self._on_ip_disconnect()
-            return
-        ret, frame = self._ip_cap.read()
-        if not ret:
-            return
-        self._show_ip_frame(frame)
-
-    def _show_ip_frame(self, frame) -> None:
-        rect = self._ip_preview.contentsRect()
-        w = max(640, rect.width() - 4)
-        h = max(420, rect.height() - 4)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        fh, fw = rgb.shape[:2]
-        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
-        pxm = QPixmap.fromImage(qi).scaled(
-            w,
-            h,
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation,
-        )
-        self._ip_preview.setPixmap(pxm)
-
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -238,7 +140,6 @@ class PLCIOTab(QWidget):
         self._plc_status.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;")
         top.addWidget(self._plc_status)
         root.addLayout(top)
-        root.addWidget(self._build_ip_camera_section(), stretch=3)
 
         self._table = QTableWidget(0, len(self._COLS))
         self._table.setHorizontalHeaderLabels(self._COLS)
@@ -2806,6 +2707,7 @@ class CameraCalibTab(QWidget):
         top.addWidget(self._status_lbl)
 
         root.addLayout(top)
+        root.addWidget(self._build_ip_camera_section(), stretch=3)
 
         # ── main split ───────────────────────────────────────────────
         main = QHBoxLayout()
@@ -3003,6 +2905,104 @@ class CameraCalibTab(QWidget):
         if pd.auto_key:
             slider.setEnabled(False)
             sb.setEnabled(False)
+
+    def _on_ip_connect(self) -> None:
+        url = self._ip_url_edit.text().strip()
+        if not url:
+            self._ip_status_lbl.setText("Ingrese una URL")
+            return
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText("Conectando...")
+        source = int(url) if url.isdigit() else url
+        if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
+            auth = self._ip_auth_settings()
+            self._ip_worker = _MJPEGReader(
+                source,
+                self,
+                username=auth.get("username"),
+                password=auth.get("password"),
+            )
+            self._ip_worker.frame_ready.connect(self._on_ip_frame_ready)
+            self._ip_worker.error_occurred.connect(self._on_ip_error)
+            self._ip_worker.start()
+            self._btn_ip_connect.setEnabled(False)
+            self._btn_ip_disconnect.setEnabled(True)
+            self._ip_url_edit.setEnabled(False)
+            self._ip_preview.setText("")
+            return
+
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            self._ip_status_lbl.setText("No se pudo conectar")
+            cap.release()
+            return
+        self._ip_cap = cap
+        self._ip_timer.start(200)
+        self._btn_ip_connect.setEnabled(False)
+        self._btn_ip_disconnect.setEnabled(True)
+        self._ip_url_edit.setEnabled(False)
+        self._ip_preview.setText("")
+        self._ip_status_lbl.setText("Conectado")
+
+    def _on_ip_disconnect(self) -> None:
+        self._ip_timer.stop()
+        if self._ip_worker is not None:
+            self._ip_worker.stop()
+            self._ip_worker = None
+        if self._ip_cap is not None:
+            self._ip_cap.release()
+            self._ip_cap = None
+        if hasattr(self, "_ip_preview"):
+            self._ip_preview.setPixmap(QPixmap())
+            self._ip_preview.setText("Sin senal")
+        self._btn_ip_connect.setEnabled(True)
+        self._btn_ip_disconnect.setEnabled(False)
+        self._ip_url_edit.setEnabled(True)
+        self._ip_status_lbl.setText("-")
+
+    def _on_ip_error(self, msg: str) -> None:
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText(f"Error: {msg}")
+
+    def _on_ip_frame_ready(self, frame) -> None:
+        self._ip_status_lbl.setText("Conectado")
+        self._show_ip_frame(frame)
+
+    def _ip_auth_settings(self) -> dict:
+        scanner_id = self._scanner_combo.currentText() if hasattr(self, "_scanner_combo") else ""
+        if scanner_id:
+            settings = camera_config.load_camera_settings(scanner_id)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        for sid in self._system.scanner_ids():
+            settings = camera_config.load_camera_settings(sid)
+            if settings.get("username") and settings.get("password"):
+                return settings
+        return {}
+
+    def _refresh_ip_camera(self) -> None:
+        if self._ip_cap is None or not self._ip_cap.isOpened():
+            self._on_ip_disconnect()
+            return
+        ret, frame = self._ip_cap.read()
+        if not ret:
+            return
+        self._show_ip_frame(frame)
+
+    def _show_ip_frame(self, frame) -> None:
+        rect = self._ip_preview.contentsRect()
+        w = max(640, rect.width() - 4)
+        h = max(420, rect.height() - 4)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        fh, fw = rgb.shape[:2]
+        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        pxm = QPixmap.fromImage(qi).scaled(
+            w,
+            h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._ip_preview.setPixmap(pxm)
 
     # ------------------------------------------------------------------
     # Slots
