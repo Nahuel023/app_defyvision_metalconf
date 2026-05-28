@@ -45,6 +45,7 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QFileDialog,
+    QLineEdit,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -1160,6 +1161,11 @@ class RecordingTab(QWidget):
         # Indices of NOK frames for quick navigation.
         self._nok_indices: list[int] = []
 
+        # IP camera live view
+        self._ip_cap: Optional[cv2.VideoCapture] = None
+        self._ip_timer = QTimer(self)
+        self._ip_timer.timeout.connect(self._refresh_ip_camera)
+
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
         self._build_ui()
@@ -1187,6 +1193,7 @@ class RecordingTab(QWidget):
         root.setSpacing(10)
 
         root.addWidget(self._build_recording_section())
+        root.addWidget(self._build_ip_camera_section())
         root.addWidget(self._build_analysis_section())
         root.addWidget(self._build_browser_section(), stretch=1)
 
@@ -1383,6 +1390,122 @@ class RecordingTab(QWidget):
 
         lay.addLayout(act)
         return grp
+
+    def _build_ip_camera_section(self) -> QGroupBox:
+        grp = QGroupBox("CÁMARA IP EN VIVO")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(8)
+
+        # ── URL row ──────────────────────────────────────────────────
+        url_row = QHBoxLayout()
+        url_row.setSpacing(8)
+
+        url_lbl = QLabel("URL")
+        url_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;"
+        )
+        url_row.addWidget(url_lbl)
+
+        self._ip_url_edit = QLineEdit()
+        self._ip_url_edit.setPlaceholderText(
+            "rtsp://192.168.1.100:554/stream  ó  http://192.168.1.100:8080/video  ó  0 (índice USB)"
+        )
+        self._ip_url_edit.setStyleSheet(
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:6px 10px;font-size:12px;font-family:Consolas,monospace;"
+            f"selection-background-color:{_ACCENT};"
+        )
+        self._ip_url_edit.returnPressed.connect(self._on_ip_connect)
+        url_row.addWidget(self._ip_url_edit, stretch=1)
+
+        self._btn_ip_connect = self._mk_btn("▶  Conectar",    "#15803d", h=36, fs=12)
+        self._btn_ip_disconnect = self._mk_btn("■  Desconectar", "#991b1b", h=36, fs=12)
+        self._btn_ip_disconnect.setEnabled(False)
+        self._btn_ip_connect.clicked.connect(self._on_ip_connect)
+        self._btn_ip_disconnect.clicked.connect(self._on_ip_disconnect)
+        url_row.addWidget(self._btn_ip_connect)
+        url_row.addWidget(self._btn_ip_disconnect)
+
+        self._ip_status_lbl = QLabel("—")
+        self._ip_status_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+        )
+        url_row.addWidget(self._ip_status_lbl)
+
+        lay.addLayout(url_row)
+
+        # ── Preview ──────────────────────────────────────────────────
+        self._ip_preview = QLabel("Sin señal — ingrese la URL de la cámara y presione Conectar")
+        self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._ip_preview.setMinimumHeight(220)
+        self._ip_preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._ip_preview.setStyleSheet(
+            f"background:#0a0f1a;border-radius:8px;border:1px solid {_BORDER};"
+            f"color:{_MUTED};font-size:12px;"
+        )
+        lay.addWidget(self._ip_preview)
+
+        return grp
+
+    def _on_ip_connect(self) -> None:
+        url = self._ip_url_edit.text().strip()
+        if not url:
+            self._ip_status_lbl.setText("⚠  Ingrese una URL")
+            return
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText("Conectando…")
+        # Accept integer index (e.g. "0") or full URL string
+        source = int(url) if url.isdigit() else url
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            self._ip_status_lbl.setText("⚠  No se pudo conectar")
+            cap.release()
+            return
+        self._ip_cap = cap
+        self._ip_timer.start(200)   # ~5 fps para la vista previa
+        self._btn_ip_connect.setEnabled(False)
+        self._btn_ip_disconnect.setEnabled(True)
+        self._ip_url_edit.setEnabled(False)
+        self._ip_preview.setText("")
+        self._ip_status_lbl.setText("Conectado")
+
+    def _on_ip_disconnect(self) -> None:
+        self._ip_timer.stop()
+        if self._ip_cap is not None:
+            self._ip_cap.release()
+            self._ip_cap = None
+        self._ip_preview.setPixmap(QPixmap())
+        self._ip_preview.setText("Sin señal")
+        self._btn_ip_connect.setEnabled(True)
+        self._btn_ip_disconnect.setEnabled(False)
+        self._ip_url_edit.setEnabled(True)
+        self._ip_status_lbl.setText("—")
+
+    def _refresh_ip_camera(self) -> None:
+        if self._ip_cap is None or not self._ip_cap.isOpened():
+            self._on_ip_disconnect()
+            return
+        ret, frame = self._ip_cap.read()
+        if not ret:
+            return
+        rect = self._ip_preview.contentsRect()
+        w = max(320, rect.width() - 4)
+        h = max(180, rect.height() - 4)
+        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        fh, fw = rgb.shape[:2]
+        qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        pxm = QPixmap.fromImage(qi).scaled(
+            w, h,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.FastTransformation,
+        )
+        self._ip_preview.setPixmap(pxm)
 
     def _build_analysis_section(self) -> QGroupBox:
         grp = QGroupBox("ANÁLISIS")
