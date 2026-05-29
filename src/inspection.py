@@ -677,10 +677,49 @@ def inspect_folder(
         same_column_tol_cells=int(tolerances.get("machine_stop_same_column_tol_cells", 0)),
     )
 
+    import os
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     image_paths = list(iter_image_files(input_dir))
-    results = [inspect_image(model, path, save=save, scanner_id=scanner_id,
-                             _machine_stop_detector=ms_detector)
-               for path in image_paths]
+    n = len(image_paths)
+
+    # Pre-load shared read-only resources once (elimina N×3 lecturas de disco)
+    _pre: dict = {
+        "tolerances": tolerances,
+        "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
+        "roi":        load_roi(model, scanner_id),
+    }
+
+    if ms_detector._enabled:
+        # Secuencial obligatorio: MachineStopDetector tiene estado y debe ver
+        # los frames en orden para acumular rachas correctamente.
+        _pre["machine_stop_detector"] = ms_detector
+        results = [
+            inspect_image(model, path, save=save, scanner_id=scanner_id,
+                          _preloaded=_pre)
+            for path in image_paths
+        ]
+    else:
+        # Paralelo seguro: sin detector con estado.
+        # OpenCV y numpy liberan el GIL en operaciones pesadas.
+        n_workers = min(os.cpu_count() or 2, 6)
+        results_list: list = [None] * n
+
+        def _worker(args):
+            idx, path = args
+            return idx, inspect_image(model, path, save=save,
+                                      scanner_id=scanner_id, _preloaded=_pre)
+
+        with ThreadPoolExecutor(max_workers=n_workers) as executor:
+            futures = {
+                executor.submit(_worker, (i, p)): i
+                for i, p in enumerate(image_paths)
+            }
+            for future in as_completed(futures):
+                idx, result = future.result()
+                results_list[idx] = result
+
+        results = results_list
     ok_count = sum(1 for result in results if result.status == "OK")
     low_quality_count = sum(
         1 for r in results if getattr(r, "frame_quality", "GOOD") == "LOW_QUALITY"
