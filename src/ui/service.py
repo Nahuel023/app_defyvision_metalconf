@@ -1,13 +1,13 @@
-﻿"""
-Interfaz de servicio/calibraciÃ³n (PyQt6).
+"""
+Interfaz de servicio/calibración (PyQt6).
 
-4 pestaÃ±as:
-  PLC I/O       â€” tabla de seÃ±ales en tiempo real, toggle de salidas
-  Sistema       â€” mÃ©tricas de sesiÃ³n por scanner + estado PLC
-  Logs          â€” visor de logs Python en tiempo real
-  ConfiguraciÃ³n â€” visualizaciÃ³n read-only de archivos YAML
+4 pestañas:
+  PLC I/O       - tabla de señales en tiempo real, toggle de salidas
+  Sistema       - métricas de sesión por scanner + estado PLC
+  Logs          - visor de logs Python en tiempo real
+  Configuración - visualización read-only de archivos YAML
 
-Se lanza tras autenticaciÃ³n con LoginDialog.
+Se lanza tras autenticación con LoginDialog.
 Acepta un InspectionSystem existente (desde OperatorWindow) o crea uno propio.
 """
 
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
-# Ancho fijo de cada ala del header â€” igualar ambos lados centra el tÃ­tulo
+# Ancho fijo de cada ala del header - igualar ambos lados centra el título
 _HEADER_WING_W = 310
 
 # ------------------------------------------------------------------
@@ -88,14 +88,14 @@ class _LogEmitter(QObject):
 
 
 class QtLogHandler(logging.Handler):
-    """ReenvÃ­a registros al widget de logs mediante seÃ±al Qt (thread-safe)."""
+    """Reenvía registros al widget de logs mediante señal Qt (thread-safe)."""
 
     def __init__(self) -> None:
         super().__init__()
         self._emitter = _LogEmitter()
         self.signal   = self._emitter.record
         self.setFormatter(logging.Formatter(
-            "%(asctime)s  %(levelname)-8s  %(name)s â€” %(message)s",
+            "%(asctime)s  %(levelname)-8s  %(name)s - %(message)s",
             datefmt="%H:%M:%S",
         ))
 
@@ -111,9 +111,9 @@ class QtLogHandler(logging.Handler):
 # ==================================================================
 
 class PLCIOTab(QWidget):
-    """Tabla de seÃ±ales PLC con lectura en vivo y toggle de salidas."""
+    """Tabla de señales PLC con lectura en vivo y toggle de salidas."""
 
-    _COLS = ["Scanner", "SeÃ±al", "Tipo", "Valor", "AcciÃ³n"]
+    _COLS = ["Scanner", "Señal", "Tipo", "Valor", "Acción"]
 
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
@@ -133,11 +133,11 @@ class PLCIOTab(QWidget):
         root.setSpacing(8)
 
         top = QHBoxLayout()
-        lbl = QLabel("Estado de seÃ±ales PLC en tiempo real")
+        lbl = QLabel("Estado de señales PLC en tiempo real")
         lbl.setStyleSheet(f"color:{_ACCENT};font-size:13px;font-weight:700;")
         top.addWidget(lbl)
         top.addStretch()
-        self._plc_status = QLabel("PLC: â€”")
+        self._plc_status = QLabel("PLC: -")
         self._plc_status.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;")
         top.addWidget(self._plc_status)
         root.addLayout(top)
@@ -176,7 +176,7 @@ class PLCIOTab(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self._table.setItem(row, col, item)
 
-            val_item = QTableWidgetItem("â€”")
+            val_item = QTableWidgetItem("-")
             val_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self._table.setItem(row, 3, val_item)
             self._value_items[name] = val_item
@@ -213,7 +213,7 @@ class PLCIOTab(QWidget):
                 continue
             self._last_vals[name] = val
             if val is None:
-                item.setText("â€”")
+                item.setText("-")
                 item.setForeground(QBrush(QColor(_MUTED)))
             else:
                 item.setText("ON" if val else "OFF")
@@ -224,11 +224,11 @@ class PLCIOTab(QWidget):
         current = self._system.io.read(name)
         new_val = not bool(current)
         self._system.io.write(name, new_val)
-        logger.info(f"[Servicio] Toggle {name} â†’ {'ON' if new_val else 'OFF'}")
+        logger.info(f"[Servicio] Toggle {name} -> {'ON' if new_val else 'OFF'}")
 
 
 # ==================================================================
-# Tab: DiagnÃ³stico HW â€” X0-X15 / Y0-Y15
+# Tab: Diagnóstico HW - X0-X15 / Y0-Y15
 # ==================================================================
 
 class PLCDiagTab(QWidget):
@@ -360,7 +360,7 @@ class PLCDiagTab(QWidget):
                 c = "#f97316" if v else _BORDER
                 self._y_leds[i].setStyleSheet(f"background:{c};border-radius:7px;")
                 if self._y_name.get(i) == "solenoid":
-                    continue  # botÃ³n bloqueado, no actualizar estilo
+                    continue  # botón bloqueado, no actualizar estilo
                 self._y_btns[i].setText("ON" if v else "OFF")
                 self._y_btns[i].setStyleSheet(
                     f"background:{'#c2410c' if v else '#374151'};"
@@ -369,7 +369,7 @@ class PLCDiagTab(QWidget):
 
     def _toggle(self, idx: int) -> None:
         self._plc.write_coil(idx, not self._y_vals[idx])
-        logger.info(f"[DiagnÃ³stico] Toggle Y{idx} â†’ {'ON' if not self._y_vals[idx] else 'OFF'}")
+        logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if not self._y_vals[idx] else 'OFF'}")
 
 
 # ==================================================================
@@ -405,12 +405,12 @@ class PLCOutputTestTab(QWidget):
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(16)
 
-        title = QLabel("Prueba de salidas PLC â€” activar cada salida manualmente para verificar")
+        title = QLabel("Prueba de salidas PLC - activar cada salida manualmente para verificar")
         title.setStyleSheet(f"color:{_ACCENT};font-size:13px;font-weight:700;")
         lay.addWidget(title)
 
         warn = QLabel(
-            "PrecauciÃ³n: los cambios aquÃ­ escriben directamente al PLC "
+            "Precaución: los cambios aquí escriben directamente al PLC "
             "sin pasar por la FSM del scanner."
         )
         warn.setStyleSheet(f"color:{_WARN};font-size:11px;")
@@ -432,7 +432,7 @@ class PLCOutputTestTab(QWidget):
                 btn.setFixedSize(110, 56)
                 if sig_key == "solenoid":
                     btn.setEnabled(False)
-                    btn.setToolTip("Solenoide bloqueado por seguridad\n(activaciÃ³n por software deshabilitada)")
+                    btn.setToolTip("Solenoide bloqueado por seguridad\n(activación por software deshabilitada)")
                     btn.setStyleSheet(
                         "background:#111827;color:#4b5563;border-radius:8px;"
                         "font-size:12px;font-weight:700;border:1px solid #1f2937;"
@@ -495,12 +495,12 @@ class PLCOutputTestTab(QWidget):
         current = self._system.io.read(f"{scanner_id}.{sig_key}")
         new_val = not bool(current)
         self._system.io.write(f"{scanner_id}.{sig_key}", new_val)
-        logger.info(f"[PruebaS] {scanner_id}.{sig_key} â†’ {'ON' if new_val else 'OFF'}")
+        logger.info(f"[PruebaS] {scanner_id}.{sig_key} -> {'ON' if new_val else 'OFF'}")
 
     def _all_off(self, scanner_id: str) -> None:
         for sig_key in self._btns.get(scanner_id, {}):
             self._system.io.write(f"{scanner_id}.{sig_key}", False)
-        logger.info(f"[PruebaS] {scanner_id} â€” Todo OFF")
+        logger.info(f"[PruebaS] {scanner_id} - Todo OFF")
 
     def _grp_style(self) -> str:
         return (
@@ -516,7 +516,7 @@ class PLCOutputTestTab(QWidget):
 # ==================================================================
 
 class SystemTab(QWidget):
-    """MÃ©tricas de sesiÃ³n por scanner y estado general del sistema."""
+    """Métricas de sesión por scanner y estado general del sistema."""
 
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
@@ -548,9 +548,9 @@ class SystemTab(QWidget):
         plc_lay = QHBoxLayout(plc_group)
         plc_lay.setSpacing(10)
 
-        ip_w, self._plc_ip_lbl   = self._kv("IP / Puerto", "â€”")
-        conn_w, self._plc_conn_lbl = self._kv("Estado",     "â€”")
-        poll_w, self._plc_poll_lbl = self._kv("Poll interval", "â€”")
+        ip_w, self._plc_ip_lbl   = self._kv("IP / Puerto", "-")
+        conn_w, self._plc_conn_lbl = self._kv("Estado",     "-")
+        poll_w, self._plc_poll_lbl = self._kv("Poll interval", "-")
         for w in (ip_w, conn_w, poll_w):
             plc_lay.addWidget(w)
         plc_lay.addStretch()
@@ -561,12 +561,12 @@ class SystemTab(QWidget):
             ("state",             "Estado"),
             ("mode",              "Modo"),
             ("nok_streak",        "Racha NOK actual"),
-            ("max_nok_streak",    "Racha NOK mÃ¡x."),
+            ("max_nok_streak",    "Racha NOK máx."),
             ("total_inspections", "Total inspecciones"),
             ("ok_count",          "OK"),
             ("nok_count",         "NOK"),
-            ("session_start",     "Inicio de sesiÃ³n"),
-            ("camera",            "CÃ¡mara"),
+            ("session_start",     "Inicio de sesión"),
+            ("camera",            "Cámara"),
         ]
         for sid in self._system.scanner_ids():
             group = QGroupBox(sid.replace("_", " ").upper())
@@ -581,7 +581,7 @@ class SystemTab(QWidget):
             widgets: dict[str, QLabel] = {}
             for i, (key, label) in enumerate(_FIELDS):
                 row, col = divmod(i, 3)
-                w, lbl = self._kv(label, "â€”")
+                w, lbl = self._kv(label, "-")
                 grid.addWidget(w, row, col)
                 widgets[key] = lbl
             vbox.addLayout(grid)
@@ -600,10 +600,10 @@ class SystemTab(QWidget):
                 )
                 return b
 
-            start_btn = _btn("â–¶  Iniciar",  "#166534")
-            stop_btn  = _btn("â–   Detener",  "#7f1d1d")
-            reset_btn = _btn("â†º  Reset",    "#1e3a5f")
-            sim_btn   = _btn("âš¡  Forzar InspecciÃ³n", "#78350f")
+            start_btn = _btn("Iniciar", "#166534")
+            stop_btn  = _btn("Detener", "#7f1d1d")
+            reset_btn = _btn("Reset  Reset",    "#1e3a5f")
+            sim_btn   = _btn("Forzar Inspección", "#78350f")
             cap_btn   = _btn("Capturar frame",    "#1e3a5f")
             cap_btn.setStyleSheet(
                 "background:#0f4c81;color:white;border-radius:5px;"
@@ -731,7 +731,7 @@ class SystemTab(QWidget):
             wdg["ok_count"].setText(str(s.get("ok_count", 0)))
             wdg["nok_count"].setText(str(s.get("nok_count", 0)))
             wdg["session_start"].setText(
-                start.strftime("%H:%M:%S") if start else "â€”"
+                start.strftime("%H:%M:%S") if start else "-"
             )
             wdg["camera"].setText(
                 f"#{cam.index} {'activa' if cam_running else 'inactiva'}"
@@ -850,11 +850,11 @@ class LogsTab(QWidget):
 
 
 # ==================================================================
-# Tab 4: ConfiguraciÃ³n
+# Tab 4: Configuración
 # ==================================================================
 
 class ConfigTab(QWidget):
-    """VisualizaciÃ³n read-only de archivos YAML de configuraciÃ³n."""
+    """Visualización read-only de archivos YAML de configuración."""
 
     _FILES = [
         ("Tolerancias", "config/tolerancias.yaml"),
@@ -911,7 +911,7 @@ class ConfigTab(QWidget):
 
 
 # ==================================================================
-# Tab 5: GrabaciÃ³n / AnÃ¡lisis / Navegador
+# Tab 5: Grabación / Análisis / Navegador
 # ==================================================================
 
 class _AnalysisWorker(QThread):
@@ -939,7 +939,7 @@ class _AnalysisWorker(QThread):
             n = len(self._paths)
             tols = load_tolerances(self._model)
 
-            # Pre-load shared read-only resources once (eliminates NÃ—3 disk reads).
+            # Pre-load shared read-only resources once (eliminates Nx3 disk reads).
             _pre: dict = {
                 "tolerances": tols,
                 "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
@@ -977,7 +977,7 @@ class _AnalysisWorker(QThread):
             else:
                 done = 0
                 _emit_every = max(1, n // 50)
-                # OpenCV and numpy release the GIL â€” parallel is safe when no stateful detector.
+                # OpenCV and numpy release the GIL - parallel is safe when no stateful detector.
                 n_workers = min(os.cpu_count() or 2, 6)
 
                 def _worker(args):
@@ -1140,8 +1140,8 @@ class _MJPEGReader(QThread):
 
     cv2.VideoCapture no puede abrir streams MJPEG sobre HTTP en Windows.
     Este hilo usa urllib para leer el stream en crudo y detecta los marcadores
-    JPEG (SOI 0xFF 0xD8 â€¦ EOI 0xFF 0xD9) directamente en el flujo de bytes.
-    Funciona con cÃ¡maras Axis y cualquier stream MJPEG estÃ¡ndar.
+    JPEG (SOI 0xFF 0xD8 ... EOI 0xFF 0xD9) directamente en el flujo de bytes.
+    Funciona con cualquier stream MJPEG estándar (Sony, Hikvision, Dahua, etc.).
     """
 
     frame_ready      = pyqtSignal(object)          # np.ndarray BGR
@@ -1184,7 +1184,7 @@ class _MJPEGReader(QThread):
                 if not chunk:
                     break
                 buf += chunk
-                # Scan for JPEG SOI â€¦ EOI boundaries
+                # Scan for JPEG SOI ... EOI boundaries
                 latest_frame = None
                 decoded_count = 0
                 while True:
@@ -1216,8 +1216,118 @@ class _MJPEGReader(QThread):
                 self.error_occurred.emit(str(exc))
 
 
+class _HTTPSnapshotReader(QThread):
+    """Polling de URL JPEG/HTTP con conexión persistente (keep-alive).
+
+    Usa http.client directamente para reusar la conexión TCP entre frames,
+    eliminando el overhead del handshake TCP en cada captura.
+    El intervalo real queda limitado por la latencia de red + tiempo de captura
+    de la cámara (típicamente 20-60 ms en LAN → máx ~20-30 fps práctico).
+    """
+
+    frame_ready_meta = pyqtSignal(object, object)  # frame, dict metadata
+    error_occurred   = pyqtSignal(str)
+
+    def __init__(
+        self,
+        url: str,
+        parent=None,
+        username: str | None = None,
+        password: str | None = None,
+        interval_ms: int = 33,          # 33 ms ≈ 30 fps objetivo
+    ) -> None:
+        super().__init__(parent)
+        self._url = url
+        self._stop_flag = False
+        self._username = username or ""
+        self._password = password or ""
+        self._interval_ms = max(20, interval_ms)   # mín 20 ms (50 fps techo)
+
+    def stop(self) -> None:
+        self._stop_flag = True
+        self.wait(3000)
+
+    def run(self) -> None:
+        import base64
+        import http.client
+        from urllib.parse import urlparse
+
+        self._stop_flag = False
+        parsed  = urlparse(self._url)
+        host    = parsed.netloc
+        path    = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        use_ssl = parsed.scheme.lower() == "https"
+
+        auth_header = ""
+        if self._username and self._password:
+            token = base64.b64encode(
+                f"{self._username}:{self._password}".encode("utf-8")
+            ).decode("ascii")
+            auth_header = f"Basic {token}"
+
+        conn: http.client.HTTPConnection | None = None
+
+        def _make_conn():
+            if use_ssl:
+                import ssl
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                return http.client.HTTPSConnection(host, timeout=5, context=ctx)
+            return http.client.HTTPConnection(host, timeout=5)
+
+        while not self._stop_flag:
+            tick_start = time.monotonic()
+            try:
+                if conn is None:
+                    conn = _make_conn()
+                headers = {"Connection": "keep-alive"}
+                if auth_header:
+                    headers["Authorization"] = auth_header
+                conn.request("GET", path, headers=headers)
+                resp = conn.getresponse()
+                jpg = resp.read()
+                if resp.status != 200:
+                    conn.close()
+                    conn = None
+                else:
+                    arr   = np.frombuffer(jpg, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        self.frame_ready_meta.emit(
+                            frame,
+                            {"monotonic_ts": time.monotonic(), "dropped": 0},
+                        )
+            except Exception as exc:
+                # Reconectar en el próximo ciclo
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                conn = None
+                if self._stop_flag:
+                    break
+                # Emitir error solo si supera varios fallos consecutivos
+                # para no interrumpir por un blip de red
+                self.msleep(200)
+                continue
+
+            remaining = (self._interval_ms / 1000.0) - (time.monotonic() - tick_start)
+            if remaining > 0:
+                self.msleep(int(remaining * 1000))
+
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+
 class RecordingTab(QWidget):
-    """GrabaciÃ³n continua de frames, anÃ¡lisis offline y navegador de resultados."""
+    """Grabación continua de frames, análisis offline y navegador de resultados."""
 
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
@@ -1233,10 +1343,10 @@ class RecordingTab(QWidget):
         # PNG writes go to a background thread so the main thread stays responsive.
         self._write_executor = None   # concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-        # QPixmap cache: (idx, overlay_bool) â†’ QPixmap.  Avoids re-converting BGRâ†’QPixmap
+        # QPixmap cache: (idx, overlay_bool) -> QPixmap.  Avoids re-converting BGR->QPixmap
         # on every navigation click. Cleared when a new analysis/load replaces the data.
         self._px_cache: dict = {}
-        self._px_cache_max = 40  # keep last ~40 pixmaps (~320 MB for 1920Ã—1080)
+        self._px_cache_max = 40  # keep last ~40 pixmaps (~320 MB for 1920x1080)
 
         # Track last result-card state to skip redundant setStyleSheet calls.
         self._last_card_state: str | None = None
@@ -1244,7 +1354,7 @@ class RecordingTab(QWidget):
         # Indices of NOK frames for quick navigation.
         self._nok_indices: list[int] = []
 
-        # IP camera live view â€” MJPEG worker (HTTP) or cv2 fallback (RTSP/USB)
+        # IP camera live view - MJPEG worker (HTTP) or cv2 fallback (RTSP/USB)
         self._ip_worker: Optional[_MJPEGReader] = None
         self._ip_cap:    Optional[cv2.VideoCapture] = None
         self._ip_timer = QTimer(self)
@@ -1307,13 +1417,13 @@ class RecordingTab(QWidget):
         self._set_rec_badge("standby", 0, None)
 
     def _build_recording_section(self) -> QGroupBox:
-        grp = QGroupBox("GRABACIÃ“N")
+        grp = QGroupBox("GRABACIÓN")
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
         lay.setSpacing(12)
 
-        # â”€â”€ Config row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Config row ────────────────────────────────────────────────
         cfg = QHBoxLayout()
         cfg.setSpacing(0)
 
@@ -1333,12 +1443,12 @@ class RecordingTab(QWidget):
 
         cfg.addSpacing(16)
 
-        # â”€â”€ Model selector: two large toggle buttons (exclusive) â”€â”€â”€â”€â”€â”€
-        self._btn_model_esterilla = QPushButton("â— ESTERILLA")
+        # ── Model selector: two large toggle buttons (exclusive) ──────
+        self._btn_model_esterilla = QPushButton("ESTERILLA")
         self._btn_model_esterilla.setCheckable(True)
         self._btn_model_esterilla.setFixedHeight(38)
         self._btn_model_esterilla.setMinimumWidth(148)
-        self._btn_model_microperf = QPushButton("â— MICROPERFORADO")
+        self._btn_model_microperf = QPushButton("MICROPERFORADO")
         self._btn_model_microperf.setCheckable(True)
         self._btn_model_microperf.setFixedHeight(38)
         self._btn_model_microperf.setMinimumWidth(178)
@@ -1387,7 +1497,7 @@ class RecordingTab(QWidget):
         cfg.addWidget(self._fps_spin)
 
         cfg.addSpacing(16)
-        self._live_chk = QCheckBox("AnÃ¡lisis en vivo")
+        self._live_chk = QCheckBox("Análisis en vivo")
         self._live_chk.setChecked(False)
         self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:12px;")
         cfg.addWidget(self._live_chk)
@@ -1395,7 +1505,7 @@ class RecordingTab(QWidget):
         cfg.addStretch()
 
         # Camera info inline
-        self._btn_read_cam = QPushButton("â†»  Info cÃ¡mara")
+        self._btn_read_cam = QPushButton("Actualizar cámara")
         self._btn_read_cam.setFixedHeight(30)
         self._btn_read_cam.setStyleSheet(
             f"QPushButton {{ background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
@@ -1404,7 +1514,7 @@ class RecordingTab(QWidget):
         )
         cfg.addWidget(self._btn_read_cam)
         cfg.addSpacing(8)
-        self._cam_info_lbl = QLabel("â€”")
+        self._cam_info_lbl = QLabel("-")
         self._cam_info_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
         )
@@ -1412,18 +1522,18 @@ class RecordingTab(QWidget):
 
         lay.addLayout(cfg)
 
-        # â”€â”€ Action row: buttons + state badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Action row: buttons + state badge ────────────────────────
         act = QHBoxLayout()
         act.setSpacing(10)
 
-        self._btn_start = self._mk_btn("â–¶  INICIAR GRABACIÃ“N", "#15803d", h=42, fs=13)
-        self._btn_stop  = self._mk_btn("â–   DETENER",           "#991b1b", h=42, fs=13)
+        self._btn_start = self._mk_btn("INICIAR GRABACION", "#15803d", h=42, fs=13)
+        self._btn_stop  = self._mk_btn("DETENER",           "#991b1b", h=42, fs=13)
         self._btn_stop.setEnabled(False)
         act.addWidget(self._btn_start)
         act.addWidget(self._btn_stop)
         act.addStretch()
 
-        # State badge â€” prominent indicator panel
+        # State badge - prominent indicator panel
         badge = QFrame()
         badge.setStyleSheet(
             f"QFrame {{ background:{_DARK};border:1px solid {_BORDER};border-radius:10px; }}"
@@ -1435,13 +1545,13 @@ class RecordingTab(QWidget):
         left_col = QVBoxLayout()
         left_col.setSpacing(2)
         left_col.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._rec_state_lbl = QLabel("â— STANDBY")
+        self._rec_state_lbl = QLabel("STANDBY")
         self._rec_state_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_state_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-weight:700;"
             "letter-spacing:3px;background:transparent;"
         )
-        self._rec_folder_lbl = QLabel("â€”")
+        self._rec_folder_lbl = QLabel("-")
         self._rec_folder_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._rec_folder_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:9px;font-family:Consolas;background:transparent;"
@@ -1475,13 +1585,13 @@ class RecordingTab(QWidget):
         return grp
 
     def _build_ip_camera_section(self) -> QGroupBox:
-        grp = QGroupBox("CÃMARA IP EN VIVO")
+        grp = QGroupBox("CÁMARA IP EN VIVO")
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
         lay.setSpacing(8)
 
-        # â”€â”€ URL row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── URL row ──────────────────────────────────────────────────
         url_row = QHBoxLayout()
         url_row.setSpacing(8)
 
@@ -1495,8 +1605,8 @@ class RecordingTab(QWidget):
 
         self._ip_url_edit = QLineEdit()
 
-        self._ip_url_edit.setText("http://192.168.1.17/axis-cgi/mjpg/video.cgi")
-        self._ip_url_edit.setPlaceholderText("http://ip/mjpg/video.cgi  o  rtsp://ip:554/axis-media/media.amp  o  0 (USB)")
+        self._ip_url_edit.setText("")
+        self._ip_url_edit.setPlaceholderText("http://ip/oneshotimage.jpg  o  rtsp://ip:554/live  o  http://ip/video.mjpg")
         self._ip_url_edit.setStyleSheet(
             f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:6px;padding:6px 10px;font-size:12px;font-family:Consolas,monospace;"
@@ -1505,15 +1615,15 @@ class RecordingTab(QWidget):
         self._ip_url_edit.returnPressed.connect(self._on_ip_connect)
         url_row.addWidget(self._ip_url_edit, stretch=1)
 
-        self._btn_ip_connect = self._mk_btn("â–¶  Conectar",    "#15803d", h=36, fs=12)
-        self._btn_ip_disconnect = self._mk_btn("â–   Desconectar", "#991b1b", h=36, fs=12)
+        self._btn_ip_connect = self._mk_btn("Conectar", "#15803d", h=36, fs=12)
+        self._btn_ip_disconnect = self._mk_btn("Desconectar", "#991b1b", h=36, fs=12)
         self._btn_ip_disconnect.setEnabled(False)
         self._btn_ip_connect.clicked.connect(self._on_ip_connect)
         self._btn_ip_disconnect.clicked.connect(self._on_ip_disconnect)
         url_row.addWidget(self._btn_ip_connect)
         url_row.addWidget(self._btn_ip_disconnect)
 
-        self._ip_status_lbl = QLabel("â€”")
+        self._ip_status_lbl = QLabel("-")
         self._ip_status_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas;"
         )
@@ -1521,8 +1631,8 @@ class RecordingTab(QWidget):
 
         lay.addLayout(url_row)
 
-        # â”€â”€ Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        self._ip_preview = QLabel("Sin seÃ±al â€” ingrese la URL de la cÃ¡mara y presione Conectar")
+        # ── Preview ──────────────────────────────────────────────────
+        self._ip_preview = QLabel("Sin señal - ingrese la URL de la cámara y presione Conectar")
         self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._ip_preview.setMinimumHeight(220)
         self._ip_preview.setSizePolicy(
@@ -1539,10 +1649,10 @@ class RecordingTab(QWidget):
     def _on_ip_connect(self) -> None:
         url = self._ip_url_edit.text().strip()
         if not url:
-            self._ip_status_lbl.setText("âš   Ingrese una URL")
+            self._ip_status_lbl.setText("Ingrese una URL")
             return
         self._on_ip_disconnect()
-        self._ip_status_lbl.setText("Conectandoâ€¦")
+        self._ip_status_lbl.setText("Conectando...")
         # Accept integer index (e.g. "0") or full URL string
         source = int(url) if url.isdigit() else url
         if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
@@ -1563,7 +1673,7 @@ class RecordingTab(QWidget):
             return
         cap = cv2.VideoCapture(source)
         if not cap.isOpened():
-            self._ip_status_lbl.setText("âš   No se pudo conectar")
+            self._ip_status_lbl.setText("No se pudo conectar")
             cap.release()
             return
         self._ip_cap = cap
@@ -1583,11 +1693,11 @@ class RecordingTab(QWidget):
             self._ip_cap.release()
             self._ip_cap = None
         self._ip_preview.setPixmap(QPixmap())
-        self._ip_preview.setText("Sin seÃ±al")
+        self._ip_preview.setText("Sin señal")
         self._btn_ip_connect.setEnabled(True)
         self._btn_ip_disconnect.setEnabled(False)
         self._ip_url_edit.setEnabled(True)
-        self._ip_status_lbl.setText("â€”")
+        self._ip_status_lbl.setText("-")
 
     def _on_ip_error(self, msg: str) -> None:
         self._on_ip_disconnect()
@@ -1633,7 +1743,7 @@ class RecordingTab(QWidget):
         self._ip_preview.setPixmap(pxm)
 
     def _build_analysis_section(self) -> QGroupBox:
-        grp = QGroupBox("ANÃLISIS")
+        grp = QGroupBox("ANÁLISIS")
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
@@ -1643,8 +1753,8 @@ class RecordingTab(QWidget):
         row1 = QHBoxLayout()
         row1.setSpacing(8)
 
-        self._btn_load    = self._mk_btn("ðŸ“‚  Abrir grabaciÃ³n", "#374151", h=36, fs=11)
-        self._btn_analyze = self._mk_btn("âš™  Analizar",         "#1d4ed8", h=36, fs=12)
+        self._btn_load    = self._mk_btn("Abrir grabación", "#374151", h=36, fs=11)
+        self._btn_analyze = self._mk_btn("Analizar",         "#1d4ed8", h=36, fs=12)
         self._btn_analyze.setEnabled(False)
         row1.addWidget(self._btn_load)
         row1.addWidget(self._btn_analyze)
@@ -1693,7 +1803,7 @@ class RecordingTab(QWidget):
         lay.setContentsMargins(14, 20, 14, 14)
         lay.setSpacing(10)
 
-        # â”€â”€ Navigation bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Navigation bar ────────────────────────────────────────────
         nav = QHBoxLayout()
         nav.setSpacing(4)
 
@@ -1721,24 +1831,24 @@ class RecordingTab(QWidget):
             ))
             return b
 
-        # First / Last â€” outlined style
-        self._btn_first = _nav_btn("â®", w=40, tooltip="Primer frame", pad=0)
-        self._btn_last  = _nav_btn("â­", w=40, tooltip="Ãšltimo frame",  pad=0)
+        # First / Last - outlined style
+        self._btn_first = _nav_btn("|<", w=40, tooltip="Primer frame", pad=0)
+        self._btn_last  = _nav_btn(">|", w=40, tooltip="Último frame",  pad=0)
 
-        # Â±10 â€” larger with text
-        self._btn_prev10 = _nav_btn("Â«  âˆ’10", w=74, tooltip="Retroceder 10 frames",
+        # ±10 - larger with text
+        self._btn_prev10 = _nav_btn("<<  -10", w=74, tooltip="Retroceder 10 frames",
                                      bg="#1e293b", bd="#334155", hv="#2d3f55", fs=12)
-        self._btn_next10 = _nav_btn("+10  Â»", w=74, tooltip="Avanzar 10 frames",
+        self._btn_next10 = _nav_btn("+10  >>", w=74, tooltip="Avanzar 10 frames",
                                      bg="#1e293b", bd="#334155", hv="#2d3f55", fs=12)
 
-        # Â±1 â€” filled accent style
-        self._btn_prev = _nav_btn("â—€  Ant.", w=76, tooltip="Frame anterior",
+        # ±1 - filled accent style
+        self._btn_prev = _nav_btn("<  Ant.", w=76, tooltip="Frame anterior",
                                    bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8", fs=12)
-        self._btn_next = _nav_btn("Sig.  â–¶", w=76, tooltip="Frame siguiente",
+        self._btn_next = _nav_btn("Sig.  >", w=76, tooltip="Frame siguiente",
                                    bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8", fs=12)
 
         # Frame counter
-        self._nav_lbl = QLabel("â€”")
+        self._nav_lbl = QLabel("-")
         self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._nav_lbl.setMinimumWidth(130)
         self._nav_lbl.setStyleSheet(
@@ -1764,12 +1874,12 @@ class RecordingTab(QWidget):
         nav.addWidget(sep)
         nav.addSpacing(10)
 
-        # â”€â”€ NOK navigator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        self._btn_prev_nok = _nav_btn("â—€ NOK", w=72, tooltip="Frame NOK anterior",
+        # ── NOK navigator ─────────────────────────────────────────────
+        self._btn_prev_nok = _nav_btn("< NOK", w=72, tooltip="Frame NOK anterior",
                                       bg="#3b0f0f", bd="#7f1d1d", hv="#5c1515", fs=11)
-        self._btn_next_nok = _nav_btn("NOK â–¶", w=72, tooltip="Frame NOK siguiente",
+        self._btn_next_nok = _nav_btn("NOK >", w=72, tooltip="Frame NOK siguiente",
                                       bg="#3b0f0f", bd="#7f1d1d", hv="#5c1515", fs=11)
-        self._nok_nav_lbl = QLabel("NOK â€”")
+        self._nok_nav_lbl = QLabel("NOK -")
         self._nok_nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._nok_nav_lbl.setFixedWidth(80)
         self._nok_nav_lbl.setStyleSheet(
@@ -1790,8 +1900,8 @@ class RecordingTab(QWidget):
         nav.addWidget(sep2)
         nav.addSpacing(10)
 
-        # Overlay toggle â€” pill style
-        self._overlay_toggle = QPushButton("â—‰  OVERLAY")
+        # Overlay toggle - pill style
+        self._overlay_toggle = QPushButton("OVERLAY")
         self._overlay_toggle.setCheckable(True)
         self._overlay_toggle.setChecked(True)
         self._overlay_toggle.setFixedHeight(38)
@@ -1811,13 +1921,13 @@ class RecordingTab(QWidget):
         nav.addWidget(self._overlay_toggle)
         nav.addSpacing(4)
 
-        self._btn_fit = _nav_btn("âŠž  Ajustar", bg="#0f3460", bd="#1d4ed8", hv="#1e40af",
+        self._btn_fit = _nav_btn("Ajustar", bg="#0f3460", bd="#1d4ed8", hv="#1e40af",
                                   tooltip="Ajustar imagen a ventana (doble clic en imagen)")
         nav.addWidget(self._btn_fit)
         nav.addStretch()
 
-        # â”€â”€ Model chip â€” shows which pattern type was used for analysis â”€
-        self._model_chip = QLabel("â€”")
+        # ── Model chip - shows which pattern type was used for analysis ─
+        self._model_chip = QLabel("-")
         self._model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._model_chip.setFixedHeight(38)
         self._model_chip.setMinimumWidth(140)
@@ -1830,7 +1940,7 @@ class RecordingTab(QWidget):
         nav.addWidget(self._model_chip)
         nav.addSpacing(8)
 
-        # â”€â”€ Result card â€” right of nav bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Result card - right of nav bar ────────────────────────────
         self._result_card = QFrame()
         self._result_card.setMinimumWidth(280)
         self._result_card.setStyleSheet(
@@ -1838,7 +1948,7 @@ class RecordingTab(QWidget):
         )
         rc_lay = QHBoxLayout(self._result_card)
         rc_lay.setContentsMargins(14, 0, 14, 0)
-        self._result_lbl = QLabel("â€”")
+        self._result_lbl = QLabel("-")
         self._result_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._result_lbl.setStyleSheet(f"font-size:13px;font-weight:700;color:{_MUTED};")
         rc_lay.addWidget(self._result_lbl)
@@ -1846,21 +1956,21 @@ class RecordingTab(QWidget):
 
         lay.addLayout(nav)
 
-        # â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Separator ─────────────────────────────────────────────────
         lay.addWidget(self._hline())
 
-        # â”€â”€ Save / Export row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Save / Export row ─────────────────────────────────────────
         save = QHBoxLayout()
         save.setSpacing(10)
 
-        self._btn_save_current = self._mk_btn("ðŸ’¾  Guardar frame", "#065f46", h=36, fs=11)
+        self._btn_save_current = self._mk_btn("Guardar frame", "#065f46", h=36, fs=11)
         self._btn_save_current.setEnabled(False)
         self._btn_save_current.setToolTip("Guarda el overlay del frame actual en data/output/export/")
         save.addWidget(self._btn_save_current)
 
         save.addWidget(self._vline())
 
-        # Export group â€” visual container
+        # Export group - visual container
         exp_card = QFrame()
         exp_card.setStyleSheet(
             f"QFrame {{ background:{_DARK};border:1px solid {_BORDER};border-radius:7px; }}"
@@ -1909,7 +2019,7 @@ class RecordingTab(QWidget):
 
         save.addWidget(exp_card)
 
-        self._btn_export = self._mk_btn("â¬‡  Exportar 0 frames", "#0f3460", h=36, fs=11)
+        self._btn_export = self._mk_btn("Exportar 0 frames", "#0f3460", h=36, fs=11)
         self._btn_export.setEnabled(False)
         self._btn_export.setToolTip("Exporta los overlays del rango seleccionado a data/output/export/")
         save.addWidget(self._btn_export)
@@ -1924,10 +2034,10 @@ class RecordingTab(QWidget):
 
         lay.addLayout(save)
 
-        # â”€â”€ Separator â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Separator ─────────────────────────────────────────────────
         lay.addWidget(self._hline())
 
-        # â”€â”€ Image viewer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Image viewer ──────────────────────────────────────────────
         self._img_view = ZoomableImageView("Sin frames")
         self._img_view.setMinimumHeight(600)
         lay.addWidget(self._img_view, stretch=1)
@@ -1942,7 +2052,7 @@ class RecordingTab(QWidget):
         sid = self._scanner_combo.currentText()
         cam = self._system.camera(sid)
         if not cam.is_running:
-            self._status_lbl.setText("âš   La cÃ¡mara no estÃ¡ activa")
+            self._status_lbl.setText("ALERTA  La cámara no está activa")
             return
 
         from datetime import datetime as _dt
@@ -2006,9 +2116,9 @@ class RecordingTab(QWidget):
         self._live_chk.setEnabled(False)
 
         mode_txt = " (en vivo)" if self._live_chk.isChecked() else ""
-        self._status_lbl.setText(f"Grabando{mode_txt} â†’ {self._rec_dir.name}")
+        self._status_lbl.setText(f"Grabando{mode_txt} -> {self._rec_dir.name}")
         self._set_rec_badge("recording", 0, self._rec_dir)
-        logger.info(f"[GrabaciÃ³n] inicio en {self._rec_dir}  modelo={meta['model_display']}  fps={meta['fps']}")
+        logger.info(f"[Grabación] inicio en {self._rec_dir}  modelo={meta['model_display']}  fps={meta['fps']}")
 
     def _on_stop(self) -> None:
         self._rec_timer.stop()
@@ -2027,13 +2137,13 @@ class RecordingTab(QWidget):
         self._live_chk.setEnabled(True)
 
         n = len(self._frame_paths)
-        self._status_lbl.setText(f"Detenido â€” {n} frames en {self._rec_dir.name}")
+        self._status_lbl.setText(f"Detenido - {n} frames en {self._rec_dir.name}")
         self._set_rec_badge("ready", n, self._rec_dir)
         self._btn_analyze.setEnabled(n > 0)
         self._update_export_range_max()
         if n > 0 and not self._results:
             self._show_frame(0)
-        logger.info(f"[GrabaciÃ³n] detenida â€” {n} frames")
+        logger.info(f"[Grabación] detenida - {n} frames")
 
     def _grab_frame(self) -> None:
         sid  = self._scanner_combo.currentText()
@@ -2046,7 +2156,7 @@ class RecordingTab(QWidget):
         self._frame_paths.append(path)
         self._set_rec_badge("recording", idx + 1, self._rec_dir)
 
-        # Write PNG in background â€” PNG compression can take 50-200ms and must not
+        # Write PNG in background - PNG compression can take 50-200ms and must not
         # block the main thread. compression=1 (fastest) trades size for speed.
         frame_copy = frame.copy()
         if self._write_executor is not None:
@@ -2092,7 +2202,7 @@ class RecordingTab(QWidget):
                 self._summary_lbl.setText(f"OK: {ok}  NOK: {nok}  Total: {len(self._results)}")
                 self._show_frame(idx)
             except Exception as exc:
-                logger.error(f"[Live anÃ¡lisis] error en frame {idx}: {exc}")
+                logger.error(f"[Live análisis] error en frame {idx}: {exc}")
 
     # ------------------------------------------------------------------
     # Analysis
@@ -2111,7 +2221,7 @@ class RecordingTab(QWidget):
         self._results.clear()
         self._stats_lbl.setText("")
         self._export_status_lbl.setText("")
-        self._ana_progress.setText("Analizandoâ€¦")
+        self._ana_progress.setText("Analizando...")
         self._set_rec_badge("analyzing", len(self._frame_paths), self._rec_dir)
 
         self._worker = _AnalysisWorker(
@@ -2125,7 +2235,7 @@ class RecordingTab(QWidget):
         self._worker.start()
 
     def _on_ana_progress(self, done: int, total: int) -> None:
-        self._ana_progress.setText(f"Analizando  {done} / {total}â€¦")
+        self._ana_progress.setText(f"Analizando  {done} / {total}...")
 
     def _on_ana_done(self, results: list) -> None:
         self._results = results
@@ -2146,8 +2256,8 @@ class RecordingTab(QWidget):
         ok_color  = _OK  if ok  > 0 else _MUTED
         nok_color = _NOK if nok > 0 else _MUTED
         self._summary_lbl.setText(
-            f"Frame  âœ“ OK: {ok} ({pct}%)   âœ— NOK: {nok}   Total: {len(results)}"
-            f"    â”‚    Temporal âœ“ {t_ok} ({t_pct}%)  âœ— {t_nok}   [umbral {consec}]"
+            f"Frame  OK: {ok} ({pct}%)   NOK: {nok}   Total: {len(results)}"
+            f"    │    Temporal OK {t_ok} ({t_pct}%)  NOK {t_nok}   [umbral {consec}]"
         )
 
         if results:
@@ -2167,20 +2277,20 @@ class RecordingTab(QWidget):
                 parts.append(f"centro avg={avg_off:+.1f}px  max={max_off:.1f}px")
             self._stats_lbl.setText("    ".join(parts))
 
-        self._ana_progress.setText("âœ“ AnÃ¡lisis completo")
+        self._ana_progress.setText("OK Análisis completo")
         self._btn_analyze.setEnabled(True)
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
         self._update_model_chip()
         self._update_export_range_max()
         self._rebuild_nok_index()
         self._show_frame(0)
-        logger.info(f"[GrabaciÃ³n] anÃ¡lisis completo â€” OK={ok} NOK={nok}")
+        logger.info(f"[Grabación] análisis completo - OK={ok} NOK={nok}")
 
     def _on_ana_error(self, msg: str) -> None:
-        self._ana_progress.setText(f"âš   Error: {msg}")
+        self._ana_progress.setText(f"ALERTA  Error: {msg}")
         self._btn_analyze.setEnabled(True)
         self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
-        logger.error(f"[GrabaciÃ³n] error de anÃ¡lisis: {msg}")
+        logger.error(f"[Grabación] error de análisis: {msg}")
 
     # ------------------------------------------------------------------
     # Browser
@@ -2237,19 +2347,19 @@ class RecordingTab(QWidget):
             center_txt = ""
             if r.centering is not None:
                 sign = "+" if r.centering.offset_px >= 0 else ""
-                center_txt = f"  Â·  centro {sign}{r.centering.offset_px:.1f}px"
+                center_txt = f"  -  centro {sign}{r.centering.offset_px:.1f}px"
 
             holes_nok = r.report.status == "NOK"
             if r.status == "OK":
-                label, color, card_border = "âœ“  OK", _OK, "#15803d"
+                label, color, card_border = "OK", _OK, "#15803d"
             elif getattr(r, "centering_nok", False) and holes_nok:
-                label, color, card_border = "âœ—  NOK  AGUJEROS+CENTRADO", _NOK, "#991b1b"
+                label, color, card_border = "NOK AGUJEROS+CENTRADO", _NOK, "#991b1b"
             elif getattr(r, "centering_nok", False):
-                label, color, card_border = "âœ—  NOK  CENTRADO", "#f97316", "#92400e"
+                label, color, card_border = "NOK CENTRADO", "#f97316", "#92400e"
             else:
-                label, color, card_border = "âœ—  NOK  AGUJEROS", _NOK, "#991b1b"
+                label, color, card_border = "NOK AGUJEROS", _NOK, "#991b1b"
 
-            miss_txt = f"  Â·  faltantes: {missing}" if missing else ""
+            miss_txt = f"  -  faltantes: {missing}" if missing else ""
             new_text = f"{label}{miss_txt}{center_txt}"
             new_card_state = f"{color}|{card_border}"
 
@@ -2269,13 +2379,13 @@ class RecordingTab(QWidget):
                     "border-radius:8px; }}"
                 )
                 self._last_card_state = "none"
-            self._result_lbl.setText("â€”")
+            self._result_lbl.setText("-")
 
         self._btn_save_current.setEnabled(idx < len(self._results))
         self._update_nav_state()
 
     def _on_overlay_toggled(self, checked: bool) -> None:
-        self._overlay_toggle.setText("â— OVERLAY" if checked else "â—‹ OVERLAY")
+        self._overlay_toggle.setText("OVERLAY ON" if checked else "OVERLAY OFF")
         self._show_frame(self._current_idx)
 
     def _update_nav_state(self) -> None:
@@ -2305,8 +2415,8 @@ class RecordingTab(QWidget):
         fname = f"frame_{self._current_idx:04d}_{result.status}_{ts}.png"
         out_path = out_dir / fname
         cv2.imwrite(str(out_path), result.overlay)
-        self._export_status_lbl.setText(f"âœ“  {fname}")
-        logger.info(f"[Export] frame guardado â†’ {out_path}")
+        self._export_status_lbl.setText(f"OK  {fname}")
+        logger.info(f"[Export] frame guardado -> {out_path}")
 
     def _update_export_label(self) -> None:
         if not self._frame_paths:
@@ -2315,7 +2425,7 @@ class RecordingTab(QWidget):
         f_to   = self._spin_to.value()          # exclusive (1-based input = natural end)
         count  = max(0, f_to - f_from)
         has_results = len(self._results) >= f_to
-        self._btn_export.setText(f"â¬‡  Exportar {count} frames")
+        self._btn_export.setText(f"Exportar {count} frames")
         self._btn_export.setEnabled(count > 0 and has_results)
 
     def _update_export_range_max(self) -> None:
@@ -2328,11 +2438,10 @@ class RecordingTab(QWidget):
         self._update_export_label()
 
     def _export_range(self) -> None:
-        """Export overlays for selected frame range to data/output/export/."""
         import cv2
         from datetime import datetime as _dt
         if not self._results:
-            QMessageBox.information(self, "Exportar", "Primero analice la grabaciÃ³n.")
+            QMessageBox.information(self, "Exportar", "Primero analice la grabación.")
             return
         f_from = self._spin_from.value() - 1
         f_to   = min(self._spin_to.value(), len(self._results))
@@ -2345,8 +2454,8 @@ class RecordingTab(QWidget):
             r = self._results[i]
             cv2.imwrite(str(out_dir / f"frame_{i:04d}_{r.status}.png"), r.overlay)
         saved = f_to - f_from
-        self._export_status_lbl.setText(f"âœ“  {saved} frames â†’ export/rango_{ts}/")
-        logger.info(f"[Export] {saved} frames â†’ {out_dir}")
+        self._export_status_lbl.setText(f"OK  {saved} frames -> export/rango_{ts}/")
+        logger.info(f"[Export] {saved} frames -> {out_dir}")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -2374,26 +2483,26 @@ class RecordingTab(QWidget):
                        folder: Optional[Path]) -> None:
         """Update the prominent recording state indicator."""
         _STATES = {
-            "standby":   (f"color:{_MUTED};",   "â— STANDBY"),
-            "recording": ("color:#f87171;",      "â— GRABANDO"),
-            "ready":     (f"color:{_OK};",       "â— LISTO"),
-            "analyzing": (f"color:{_ACCENT};",   "â—Ž ANALIZANDO"),
-            "analyzed":  (f"color:{_OK};",       "âœ“ ANALIZADO"),
+            "standby":   (f"color:{_MUTED};",   "STANDBY"),
+            "recording": ("color:#f87171;",      "GRABANDO"),
+            "ready":     (f"color:{_OK};",       "LISTO"),
+            "analyzing": (f"color:{_ACCENT};",   "ANALIZANDO"),
+            "analyzed":  (f"color:{_OK};",       "ANALIZADO"),
         }
-        style, text = _STATES.get(state, (f"color:{_MUTED};", "â— â€”"))
+        style, text = _STATES.get(state, (f"color:{_MUTED};", "-"))
         self._rec_state_lbl.setStyleSheet(
             f"{style}font-size:13px;font-weight:700;letter-spacing:3px;background:transparent;"
         )
         self._rec_state_lbl.setText(text)
         self._rec_count_lbl.setText(str(n_frames))
-        self._rec_folder_lbl.setText(folder.name if folder else "â€”")
+        self._rec_folder_lbl.setText(folder.name if folder else "-")
 
     def _refresh_cam_info(self) -> None:
         sid = self._scanner_combo.currentText()
         try:
             cam = self._system.camera(sid)
         except Exception:
-            self._cam_info_lbl.setText("cÃ¡mara no disponible")
+            self._cam_info_lbl.setText("cámara no disponible")
             return
         _READ = [
             ("exp",   "exposure"),
@@ -2406,24 +2515,24 @@ class RecordingTab(QWidget):
         parts = []
         for lbl, key in _READ:
             v = cam.read_setting(key)
-            parts.append(f"{lbl}:{v:.0f}" if v >= 0 else f"{lbl}:?")
+            parts.append(f"{lbl}:{v:.0f}" if v >= 0 else f"{lbl}:EUR")
         fps_real = cam.fps
-        parts.append(f"real:{fps_real:.1f}" if fps_real > 0 else "real:â€”")
+        parts.append(f"real:{fps_real:.1f}" if fps_real > 0 else "real:-")
         self._cam_info_lbl.setText("  ".join(parts))
 
     def _active_model(self) -> str:
         return to_internal(self._model_combo.currentText())
 
-    # â”€â”€ Model toggle buttons â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Model toggle buttons ──────────────────────────────────────────
 
     _MODEL_BTN_STYLES = {
         "Esterilla": {
-            "on":  ("background:#052e16;color:#4ade80;border-color:#16a34a;", "â— ESTERILLA"),
-            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "â—‹ ESTERILLA"),
+            "on":  ("background:#052e16;color:#4ade80;border-color:#16a34a;", "ESTERILLA"),
+            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "ESTERILLA"),
         },
         "Microperforado": {
-            "on":  ("background:#0c2a3e;color:#38bdf8;border-color:#0284c7;", "â— MICROPERFORADO"),
-            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "â—‹ MICROPERFORADO"),
+            "on":  ("background:#0c2a3e;color:#38bdf8;border-color:#0284c7;", "MICROPERFORADO"),
+            "off": (f"background:#1e293b;color:#475569;border-color:#334155;", "MICROPERFORADO"),
         },
     }
     _MODEL_BTN_BASE = (
@@ -2455,20 +2564,16 @@ class RecordingTab(QWidget):
         self._update_model_chip(name)
 
     def _on_scanner_changed(self, sid: str) -> None:
-        if self._recording:
-            return
-        model_internal = self._system.io.scanner_config(sid).get("model", "")
-        if model_internal:
-            self._model_combo.blockSignals(True)
-            self._model_combo.setCurrentText(to_display(model_internal))
-            self._model_combo.blockSignals(False)
-            self._sync_model_buttons()
+        # El modelo NO cambia automáticamente al cambiar de scanner.
+        # El operador puede elegir cualquier combinación de scanner + modelo,
+        # por ejemplo analizar Esterilla grabada desde scanner_1.
+        pass
 
     def _on_load_recording(self) -> None:
         """Load an existing recording folder for analysis."""
         base = str(Path("data/recordings").resolve())
         folder = QFileDialog.getExistingDirectory(
-            self, "Seleccionar grabaciÃ³n", base,
+            self, "Seleccionar grabación", base,
             QFileDialog.Option.ShowDirsOnly,
         )
         if not folder:
@@ -2488,7 +2593,7 @@ class RecordingTab(QWidget):
         self._current_idx  = 0
         self._px_cache.clear()
         self._last_card_state = None
-        self._nok_nav_lbl.setText("NOK â€”")
+        self._nok_nav_lbl.setText("NOK -")
         self._btn_prev_nok.setEnabled(False)
         self._btn_next_nok.setEnabled(False)
         self._summary_lbl.setText("")
@@ -2507,16 +2612,16 @@ class RecordingTab(QWidget):
                 fps_saved = meta.get("fps")
                 if fps_saved:
                     self._fps_spin.setValue(fps_saved)
-                logger.info(f"[GrabaciÃ³n] meta cargada: {meta}")
+                logger.info(f"[Grabación] meta cargada: {meta}")
             except Exception as exc:
-                logger.warning(f"[GrabaciÃ³n] no se pudo leer meta.json: {exc}")
+                logger.warning(f"[Grabación] no se pudo leer meta.json: {exc}")
 
         self._btn_analyze.setEnabled(True)
         self._update_export_range_max()
         self._show_frame(0)
         self._set_rec_badge("ready", len(frames), folder_path)
-        self._status_lbl.setText(f"Cargado â€” {len(frames)} frames  Â·  {folder_path.name}")
-        logger.info(f"[GrabaciÃ³n] cargada carpeta {folder_path.name} con {len(frames)} frames")
+        self._status_lbl.setText(f"Cargado - {len(frames)} frames  ·  {folder_path.name}")
+        logger.info(f"[Grabación] cargada carpeta {folder_path.name} con {len(frames)} frames")
 
     def _mk_btn(self, text: str, bg: str, h: int = 30,
                 fs: int = 11, w: int | None = None) -> QPushButton:
@@ -2574,7 +2679,7 @@ class RecordingTab(QWidget):
         self._btn_prev_nok.setEnabled(has_nok)
         self._btn_next_nok.setEnabled(has_nok)
         total = len(self._nok_indices)
-        self._nok_nav_lbl.setText(f"NOK {total}" if total else "NOK â€”")
+        self._nok_nav_lbl.setText(f"NOK {total}" if total else "NOK -")
 
     def _go_prev_nok(self) -> None:
         if not self._nok_indices:
@@ -2628,7 +2733,7 @@ class RecordingTab(QWidget):
 
 
 # ==================================================================
-# CalibraciÃ³n de cÃ¡mara
+# Calibración de cámara
 # ==================================================================
 
 @dataclass
@@ -2643,36 +2748,19 @@ class _ParamDef:
 
 _PARAM_DEFS: list[_ParamDef] = [
     _ParamDef("focus",                  "Foco",            0,    255, 100, "autofocus"),
-    _ParamDef("exposure",               "ExposiciÃ³n",    -13,      0,  -7, "auto_exposure"),
+    _ParamDef("exposure",               "Exposición",    -13,      0,  -7, "auto_exposure"),
     _ParamDef("white_balance",          "Bal. Blanco",  2800,   6500, 4500, "auto_white_balance"),
     _ParamDef("gain",                   "Ganancia",        0,    255,   0),
     _ParamDef("brightness",             "Brillo",          0,    255, 128),
     _ParamDef("contrast",               "Contraste",       0,    255, 140),
-    _ParamDef("saturation",             "SaturaciÃ³n",      0,    255,  50),
+    _ParamDef("saturation",             "Saturación",      0,    255,  50),
     _ParamDef("sharpness",              "Nitidez",         0,    255, 160),
     _ParamDef("gamma",                  "Gamma",         100,    500, 110),
     _ParamDef("backlight_compensation", "Comp. backlight", 0,      1,   0),
 ]
 
-# ParÃ¡metros para cÃ¡maras IP (rangos Axis VAPIX)
-_IP_PARAM_DEFS: list[_ParamDef] = [
-    _ParamDef("brightness",  "Brillo",        0, 100, 50),
-    _ParamDef("contrast",    "Contraste",     0, 100, 50),
-    _ParamDef("saturation",  "SaturaciÃ³n",    0, 100, 50),
-    _ParamDef("sharpness",   "Nitidez",       0, 100, 50),
-]
-
-# Mapeo clave â†’ parÃ¡metro VAPIX (Axis)
-_IP_VAPIX_MAP: dict[str, str] = {
-    "brightness":  "ImageSource.I0.Sensor.Brightness",
-    "contrast":    "ImageSource.I0.Sensor.Contrast",
-    "saturation":  "ImageSource.I0.Sensor.ColorLevel",
-    "sharpness":   "ImageSource.I0.Sensor.Sharpness",
-}
-
-
 class CameraCalibTab(QWidget):
-    """Vista en vivo + sliders de todos los parÃ¡metros UVC de la cÃ¡mara."""
+    """Vista en vivo + sliders de todos los parámetros UVC de la cámara."""
 
     def __init__(self, system: InspectionSystem, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -2682,8 +2770,8 @@ class CameraCalibTab(QWidget):
         self._auto_checks: dict[str, QCheckBox] = {}
         self._block_apply = False  # avoid feedback loops while populating UI
 
-        # IP camera state â€” two independent slots
-        self._ip_workers: list[Optional[_MJPEGReader]] = [None, None]
+        # IP camera state - two independent slots
+        self._ip_workers: list[Optional[QThread]] = [None, None]
         self._ip_caps:    list[Optional[cv2.VideoCapture]] = [None, None]
         self._ip_timers:  list[QTimer] = []
         for _i in range(2):
@@ -2691,8 +2779,6 @@ class CameraCalibTab(QWidget):
             _t.timeout.connect(lambda _s=_i: self._refresh_ip_camera(_s))
             self._ip_timers.append(_t)
         self._ip_slot = 0
-        self._ip_param_sliders:   dict[str, QSlider]  = {}
-        self._ip_param_spinboxes: dict[str, QSpinBox] = {}
 
         # Auto-reconectar, FPS y captura
         self._ip_retry_timers: list[QTimer] = []
@@ -2702,12 +2788,12 @@ class CameraCalibTab(QWidget):
             _rt.timeout.connect(lambda _s=_i: self._on_ip_retry(_s))
             self._ip_retry_timers.append(_rt)
         self._ip_retry_counts   = [0, 0]    # reintentos pendientes por slot
-        self._ip_manual_disc    = [False, False]  # True = el operador desconectÃ³ manualmente
-        self._ip_fps_count      = [0, 0]    # frames desde Ãºltimo cÃ¡lculo de FPS
+        self._ip_manual_disc    = [False, False]  # True = el operador desconectó manualmente
+        self._ip_fps_count      = [0, 0]    # frames desde último cálculo de FPS
         self._ip_fps_last_t     = [0.0, 0.0]
         self._ip_fps_value      = [0.0, 0.0]
-        self._ip_last_res       = ["", ""]  # "WxH" del Ãºltimo frame
-        self._ip_last_frames: list = [None, None]  # Ãºltimo frame BGR por slot
+        self._ip_last_res       = ["", ""]  # "WxH" del último frame
+        self._ip_last_frames: list = [None, None]  # último frame BGR por slot
 
         self._ip_last_frame_t = [0.0, 0.0]
         self._ip_dropped_frames = [0, 0]
@@ -2716,6 +2802,7 @@ class CameraCalibTab(QWidget):
         self._ip_frozen_since = [0.0, 0.0]
         self._ip_frozen = [False, False]
         self._ip_last_diag_snapshot_t = [0.0, 0.0]
+        self._ip_auto_urls = ["", ""]
 
         self._preview_timer = QTimer(self)
         self._preview_timer.timeout.connect(self._update_preview)
@@ -2751,7 +2838,7 @@ class CameraCalibTab(QWidget):
         root.setContentsMargins(14, 12, 14, 14)
         root.setSpacing(10)
 
-        # â”€â”€ top bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── top bar ──────────────────────────────────────────────────
         top = QHBoxLayout()
         top.setSpacing(10)
 
@@ -2768,26 +2855,26 @@ class CameraCalibTab(QWidget):
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
         top.addWidget(self._scanner_combo)
 
-        self._cam_btn = QPushButton("Iniciar cÃ¡mara")
+        self._cam_btn = QPushButton("Iniciar cámara")
         self._cam_btn.setFixedWidth(140)
         self._cam_btn.clicked.connect(self._toggle_camera)
         top.addWidget(self._cam_btn)
 
-        self._read_btn = QPushButton("Leer de cÃ¡mara")
+        self._read_btn = QPushButton("Leer de cámara")
         self._read_btn.setFixedWidth(140)
         self._read_btn.clicked.connect(self._read_from_camera)
         top.addWidget(self._read_btn)
 
         top.addStretch()
 
-        self._status_lbl = QLabel("â€”")
+        self._status_lbl = QLabel("-")
         self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
         top.addWidget(self._status_lbl)
 
         root.addLayout(top)
-        root.addWidget(self._build_ip_camera_section(), stretch=2)
+        root.addWidget(self._build_ip_camera_section(), stretch=4)
 
-        # â”€â”€ main split â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── main split ───────────────────────────────────────────────
         main = QHBoxLayout()
         main.setSpacing(12)
 
@@ -2797,7 +2884,7 @@ class CameraCalibTab(QWidget):
         prev_grp.setMinimumWidth(560)
         prev_lay = QVBoxLayout(prev_grp)
 
-        self._preview_lbl = QLabel("Sin seÃ±al de cÃ¡mara")
+        self._preview_lbl = QLabel("Sin señal de cámara")
         self._preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._preview_lbl.setMinimumSize(540, 340)
         self._preview_lbl.setStyleSheet(
@@ -2813,7 +2900,7 @@ class CameraCalibTab(QWidget):
         main.addWidget(prev_grp, stretch=3)
 
         # Right: parameter panel
-        params_grp = QGroupBox("ParÃ¡metros de cÃ¡mara")
+        params_grp = QGroupBox("Parámetros de cámara")
         params_grp.setStyleSheet(self._grp_style())
         params_outer = QVBoxLayout(params_grp)
 
@@ -2839,7 +2926,7 @@ class CameraCalibTab(QWidget):
 
         # buttons
         btn_lay = QHBoxLayout()
-        save_btn = QPushButton("Guardar configuraciÃ³n")
+        save_btn = QPushButton("Guardar configuración")
         save_btn.clicked.connect(self._save_settings)
         save_btn.setStyleSheet(
             f"background:{_ACCENT};color:#000;font-weight:700;"
@@ -2860,7 +2947,7 @@ class CameraCalibTab(QWidget):
         root.addLayout(main, stretch=2)
 
     def _build_ip_camera_section(self) -> QGroupBox:
-        grp = QGroupBox("CÃ¡maras IP")
+        grp = QGroupBox("Cámaras IP")
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(18, 24, 18, 18)
@@ -2872,12 +2959,12 @@ class CameraCalibTab(QWidget):
         )
         _lbl_ss = f"color:{_MUTED};font-size:11px;"
 
-        # â”€â”€ Fila 1: selector + URL + botones â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Fila 1: selector + URL + botones ─────────────────────────
         row1 = QHBoxLayout()
         row1.setSpacing(10)
 
         self._ip_slot_combo = QComboBox()
-        self._ip_slot_combo.addItems(["CÃ¡mara IP 1", "CÃ¡mara IP 2"])
+        self._ip_slot_combo.addItems(["Cámara IP 1", "Cámara IP 2"])
         self._ip_slot_combo.setFixedWidth(130)
         self._ip_slot_combo.setFixedHeight(34)
         self._ip_slot_combo.setStyleSheet(
@@ -2897,14 +2984,14 @@ class CameraCalibTab(QWidget):
         self._ip_host_edit = QLineEdit()
         self._ip_host_edit.setFixedHeight(34)
         self._ip_host_edit.setFixedWidth(190)
-        self._ip_host_edit.setPlaceholderText("192.168.1.17")
+        self._ip_host_edit.setPlaceholderText("192.168.1.26")
         self._ip_host_edit.setStyleSheet(
             f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:5px;padding:5px 10px;font-size:12px;"
             f"font-family:Consolas,monospace;selection-background-color:{_ACCENT};"
         )
         self._ip_host_edit.returnPressed.connect(self._on_ip_connect)
-        self._ip_host_edit.setPlaceholderText("192.168.1.17")
+        self._ip_host_edit.setPlaceholderText("192.168.1.26")
         self._ip_host_edit.textChanged.connect(lambda _txt: self._sync_ip_generated_url())
         row1.addWidget(self._ip_host_edit)
 
@@ -2928,7 +3015,7 @@ class CameraCalibTab(QWidget):
         row1.addWidget(self._btn_ip_connect)
         row1.addWidget(self._btn_ip_disconnect)
 
-        self._ip_status_lbl = QLabel("â€”")
+        self._ip_status_lbl = QLabel("-")
         self._ip_status_lbl.setMinimumWidth(170)
         self._ip_status_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._ip_status_lbl.setStyleSheet(
@@ -2941,23 +3028,24 @@ class CameraCalibTab(QWidget):
 
         url_row = QHBoxLayout()
         url_row.setSpacing(10)
-        url_lbl = QLabel("URL generada")
+        url_lbl = QLabel("URL stream")
         url_lbl.setStyleSheet(_lbl_ss)
         url_row.addWidget(url_lbl)
 
         self._ip_url_edit = QLineEdit()
         self._ip_url_edit.setFixedHeight(30)
-        self._ip_url_edit.setReadOnly(True)
-        self._ip_url_edit.setPlaceholderText("Se completa automaticamente desde la IP")
+        self._ip_url_edit.setReadOnly(False)
+        self._ip_url_edit.setPlaceholderText("URL completa de la camara (se completa automaticamente desde la IP)")
         self._ip_url_edit.setStyleSheet(
-            f"background:#111827;color:{_MUTED};border:1px solid {_BORDER};"
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:5px;padding:4px 9px;font-size:11px;"
             "font-family:Consolas,monospace;"
         )
+        self._ip_url_edit.returnPressed.connect(self._on_ip_connect)
         url_row.addWidget(self._ip_url_edit, stretch=1)
         lay.addLayout(url_row)
 
-        # â”€â”€ Fila 2: credenciales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Fila 2: credenciales ──────────────────────────────────────
         row2 = QHBoxLayout()
         row2.setSpacing(10)
 
@@ -2972,7 +3060,7 @@ class CameraCalibTab(QWidget):
         row2.addWidget(self._ip_user_edit)
 
         row2.addSpacing(16)
-        p_lbl = QLabel("ContraseÃ±a")
+        p_lbl = QLabel("Contraseña")
         p_lbl.setStyleSheet(_lbl_ss)
         row2.addWidget(p_lbl)
 
@@ -3003,80 +3091,17 @@ class CameraCalibTab(QWidget):
         lay.addLayout(row2)
         lay.addSpacing(4)
 
-        # â”€â”€ Separador â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Separador ────────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color:{_BORDER};background:{_BORDER};max-height:1px;")
         lay.addWidget(sep)
 
-        # â”€â”€ ParÃ¡metros de imagen â€” grid 2Ã—2 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        lay.addSpacing(2)
-        _sl_ss = (
-            f"QSlider::groove:horizontal {{ height:3px;background:{_BORDER};border-radius:2px; }}"
-            f"QSlider::handle:horizontal {{ width:13px;height:13px;margin:-5px 0;"
-            f"background:{_ACCENT};border-radius:7px; }}"
-            f"QSlider::sub-page:horizontal {{ background:{_ACCENT};border-radius:2px; }}"
-        )
-        _sb_ss = (
-            f"QSpinBox {{ background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 4px;font-size:12px; }"
-            f"QSpinBox::up-button, QSpinBox::down-button {{ width:14px; }}"
-        )
-
-        # 4 parÃ¡metros en 2 columnas
-        grid_lay = QHBoxLayout()
-        grid_lay.setSpacing(20)
-        col_left  = QVBoxLayout(); col_left.setSpacing(8)
-        col_right = QVBoxLayout(); col_right.setSpacing(8)
-        for i, pd in enumerate(_IP_PARAM_DEFS):
-            col = col_left if i % 2 == 0 else col_right
-            cell = QHBoxLayout(); cell.setSpacing(8)
-            p_lbl2 = QLabel(pd.label)
-            p_lbl2.setFixedWidth(82)
-            p_lbl2.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            p_lbl2.setStyleSheet(f"color:{_TEXT};font-size:12px;font-weight:600;")
-            sl = QSlider(Qt.Orientation.Horizontal)
-            sl.setRange(0, pd.max_val - pd.min_val)
-            sl.setValue(pd.default - pd.min_val)
-            sl.setMinimumWidth(110)
-            sl.setFixedHeight(22)
-            sl.setStyleSheet(_sl_ss)
-            sb = QSpinBox()
-            sb.setRange(pd.min_val, pd.max_val)
-            sb.setValue(pd.default)
-            sb.setFixedWidth(72)
-            sb.setFixedHeight(30)
-            sb.setStyleSheet(_sb_ss)
-            sl.valueChanged.connect(
-                lambda v, _pd=pd, _sb=sb: (
-                    _sb.blockSignals(True) or
-                    _sb.setValue(_pd.min_val + v) or
-                    _sb.blockSignals(False)
-                )
-            )
-            sb.valueChanged.connect(
-                lambda v, _pd=pd, _sl=sl: (
-                    _sl.blockSignals(True) or
-                    _sl.setValue(v - _pd.min_val) or
-                    _sl.blockSignals(False)
-                )
-            )
-            self._ip_param_sliders[pd.key] = sl
-            self._ip_param_spinboxes[pd.key] = sb
-            cell.addWidget(p_lbl2)
-            cell.addWidget(sl, stretch=1)
-            cell.addWidget(sb)
-            col.addLayout(cell)
-        grid_lay.addLayout(col_left,  stretch=1)
-        grid_lay.addLayout(col_right, stretch=1)
-        lay.addLayout(grid_lay)
-        lay.addSpacing(4)
-
-        # â”€â”€ Botones Guardar / Aplicar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Guardar URL y credenciales ────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
 
-        ip_save_btn = QPushButton("Guardar configuraciÃ³n")
+        ip_save_btn = QPushButton("Guardar configuración")
         ip_save_btn.setFixedHeight(32)
         ip_save_btn.clicked.connect(self._save_ip_settings)
         ip_save_btn.setStyleSheet(
@@ -3085,35 +3110,24 @@ class CameraCalibTab(QWidget):
             "QPushButton:hover { background:#67e8f9; }"
         )
 
-        ip_apply_btn = QPushButton("Aplicar a cÃ¡mara  (VAPIX / Axis)")
-        ip_apply_btn.setFixedHeight(32)
-        ip_apply_btn.clicked.connect(self._apply_ip_params)
-        ip_apply_btn.setStyleSheet(
-            f"QPushButton {{ background:{_PANEL};color:{_TEXT};"
-            f"border:1px solid {_BORDER};"
-            "border-radius:5px;padding:0 18px;font-size:12px; }}"
-            f"QPushButton:hover {{ border-color:{_ACCENT};color:{_ACCENT}; }}"
-        )
-
-        self._ip_apply_status = QLabel("")
-        self._ip_apply_status.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        self._ip_save_status = QLabel("")
+        self._ip_save_status.setStyleSheet(f"color:{_MUTED};font-size:11px;")
 
         btn_row.addWidget(ip_save_btn)
-        btn_row.addWidget(ip_apply_btn)
-        btn_row.addWidget(self._ip_apply_status)
+        btn_row.addWidget(self._ip_save_status)
         btn_row.addStretch()
         lay.addLayout(btn_row)
 
-        # â”€â”€ Separador â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Separador ────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color:{_BORDER};background:{_BORDER};max-height:1px;")
         lay.addWidget(sep2)
 
-        # â”€â”€ Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        self._ip_preview = QLabel("Sin seÃ±al  â€”  ingrese la URL y presione Conectar")
+        # ── Preview ───────────────────────────────────────────────────
+        self._ip_preview = QLabel("Sin señal  —  ingrese la URL y presione Conectar")
         self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._ip_preview.setMinimumHeight(300)
+        self._ip_preview.setMinimumHeight(500)
         self._ip_preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -3121,9 +3135,9 @@ class CameraCalibTab(QWidget):
             f"background:{_DARK};color:{_MUTED};border:1px solid {_BORDER};"
             "border-radius:8px;font-size:13px;"
         )
-        lay.addWidget(self._ip_preview, stretch=1)
+        lay.addWidget(self._ip_preview, stretch=4)
 
-        # â”€â”€ Barra inferior: Capturar + info FPS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Barra inferior: Capturar + info FPS ──────────────────────
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(10)
 
@@ -3145,7 +3159,7 @@ class CameraCalibTab(QWidget):
         self._ip_preview_only_chk.setStyleSheet(f"color:{_WARN};font-size:12px;font-weight:600;")
         bottom_row.addWidget(self._ip_preview_only_chk)
 
-        self._ip_info_lbl = QLabel("â€”")
+        self._ip_info_lbl = QLabel("-")
         self._ip_info_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:13px;font-weight:600;font-family:Consolas;"
         )
@@ -3177,7 +3191,7 @@ class CameraCalibTab(QWidget):
             self._auto_checks[pd.auto_key] = cb
             hl.addWidget(cb)
 
-        # Slider (mapped 0 â†’ max-min)
+        # Slider (mapped 0 -> max-min)
         slider = QSlider(Qt.Orientation.Horizontal)
         slider.setRange(0, pd.max_val - pd.min_val)
         slider.setValue(pd.default - pd.min_val)
@@ -3201,7 +3215,7 @@ class CameraCalibTab(QWidget):
         )
         self._spinboxes[pd.key] = sb
 
-        # Bidirectional link slider â†” spinbox
+        # Bidirectional link slider ↔ spinbox
         slider.valueChanged.connect(
             lambda v, _pd=pd, _sb=sb: self._on_slider_changed(_pd, v, _sb)
         )
@@ -3216,13 +3230,13 @@ class CameraCalibTab(QWidget):
         lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
         form.addRow(lbl, row)
 
-        # Start with auto enabled â†’ manual controls disabled
+        # Start with auto enabled -> manual controls disabled
         if pd.auto_key:
             slider.setEnabled(False)
             sb.setEnabled(False)
 
     # ------------------------------------------------------------------
-    # Badge de estado IP â€” helper central
+    # Badge de estado IP - helper central
     # ------------------------------------------------------------------
 
     _STATUS_STYLES = {
@@ -3233,7 +3247,7 @@ class CameraCalibTab(QWidget):
     }
 
     def _set_ip_status(self, text: str, kind: str = "neutral") -> None:
-        """Actualiza el badge de estado con color semÃ¡ntico y texto completo."""
+        """Actualiza el badge de estado con color semántico y texto completo."""
         fg, bg, border = self._STATUS_STYLES.get(kind, self._STATUS_STYLES["neutral"])
         self._ip_status_lbl.setStyleSheet(
             f"color:{fg};font-size:13px;font-weight:600;"
@@ -3263,7 +3277,7 @@ class CameraCalibTab(QWidget):
 
     # ------------------------------------------------------------------
 
-    def _build_ip_camera_url(self, value: str) -> str:
+    def _build_ip_camera_url(self, value: str, template_url: str = "") -> str:
         raw = value.strip()
         if not raw:
             return ""
@@ -3275,7 +3289,17 @@ class CameraCalibTab(QWidget):
         host = raw.split("/", 1)[0].strip()
         if not host:
             return ""
-        return f"http://{host}/axis-cgi/mjpg/video.cgi?resolution=640x480&fps=10"
+        if template_url:
+            try:
+                from urllib.parse import urlparse, urlunparse
+
+                parsed = urlparse(template_url)
+                if parsed.scheme and parsed.netloc:
+                    port = f":{parsed.port}" if parsed.port and ":" not in host else ""
+                    return urlunparse(parsed._replace(netloc=f"{host}{port}"))
+            except Exception:
+                pass
+        return f"http://{host}/oneshotimage.jpg"
 
     def _extract_ip_camera_host(self, settings: dict, default_host: str = "") -> str:
         host = str(settings.get("ip_address", "")).strip()
@@ -3296,9 +3320,17 @@ class CameraCalibTab(QWidget):
     def _sync_ip_generated_url(self) -> str:
         if not hasattr(self, "_ip_url_edit"):
             return ""
-        url = self._build_ip_camera_url(self._ip_host_edit.text())
-        self._ip_url_edit.setText(url)
-        return url
+        current = self._ip_url_edit.text().strip()
+        previous_auto = self._ip_auto_urls[self._ip_slot]
+        auto_url = self._build_ip_camera_url(
+            self._ip_host_edit.text(),
+            previous_auto or current,
+        )
+        if not current or current == previous_auto:
+            self._ip_url_edit.setText(auto_url)
+            current = auto_url
+        self._ip_auto_urls[self._ip_slot] = auto_url
+        return current
 
     def _ip_param_base_url(self) -> str:
         from urllib.parse import urlparse
@@ -3324,12 +3356,12 @@ class CameraCalibTab(QWidget):
 
         base = self._ip_param_base_url()
         if not base:
-            return False, "Solo soportado para camaras HTTP/Axis"
+            return False, "Sin URL configurada"
 
         headers = self._ip_basic_auth_header()
         endpoints = [
-            f"{base}/axis-cgi/param.cgi?{query}",
-            f"{base}/axis-cgi/admin/param.cgi?{query}",
+            f"{base}/param.cgi?{query}",
+            f"{base}/cgi-bin/param.cgi?{query}",
         ]
         last_error = "Sin respuesta"
         for endpoint in endpoints:
@@ -3380,21 +3412,21 @@ class CameraCalibTab(QWidget):
             if fps > 0:
                 self._set_ip_status("En vivo", "ok")
             else:
-                self._set_ip_status("Conectandoâ€¦", "warn")
+                self._set_ip_status("Conectando...", "warn")
             self._ip_info_lbl.setText(
-                f"{res}  @  {fps:.0f} fps" if res and fps > 0 else "â€”"
+                f"{res}  @  {fps:.0f} fps" if res and fps > 0 else "-"
             )
             self._btn_ip_capture.setEnabled(self._ip_last_frames[index] is not None)
         else:
-            self._set_ip_status("â€”")
-            self._ip_info_lbl.setText("â€”")
+            self._set_ip_status("-")
+            self._ip_info_lbl.setText("-")
             self._btn_ip_capture.setEnabled(False)
             if hasattr(self, "_ip_preview"):
                 self._ip_preview.setPixmap(QPixmap())
-                self._ip_preview.setText("Sin seÃ±al")
+                self._ip_preview.setText("Sin señal")
 
     def _load_ip_slot_settings(self, slot: int) -> None:
-        """Carga URL, credenciales y parÃ¡metros desde camera.yaml para el slot dado."""
+        """Carga URL, credenciales y parámetros desde camera.yaml para el slot dado."""
         import yaml
         key = f"ip_camera_{slot + 1}"
         settings: dict = {}
@@ -3409,16 +3441,19 @@ class CameraCalibTab(QWidget):
         default_host = "192.168.1.17" if slot == 0 else ""
         host = self._extract_ip_camera_host(settings, default_host)
         self._ip_host_edit.setText(host)
-        self._sync_ip_generated_url()
+        url = str(settings.get("url", "")).strip()
+        if url:
+            self._ip_url_edit.setText(url)
+            self._ip_auto_urls[slot] = url
+        else:
+            generated = self._build_ip_camera_url(host)
+            self._ip_url_edit.setText(generated)
+            self._ip_auto_urls[slot] = generated
         self._ip_user_edit.setText(str(settings.get("username", "")))
         self._ip_pass_edit.setText(str(settings.get("password", "")))
-        for pd in _IP_PARAM_DEFS:
-            raw = int(settings.get(pd.key, pd.default))
-            val = max(pd.min_val, min(pd.max_val, raw))
-            self._ip_param_spinboxes[pd.key].setValue(val)
 
     # ------------------------------------------------------------------
-    # ConexiÃ³n IP â€” lÃ³gica interna
+    # Conexión IP - lógica interna
     # ------------------------------------------------------------------
 
     def showEvent(self, event) -> None:
@@ -3426,7 +3461,7 @@ class CameraCalibTab(QWidget):
         self._auto_connect_if_saved()
 
     def _auto_connect_if_saved(self) -> None:
-        """Conecta automÃ¡ticamente los slots con URL guardada que no fueron
+        """Conecta automáticamente los slots con URL guardada que no fueron
         desconectados manualmente por el operador."""
         import yaml
         p = Path("config/camera.yaml")
@@ -3452,7 +3487,7 @@ class CameraCalibTab(QWidget):
             password = cfg.get("password") or None
             self._start_ip_connection(slot, url, user, password)
             if slot == self._ip_slot:
-                self._set_ip_status("Conectandoâ€¦", "warn")
+                self._set_ip_status("Conectando...", "warn")
                 self._btn_ip_connect.setEnabled(False)
                 self._btn_ip_disconnect.setEnabled(True)
                 self._ip_host_edit.setEnabled(False)
@@ -3463,7 +3498,7 @@ class CameraCalibTab(QWidget):
 
     def _start_ip_connection(self, slot: int, url: str,
                              user: "str | None", password: "str | None") -> None:
-        """Inicia la conexiÃ³n para un slot sin modificar la UI."""
+        """Inicia la conexión para un slot sin modificar la UI."""
         self._disconnect_ip_slot(slot)
         self._ip_retry_counts[slot] = 0
         self._ip_prev_sig[slot] = None
@@ -3471,7 +3506,11 @@ class CameraCalibTab(QWidget):
         self._ip_frozen[slot] = False
         source = int(url) if url.isdigit() else url
         if isinstance(source, str) and source.lower().startswith(("http://", "https://")):
-            worker = _MJPEGReader(source, self, username=user, password=password)
+            source_l = source.lower()
+            if any(tok in source_l for tok in (".jpg", ".jpeg", "oneshot", "snapshot")):
+                worker = _HTTPSnapshotReader(source, self, username=user, password=password)
+            else:
+                worker = _MJPEGReader(source, self, username=user, password=password)
             worker.frame_ready_meta.connect(
                 lambda f, m, _s=slot: self._on_ip_frame_ready(f, _s, m)
             )
@@ -3488,12 +3527,14 @@ class CameraCalibTab(QWidget):
 
     def _on_ip_connect(self) -> None:
         slot = self._ip_slot
-        url = self._sync_ip_generated_url()
+        url = self._ip_url_edit.text().strip()
+        if not url:
+            url = self._sync_ip_generated_url()
         if not url:
             self._set_ip_status("Ingrese una IP", "warn")
             return
         self._ip_manual_disc[slot] = False
-        self._set_ip_status("Conectandoâ€¦", "warn")
+        self._set_ip_status("Conectando...", "warn")
         user     = self._ip_user_edit.text().strip() or None
         password = self._ip_pass_edit.text().strip() or None
         self._start_ip_connection(slot, url, user, password)
@@ -3511,16 +3552,16 @@ class CameraCalibTab(QWidget):
         self._disconnect_ip_slot(slot)
         if hasattr(self, "_ip_preview"):
             self._ip_preview.setPixmap(QPixmap())
-            self._ip_preview.setText("Sin seÃ±al")
+            self._ip_preview.setText("Sin señal")
         self._btn_ip_connect.setEnabled(True)
         self._btn_ip_disconnect.setEnabled(False)
         self._ip_host_edit.setEnabled(True)
         self._ip_url_edit.setEnabled(True)
         self._ip_user_edit.setEnabled(True)
         self._ip_pass_edit.setEnabled(True)
-        self._set_ip_status("â€”")
+        self._set_ip_status("-")
         self._btn_ip_capture.setEnabled(False)
-        self._ip_info_lbl.setText("â€”")
+        self._ip_info_lbl.setText("-")
 
     def _disconnect_ip_slot(self, slot: int) -> None:
         self._ip_retry_timers[slot].stop()
@@ -3542,7 +3583,7 @@ class CameraCalibTab(QWidget):
         self._save_ip_diagnostic_snapshot(slot, f"error_{msg}")
         if slot == self._ip_slot:
             n = self._ip_retry_counts[slot]
-            self._set_ip_status(f"Reintento {n} â€” en {delay}s", "error")
+            self._set_ip_status(f"Reintento {n} - en {delay}s", "error")
             self._btn_ip_connect.setEnabled(False)
             self._btn_ip_disconnect.setEnabled(True)
             self._btn_ip_capture.setEnabled(False)
@@ -3573,7 +3614,7 @@ class CameraCalibTab(QWidget):
         self._start_ip_connection(slot, url, user, password)
         if slot == self._ip_slot:
             n = self._ip_retry_counts[slot]
-            self._set_ip_status(f"Intentando conectarâ€¦ ({n})", "warn")
+            self._set_ip_status(f"Intentando conectar... ({n})", "warn")
 
     def _ip_frame_signature(self, frame):
         h, w = frame.shape[:2]
@@ -3642,11 +3683,11 @@ class CameraCalibTab(QWidget):
             self._ip_fps_count[slot] = 0
             self._ip_fps_last_t[slot] = now
         fh, fw = frame.shape[:2]
-        self._ip_last_res[slot] = f"{fw}Ã—{fh}"
+        self._ip_last_res[slot] = f"{fw}x{fh}"
         if slot == self._ip_slot:
             frozen = self._update_ip_freeze_watchdog(frame, slot, now)
             fps_str = (f"{self._ip_fps_value[slot]:.0f} fps"
-                       if self._ip_fps_value[slot] > 0 else "â€¦")
+                       if self._ip_fps_value[slot] > 0 else "...")
             if frozen:
                 self._set_ip_status("SENAL CONGELADA", "error")
             else:
@@ -3660,7 +3701,7 @@ class CameraCalibTab(QWidget):
         if cap is None or not cap.isOpened():
             self._disconnect_ip_slot(slot)
             if slot == self._ip_slot:
-                self._on_ip_error("seÃ±al perdida", slot)
+                self._on_ip_error("señal perdida", slot)
             return
         ret, frame = cap.read()
         if not ret:
@@ -3695,71 +3736,54 @@ class CameraCalibTab(QWidget):
             cv2.imwrite(str(out_path), frame)
             self._ip_capture_status.setStyleSheet(f"color:{_OK};font-size:11px;")
             self._ip_capture_status.setText(f"Guardado: {out_path.name}")
-            # Limpiar el mensaje despuÃ©s de 4 segundos
+            # Limpiar el mensaje después de 4 segundos
             QTimer.singleShot(4000, lambda: self._ip_capture_status.setText(""))
         except Exception as exc:
             self._ip_capture_status.setStyleSheet(f"color:{_NOK};font-size:11px;")
             self._ip_capture_status.setText(f"Error: {exc}")
 
     def _save_ip_settings(self) -> None:
+        """Guarda IP, URL y credenciales en camera.yaml y conecta inmediatamente."""
         slot = self._ip_slot
-        key = f"ip_camera_{slot + 1}"
-        url = self._sync_ip_generated_url()
+        key  = f"ip_camera_{slot + 1}"
+        url  = self._sync_ip_generated_url()
+        if not url:
+            self._ip_save_status.setStyleSheet(f"color:{_NOK};font-size:11px;")
+            self._ip_save_status.setText("Ingresá la IP primero")
+            return
         settings: dict = {
             "ip_address": self._ip_host_edit.text().strip(),
-            "url":      url,
-            "username": self._ip_user_edit.text().strip(),
-            "password": self._ip_pass_edit.text().strip(),
+            "url":        url,
+            "username":   self._ip_user_edit.text().strip(),
+            "password":   self._ip_pass_edit.text().strip(),
         }
-        for pd in _IP_PARAM_DEFS:
-            settings[pd.key] = self._ip_param_spinboxes[pd.key].value()
         try:
             camera_config.save_camera_settings(key, settings)
-            self._ip_apply_status.setStyleSheet(f"color:{_OK};font-size:10px;")
-            self._ip_apply_status.setText(f"Guardado en {key}")
         except Exception as exc:
-            self._ip_apply_status.setStyleSheet(f"color:{_NOK};font-size:10px;")
-            self._ip_apply_status.setText(f"Error al guardar: {exc}")
-
-    def _apply_ip_params(self) -> None:
-        """EnvÃ­a parÃ¡metros de imagen a la cÃ¡mara vÃ­a VAPIX (Axis)."""
-        params: dict = {}
-        for pd in _IP_PARAM_DEFS:
-            vapix_key = _IP_VAPIX_MAP.get(pd.key)
-            if vapix_key:
-                params[vapix_key] = self._ip_param_spinboxes[pd.key].value()
-        if not params:
+            self._ip_save_status.setStyleSheet(f"color:{_NOK};font-size:11px;")
+            self._ip_save_status.setText(f"Error al guardar: {exc}")
             return
-        try:
-            query = "&".join(
-                ["action=update", "usergroup=admin"] + [f"{k}={v}" for k, v in params.items()]
-            )
-            ok, body = self._ip_param_request(query)
-            if not ok:
-                self._ip_apply_status.setStyleSheet(f"color:{_NOK};font-size:10px;")
-                self._ip_apply_status.setText(f"VAPIX error: {body}")
-                return
 
-            verified_ok, verified = self._read_ip_camera_params()
-            if verified_ok and isinstance(verified, dict):
-                confirmed = []
-                for pd in _IP_PARAM_DEFS:
-                    current = verified.get(pd.key)
-                    if current is None:
-                        continue
-                    current = max(pd.min_val, min(pd.max_val, current))
-                    self._ip_param_spinboxes[pd.key].blockSignals(True)
-                    self._ip_param_spinboxes[pd.key].setValue(current)
-                    self._ip_param_spinboxes[pd.key].blockSignals(False)
-                    confirmed.append(f"{pd.label}={current}")
-                self._ip_apply_status.setStyleSheet(f"color:{_OK};font-size:10px;")
-                self._ip_apply_status.setText("Aplicado y verificado: " + ", ".join(confirmed))
-            else:
-                self._ip_apply_status.setStyleSheet(f"color:{_WARN};font-size:10px;")
-                self._ip_apply_status.setText(f"Aplicado sin verificacion: {body}")
-        except Exception as exc:
-            self._ip_apply_status.setStyleSheet(f"color:{_NOK};font-size:10px;")
-            self._ip_apply_status.setText(f"VAPIX error: {exc}")
+        # Permitir auto-connect (cancela cualquier desconexión manual previa)
+        self._ip_manual_disc[slot] = False
+
+        # Conectar ahora si no está ya conectado
+        if self._ip_workers[slot] is None and self._ip_caps[slot] is None:
+            user     = settings["username"] or None
+            password = settings["password"] or None
+            self._start_ip_connection(slot, url, user, password)
+            if slot == self._ip_slot:
+                self._set_ip_status("Conectando...", "warn")
+                self._btn_ip_connect.setEnabled(False)
+                self._btn_ip_disconnect.setEnabled(True)
+                self._ip_url_edit.setEnabled(False)
+                self._ip_user_edit.setEnabled(False)
+                self._ip_pass_edit.setEnabled(False)
+                self._ip_preview.setText("")
+
+        self._ip_save_status.setStyleSheet(f"color:{_OK};font-size:11px;")
+        self._ip_save_status.setText("Guardado — se conectará al iniciar")
+        QTimer.singleShot(3000, lambda: self._ip_save_status.setText(""))
 
     # ------------------------------------------------------------------
     # Slots
@@ -3767,12 +3791,12 @@ class CameraCalibTab(QWidget):
 
     def _on_scanner_changed(self, scanner_id: str) -> None:
         running = self._get_camera_running(scanner_id)
-        self._cam_btn.setText("Detener cÃ¡mara" if running else "Iniciar cÃ¡mara")
+        self._cam_btn.setText("Detener cámara" if running else "Iniciar cámara")
         if running:
             self._preview_timer.start()
         else:
             self._preview_timer.stop()
-            self._preview_lbl.setText("Sin seÃ±al de cÃ¡mara")
+            self._preview_lbl.setText("Sin señal de cámara")
 
     def _toggle_camera(self) -> None:
         scanner_id = self._scanner_combo.currentText()
@@ -3782,17 +3806,17 @@ class CameraCalibTab(QWidget):
         if cam.is_running:
             cam.stop()
             self._preview_timer.stop()
-            self._cam_btn.setText("Iniciar cÃ¡mara")
-            self._preview_lbl.setText("Sin seÃ±al de cÃ¡mara")
+            self._cam_btn.setText("Iniciar cámara")
+            self._preview_lbl.setText("Sin señal de cámara")
         else:
             ok = cam.start()
             if ok:
                 self._preview_timer.start()
-                self._cam_btn.setText("Detener cÃ¡mara")
-                self._status_lbl.setText("CÃ¡mara iniciada")
+                self._cam_btn.setText("Detener cámara")
+                self._status_lbl.setText("Cámara iniciada")
             else:
                 self._status_lbl.setStyleSheet(f"color:{_NOK};font-size:11px;")
-                self._status_lbl.setText("Error al abrir cÃ¡mara")
+                self._status_lbl.setText("Error al abrir cámara")
 
     def _on_slider_changed(self, pd: _ParamDef, slider_val: int, sb: QSpinBox) -> None:
         real_val = pd.min_val + slider_val
@@ -3827,7 +3851,7 @@ class CameraCalibTab(QWidget):
             cam = self._system.camera(scanner_id)
             if cam.is_running:
                 ok = cam.apply_setting(key, value)
-                dot = "â—" if ok else "â—‹"
+                dot = "ON" if ok else "OFF"
                 self._status_lbl.setStyleSheet(
                     f"color:{'#4ade80' if ok else '#fbbf24'};font-size:11px;"
                 )
@@ -3870,7 +3894,7 @@ class CameraCalibTab(QWidget):
         except KeyError:
             return
         if not cam.is_running:
-            self._status_lbl.setText("CÃ¡mara no iniciada")
+            self._status_lbl.setText("Cámara no iniciada")
             return
 
         self._block_apply = True
@@ -3888,7 +3912,7 @@ class CameraCalibTab(QWidget):
             self._block_apply = False
 
         self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
-        self._status_lbl.setText("Valores leÃ­dos de la cÃ¡mara")
+        self._status_lbl.setText("Valores leídos de la cámara")
 
     def _save_settings(self) -> None:
         scanner_id = self._scanner_combo.currentText()
@@ -3949,20 +3973,20 @@ class CameraCalibTab(QWidget):
 
 
 # ==================================================================
-# Tab: SimulaciÃ³n de FSM de scanner
+# Tab: Simulación de FSM de scanner
 # ==================================================================
 
 class ScannerSimTab(QWidget):
     """
-    SimulaciÃ³n de ciclo completo AUTO sin cÃ¡mara real.
+    Simulación de ciclo completo AUTO sin cámara real.
 
     Permite probar el recorrido:
-      IDLE â†’ [Iniciar] â†’ RUNNING verde
-           â†’ [Inyectar OK/NOK] â†’ luces amarilla/verde
-           â†’ [1/3 NOK] â†’ streak parcial
-           â†’ [Forzar FAULT] â†’ FAULT rojo parpadeante
-           â†’ [Detener] â†’ STOPPED
-           â†’ [Reset] â†’ IDLE azul
+      IDLE -> [Iniciar] -> RUNNING verde
+           -> [Inyectar OK/NOK] -> luces amarilla/verde
+           -> [1/3 NOK] -> streak parcial
+           -> [Forzar FAULT] -> FAULT rojo parpadeante
+           -> [Detener] -> STOPPED
+           -> [Reset] -> IDLE azul
     """
 
     _STATE_COLORS = {
@@ -3998,14 +4022,14 @@ class ScannerSimTab(QWidget):
         lay.setContentsMargins(16, 16, 16, 16)
         lay.setSpacing(16)
 
-        title = QLabel("SimulaciÃ³n de ciclo de producciÃ³n â€” sin cÃ¡mara real")
+        title = QLabel("Simulación de ciclo de producción - sin cámara real")
         title.setStyleSheet(f"color:{_ACCENT};font-size:13px;font-weight:700;")
         lay.addWidget(title)
 
         desc = QLabel(
             "Inicia el scanner en modo AUTO (solenoide + backlight ON, luces PLC activas) "
-            "sin requerir cÃ¡mara. Usa los botones para simular resultados de inspecciÃ³n "
-            "y verificar la FSM completa: IDLE â†’ RUNNING â†’ FAULT â†’ STOPPED â†’ IDLE."
+            "sin requerir cámara. Usa los botones para simular resultados de inspección "
+            "y verificar la FSM completa: IDLE -> RUNNING -> FAULT -> STOPPED -> IDLE."
         )
         desc.setStyleSheet(f"color:{_MUTED};font-size:11px;")
         desc.setWordWrap(True)
@@ -4029,7 +4053,7 @@ class ScannerSimTab(QWidget):
             grp_lay.setContentsMargins(14, 16, 14, 14)
             grp_lay.setSpacing(12)
 
-            # â”€â”€ Estado actual â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── Estado actual ───────────────────────────────────────
             info_row = QHBoxLayout()
             info_row.setSpacing(16)
 
@@ -4048,13 +4072,13 @@ class ScannerSimTab(QWidget):
             self._streak_lbls[sid] = streak_lbl
             info_row.addWidget(streak_lbl)
 
-            thr_lbl = QLabel(f"Umbral FAULT: {threshold}  Â·  1/3 = {nok_third}")
+            thr_lbl = QLabel(f"Umbral FAULT: {threshold}  -  1/3 = {nok_third}")
             thr_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
             info_row.addWidget(thr_lbl)
             info_row.addStretch()
             grp_lay.addLayout(info_row)
 
-            # â”€â”€ Botones de acciÃ³n â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── Botones de acción ────────────────────────────────────
             btn_row = QHBoxLayout()
             btn_row.setSpacing(8)
 
@@ -4067,13 +4091,13 @@ class ScannerSimTab(QWidget):
                 )
                 return b
 
-            b_start  = _btn("â–¶ Iniciar\n(sim AUTO)", "#166534")
-            b_ok     = _btn("âœ“ Inyectar OK",         "#1e40af", 110)
-            b_nok1   = _btn("âœ— Inyectar NOK\n(Ã—1)",  "#7f1d1d", 110)
-            b_nok3   = _btn(f"âœ—âœ— {nok_third}Ã— NOK\n(1/3 umbral)", "#92400e", 120)
-            b_fault  = _btn("âš¡ Forzar FAULT",        "#831843", 120)
-            b_stop   = _btn("â–  Detener",              "#374151", 100)
-            b_reset  = _btn("â†º Reset",                "#1e3a5f", 90)
+            b_start  = _btn("Iniciar\n(sim AUTO)", "#166534")
+            b_ok     = _btn("OK\nInyectar",        "#1e40af", 110)
+            b_nok1   = _btn("NOK\n(x1)",           "#7f1d1d", 110)
+            b_nok3   = _btn(f"NOK x{nok_third}\n(1/3 umbral)", "#92400e", 120)
+            b_fault  = _btn("Forzar FAULT",        "#831843", 120)
+            b_stop   = _btn("Detener",              "#374151", 100)
+            b_reset  = _btn("Reset",                "#1e3a5f", 90)
 
             b_start.clicked.connect(lambda _, s=sid: self._system.scanner(s).start_simulate())
             b_ok.clicked.connect(   lambda _, s=sid: self._system.scanner(s).inject_result(True))
@@ -4090,9 +4114,9 @@ class ScannerSimTab(QWidget):
             btn_row.addStretch()
             grp_lay.addLayout(btn_row)
 
-            # â”€â”€ Secuencia sugerida â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── Secuencia sugerida ───────────────────────────────────
             seq = QLabel(
-                "Secuencia: Iniciar â†’ Inyectar OK â†’ 1/3 NOK â†’ Forzar FAULT â†’ Detener â†’ Reset"
+                "Secuencia: Iniciar -> Inyectar OK -> 1/3 NOK -> Forzar FAULT -> Detener -> Reset"
             )
             seq.setStyleSheet(f"color:#475569;font-size:10px;font-style:italic;")
             grp_lay.addWidget(seq)
@@ -4134,7 +4158,7 @@ class ScannerSimTab(QWidget):
 # ------------------------------------------------------------------
 
 def _logo_label(rel_path: str, max_h: int) -> QLabel:
-    """Carga logo desde raÃ­z del proyecto escalado a max_h px de alto."""
+    """Carga logo desde raíz del proyecto escalado a max_h px de alto."""
     lbl = QLabel()
     lbl.setStyleSheet("background:transparent;")
     pix = QPixmap(str(_ROOT / rel_path))
@@ -4159,7 +4183,7 @@ class ServiceWindow(QMainWindow):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
         self._system = system
-        self.setWindowTitle("DEFYVISION â€” Modo Servicio")
+        self.setWindowTitle("DEFYVISION - Modo Servicio")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
             self.setWindowIcon(QIcon(icon_pix))
@@ -4210,21 +4234,21 @@ class ServiceWindow(QMainWindow):
         self._cam_tab    = CameraCalibTab(self._system)
 
         self._tabs.addTab(self._plc_tab,    "PLC I/O")
-        self._tabs.addTab(self._diag_tab,   "DiagnÃ³stico HW")
+        self._tabs.addTab(self._diag_tab,   "Diagnóstico HW")
         self._tabs.addTab(self._sys_tab,    "Sistema")
         self._tabs.addTab(self._log_tab,    "Logs")
-        self._tabs.addTab(self._cfg_tab,    "ConfiguraciÃ³n")
-        self._tabs.addTab(self._rec_tab,    "GrabaciÃ³n")
-        self._tabs.addTab(self._cam_tab,    "CÃ¡mara")
+        self._tabs.addTab(self._cfg_tab,    "Configuración")
+        self._tabs.addTab(self._rec_tab,    "Grabación")
+        self._tabs.addTab(self._cam_tab,    "Cámara")
 
         root.addWidget(self._tabs, stretch=1)
 
     def _build_header(self) -> QWidget:
         """
-        Header oscuro con logos reales â€” misma estructura que OperatorWindow.
+        Header oscuro con logos reales - misma estructura que OperatorWindow.
 
         Layout de 3 secciones de ancho fijo igual (_HEADER_WING_W px c/u):
-          [ala izquierda] | [centro: tÃ­tulo, stretch=1] | [ala derecha]
+          [ala izquierda] | [centro: título, stretch=1] | [ala derecha]
         """
         header = QWidget()
         header.setFixedHeight(84)
@@ -4238,7 +4262,7 @@ class ServiceWindow(QMainWindow):
         outer.setContentsMargins(18, 0, 18, 0)
         outer.setSpacing(0)
 
-        # â”€â”€ Ala izquierda: logo Metalconf â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Ala izquierda: logo Metalconf ────────────────────────────
         left_wing = QWidget()
         left_wing.setFixedWidth(_HEADER_WING_W)
         left_wing.setStyleSheet("background:transparent;")
@@ -4249,7 +4273,7 @@ class ServiceWindow(QMainWindow):
         left_lay.addStretch()
         outer.addWidget(left_wing)
 
-        # â”€â”€ Centro: tÃ­tulo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Centro: título ────────────────────────────────────────────
         center = QWidget()
         center.setStyleSheet("background:transparent;")
         center_lay = QVBoxLayout(center)
@@ -4263,7 +4287,7 @@ class ServiceWindow(QMainWindow):
             "color:#f1f5f9;font-size:26px;font-weight:700;"
             "letter-spacing:4px;background:transparent;"
         )
-        subtitle = QLabel("Modo Servicio  Â·  DiagnÃ³stico")
+        subtitle = QLabel("Modo Servicio  ·  Diagnóstico")
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle.setStyleSheet(
             "color:#475569;font-size:10px;letter-spacing:1.5px;"
@@ -4273,7 +4297,7 @@ class ServiceWindow(QMainWindow):
         center_lay.addWidget(subtitle)
         outer.addWidget(center, stretch=1)
 
-        # â”€â”€ Ala derecha: PLC badge + logo DEFYMOTION â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Ala derecha: PLC badge + logo DEFYMOTION ─────────────────
         right_wing = QWidget()
         right_wing.setFixedWidth(_HEADER_WING_W)
         right_wing.setStyleSheet("background:transparent;")
@@ -4288,7 +4312,7 @@ class ServiceWindow(QMainWindow):
         ctrl_lay.setSpacing(5)
         ctrl_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
-        self._header_plc = QLabel("â— PLC: â€”")
+        self._header_plc = QLabel("PLC: -")
         self._header_plc.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;"
         )
@@ -4318,14 +4342,14 @@ class ServiceWindow(QMainWindow):
 
     def _reconnect_plc(self) -> None:
         ok = self._system.connect_plc()
-        logger.info(f"[Servicio] Reconectar PLC â†’ {'OK' if ok else 'FALLO'}")
+        logger.info(f"[Servicio] Reconectar PLC -> {'OK' if ok else 'FALLO'}")
 
     def _refresh(self) -> None:
         connected = self._system.plc.connected
         if connected != self._last_plc_connected:
             self._last_plc_connected = connected
             self._header_plc.setText(
-                "â— PLC: Conectado" if connected else "â— PLC: Desconectado"
+                "PLC: Conectado" if connected else "PLC: Desconectado"
             )
             self._header_plc.setStyleSheet(
                 f"color:{_OK if connected else _NOK};"
@@ -4338,7 +4362,7 @@ class ServiceWindow(QMainWindow):
             self._diag_tab.refresh()
         elif idx == 2:
             self._sys_tab.refresh()
-        # LogsTab se actualiza por seÃ±al; ConfigTab es estÃ¡tico
+        # LogsTab se actualiza por señal; ConfigTab es estático
 
     def closeEvent(self, event) -> None:
         self._timer.stop()

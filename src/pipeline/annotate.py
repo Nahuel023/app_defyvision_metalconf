@@ -142,24 +142,24 @@ def draw_compare_overlay(
     for h in detected:
         cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (0, 255, 0), 2)
 
-    # Missing esperados: rojo brillante con fondo oscuro para visibilidad máxima
+    # Missing esperados: marcador hueco — sin relleno para ver la imagen debajo
     for i, (x, y) in enumerate(missing_points):
         ix, iy = int(x), int(y)
-        # Glow: círculo relleno oscuro de fondo
-        cv2.circle(out, (ix, iy), 18, (0, 0, 80), -1)
-        # Cruz grande roja
+        # Círculo hueco: indica la posición esperada sin tapar el agujero debajo
+        cv2.circle(out, (ix, iy), 18, (0, 0, 0),   3)   # sombra negra
+        cv2.circle(out, (ix, iy), 18, (0, 0, 255),  2)   # borde rojo
+        # Cruz: sombra primero, luego roja
+        cv2.drawMarker(out, (ix, iy), (0, 0, 0),
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=28, thickness=4)
         cv2.drawMarker(out, (ix, iy), (0, 0, 255),
-                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=34, thickness=3)
-        # Borde blanco fino para contraste sobre fondo oscuro
-        cv2.drawMarker(out, (ix, iy), (200, 200, 200),
-                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=36, thickness=1)
-        # Número de faltante sobre la cruz
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=28, thickness=2)
+        # Número del faltante
         label = str(i + 1)
         (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
         cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 2, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0),     3, cv2.LINE_AA)
         cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
     # Extra detectados (espurios): naranja diamante
     for (x, y) in extra_points:
