@@ -43,6 +43,293 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-05-29 — Tadeo + Claude (noche)
+
+#### Cambio 70 — Paralelización de inspect_folder (CLI 3.1×) + diagnóstico esterilla
+
+**Mejora de rendimiento — `src/inspection.py` → `inspect_folder`:**
+Pre-carga de tolerances+pattern+roi una vez + ThreadPoolExecutor (hasta 6 workers)
+cuando `machine_stop._enabled=False`. Secuencial obligatorio si machine_stop activo.
+**Resultado:** 200 frames modelo_A: 217s → 69s (3.1× más rápido), mismo resultado.
+
+**Diagnóstico esterilla sobre 200 frames reales:**
+- Detección raw: 126 holes/frame (63 chicos + 63 grandes) — el detector funciona ✓
+- Patrón referencia: 83 celdas vs 126 visibles → 24 "extras" son agujeros reales no registrados
+- 9-21 missing/frame: ~12-16 en bordes de material (normal) + ~5-9 por drift de fase de grid
+- Mejor frame: frame_0162 (missing=9, stagger=+26px) — usado como referencia
+- frame_0139 (ratio=138%) genera stagger=-22px (fase invertida) → peor resultado
+- Para mejorar la cobertura: capturar frame con esterilla centrado y en el mismo ciclo que frame_0162
+- Resultado global: 200/200 temporal OK con threshold=35, tolerancias blandas ✓
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
+### Sesión 2026-05-29 — Tadeo + Claude (tarde)
+
+#### Cambio 71 - Aplicacion real y verificacion de parametros VAPIX en camara IP
+
+**Motivacion:** Los sliders de brillo, contraste, saturacion y nitidez no estaban
+teniendo efecto real sobre la camara IP. Habia dos problemas: rangos incompatibles
+con Axis y falta de verificacion de la respuesta de la camara.
+
+**Cambios:**
+- Los sliders IP ahora usan rangos Axis correctos `0..100` para brillo, contraste,
+  saturacion y nitidez.
+- Se agrego helper para enviar requests VAPIX con autenticacion Basic y fallback a
+  `/axis-cgi/param.cgi` y `/axis-cgi/admin/param.cgi`.
+- El update ahora se hace con `action=update&usergroup=admin`.
+- Luego de aplicar, la app intenta leer `ImageSource.I0.Sensor` y confirma en pantalla
+  los valores que quedaron realmente en la camara.
+- Si la camara rechaza el cambio o no responde, el operador ahora ve el error en vez
+  de un falso "Aplicado".
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 70 - Campo simple de IP para camaras IP
+
+**Motivacion:** El operador no deberia tener que escribir la URL completa de Axis.
+Ahora carga solo la IP de la camara y la aplicacion arma automaticamente el endpoint
+MJPEG liviano.
+
+**Cambios:**
+- En el tab Camara se agrego el campo `IP de camara`.
+- La UI muestra una `URL generada` readonly para verificar que se conectara a
+  `http://<ip>/axis-cgi/mjpg/video.cgi?resolution=640x480&fps=10`.
+- `camera.yaml` guarda `ip_address` ademas de `url`, manteniendo compatibilidad con
+  configuraciones viejas que solo tengan URL.
+- Conectar, auto-conectar, reconectar, guardar config y aplicar VAPIX usan la URL
+  generada desde la IP.
+
+**Archivos modificados:** `src/ui/service.py`, `config/camera.yaml`
+
+---
+
+#### Cambio 69 - Mejoras WiFi para camaras IP sin habilitar salidas reales
+
+**Motivacion:** La camara IP por WiFi puede atrasarse, cortar el stream o quedar
+congelada. Para usarla con mas confianza en diagnostico se agregaron controles de
+calidad de senal sin accionar ninguna salida fisica.
+
+**Cambios:**
+- `_MJPEGReader` ahora decodifica todos los JPEG completos recibidos por chunk, pero
+  emite solo el frame mas nuevo. Esto evita que la UI/inspeccion quede tomando
+  decisiones con frames viejos cuando el WiFi se atrasa.
+- El tab Camara muestra metricas de stream: edad del ultimo frame, FPS, frames
+  descartados y cantidad de reconexiones.
+- Se agrego watchdog de senal congelada: si los frames son practicamente iguales
+  durante varios segundos, el badge marca `SENAL CONGELADA`.
+- Ante error de stream o senal congelada se guarda un snapshot diagnostico en
+  `data/output/export/diagnostico_ip*_*.jpg`, con throttle para no llenar disco.
+- Se agrego un checkbox visible `Solo preview - sin salidas de maquina` para dejar
+  explicito que por ahora la camara IP no acciona la maquina.
+- La URL por defecto de `ip_camera_1` usa `resolution=640x480&fps=10` para bajar
+  carga de red en WiFi.
+
+**Archivos modificados:** `src/ui/service.py`, `config/camera.yaml`
+
+---
+
+#### Cambio 68 — Tolerancias blandas modelo_A (Esterilla) — reducir falsas cruces
+
+**Problema:** El overlay de Esterilla mostraba cruces rojas en casi todos los frames
+porque el sistema generaba posiciones esperadas donde no hay agujeros detectables
+(grid phase ligeramente off, iluminación no ideal, blur) y los umbrales eran muy ajustados.
+
+**Diagnóstico de la imagen `debug_esterilla_best.png`:**
+- Los agujeros SÍ se detectan (círculos verdes visibles)
+- El grid genera posiciones esperadas que no coinciden exactamente con los detectados
+- `frame_missing_nok_threshold: 8` → con ≥8 faltantes el frame muestra NOK con todas
+  las cruces rojas. Casi todos los frames del esterilla tienen >8 faltantes durante calibración.
+- `min_area: 150`, `circularity_min: 0.55` → rechazan agujeros reales con blur/iluminación
+
+**Cambios en `config/tolerancias.yaml` — sección `modelo_A`:**
+
+| Parámetro | Antes | Ahora | Razón |
+|-----------|-------|-------|-------|
+| `threshold` | 175 (global) | **140** | Umbral de binarización más bajo para capturar más agujeros |
+| `min_area` | 150.0 | **80.0** | Agujeros chicos con blur bajan de 150px² |
+| `min_area_small` | 150.0 | **80.0** | Igual al piso global |
+| `min_area_large` | 400.0 | **300.0** | Acepta grandes con iluminación no ideal |
+| `max_area_large` | 7000.0 | **8000.0** | Margen más amplio |
+| `circularity_min` | 0.55 | **0.35** | Acepta agujeros deformados por perspectiva/blur |
+| `aspect_ratio_max` | 2.5 | **3.0** | Ligera deformación aceptable |
+| `align_match_tol_px` | 150.0 | **250.0** | Más permisivo para alineación inicial |
+| `min_match_count` | 4 | **3** | Permite alinear con menos agujeros visibles |
+| `edge_margin_px` | 5.0 | **3.0** | No descartar agujeros en borde de ROI |
+| `grid_max_missing` | 25 | **50** | ~57% de 88 agujeros — muy permisivo |
+| `bbox_filter_margin_px` | 30.0 | **50.0** | Margen amplio alrededor del bbox |
+| `extra_min_dist_factor` | 2.0 | **1.5** | Umbral = 27px (antes 36px) |
+| `frame_missing_nok_threshold` | 8 | **35** | ★ CAMBIO CLAVE: NOK visual solo cuando faltan >35 agujeros |
+| `consecutive_nok_frames` | 8 | **9999** | FAULT deshabilitado durante calibración |
+| `machine_stop_enabled` | true | **false** | Sin alertas de parada mientras se calibra |
+
+**Por qué `frame_missing_nok_threshold: 35` es el cambio más importante:**
+El overlay muestra cruces rojas para CADA agujero faltante individual, pero el
+estado "NOK" (que hace que el frame se vea todo rojo con cruces prominentes) depende
+de si `missing >= frame_missing_nok_threshold`. Subiendo a 35, los frames con 5-30
+faltantes muestran algunas cruces pero el status sigue siendo "OK" → mucho menos
+ruido visual para el operador.
+
+**Próximos pasos para calibración fina:**
+1. Capturar imagen OK limpia de Esterilla en planta y reconstruir `holes.json`
+   con `build-pattern --model modelo_A --scanner scanner_2 --img <imagen>`
+2. Ajustar `threshold` con histograma de imagen real (scripts/_debug_areas.py)
+3. Una vez detección estable: bajar `frame_missing_nok_threshold` a 5-8
+4. Habilitar `machine_stop_enabled: true` y `consecutive_nok_frames: 8`
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+### Sesión 2026-05-29 — Tadeo + Claude
+
+#### Cambio 67 — Badge de estado IP más grande y semántico
+
+**Problema:** El badge de estado IP tenía ancho fijo de 80px → textos como
+`"Reintento 2 en 10s"` o `"Intentando conectar…"` aparecían cortados.
+Además el estado era pequeño y difícil de leer de lejos en planta.
+
+**Cambios:**
+- `setFixedWidth(80)` → `setMinimumWidth(170)`: el badge crece con el texto.
+- Font 11px → **13px bold**, padding 4px → 6px 12px, border-radius 5→6px.
+- Helper `_set_ip_status(text, kind)` centraliza todos los `setText` + `setStyleSheet`:
+  - `"ok"` → texto verde brillante, fondo verde muy oscuro
+  - `"warn"` → texto amarillo ámbar, fondo amarillo muy oscuro
+  - `"error"` → texto rojo claro, fondo rojo muy oscuro
+  - `"neutral"` → texto muted, fondo oscuro
+- Mensajes de estado unificados en todos los métodos:
+  - Conectando: `"Conectando…"` (warn)
+  - Señal activa: `"En vivo"` (ok)
+  - Error/retry: `"Reintento N — en Xs"` (error)
+  - Retry activo: `"Intentando conectar… (N)"` (warn)
+- Info FPS/resolución (`_ip_info_lbl`): font 11px → **13px bold**, color muted → _TEXT.
+
+**Archivos modificados:** `src/ui/service.py`
+
+#### Cambio 66 — Auto-conectar, auto-reconectar, FPS en vivo y captura de frame
+
+**Motivación:** El operador en planta necesitaba conectar manualmente al entrar al tab,
+no tenía forma de saber la calidad del stream IP, y si la cámara se reiniciaba debía
+reconectar a mano. Tampoco podía guardar una imagen de lo que ve la cámara IP.
+
+**Características implementadas:**
+
+1. **Auto-conectar al abrir el tab** (`showEvent`)
+   - Cuando el operador entra al tab Cámara, si hay una URL guardada para un slot y no
+     fue desconectado manualmente, la conexión arranca automáticamente.
+   - Flag `_ip_manual_disc[slot]` evita que el auto-connect se dispare después de que
+     el operador haya presionado Desconectar deliberadamente.
+
+2. **Auto-reconectar si se cae la señal** (`_on_ip_error` + `_on_ip_retry`)
+   - Si el stream HTTP/MJPEG se corta (red caída, reinicio de cámara Axis), arranca un
+     timer single-shot con delay incremental: 5s → 10s → 15s → … → 30s máximo.
+   - El badge de estado muestra `"Reintento N en Xs"` para informar al operador sin
+     necesitar intervención.
+   - El retry lee URL y credenciales desde `camera.yaml` para ese slot.
+
+3. **FPS + resolución en vivo** (`_on_ip_frame_ready`)
+   - Se actualizan cada 20 frames. Muestra `"WxH @ Xfps"` debajo del preview.
+   - El badge de estado cambia a verde con texto `"En vivo"` cuando hay señal.
+
+4. **Botón "Capturar frame"** (`_capture_ip_frame`)
+   - Habilitado solo cuando hay señal. Guarda el último frame en
+     `data/output/export/captura_ip1_YYYYMMDD_HHMMSS.jpg`.
+   - Muestra el nombre del archivo guardado durante 4 segundos luego se limpia.
+
+**Refactor interno:**
+- `_start_ip_connection(slot, url, user, pass)`: lógica de conexión extraída de
+  `_on_ip_connect`, usada también por auto-connect y retry.
+- `_auto_connect_if_saved()`: carga config desde `camera.yaml` y llama `_start_ip_connection`.
+
+**Archivos modificados:** `src/ui/service.py`
+
+#### Cambio 65 — Tab Cámara scrollable + botón mostrar contraseña + espaciado
+
+**Motivación:** El tab Cámara no tenía scroll (todo el contenido se comprimía en la ventana
+sin posibilidad de bajar), la sección IP se veía apretada y no había forma de ver la contraseña
+al escribirla.
+
+**Cambios:**
+- `CameraCalibTab._build_ui`: envuelto en `QScrollArea` (igual que RecordingTab).
+  Content widget con `background:{_DARK}`, scrollbar vertical de 8px.
+- Botón **"Mostrar"** junto al campo contraseña: toggle checkable que alterna
+  `EchoMode.Password` ↔ `EchoMode.Normal`. Se ilumina en acento cuando está activo.
+- Márgenes e inter-espaciados de la sección IP aumentados (`setContentsMargins(18,24,18,18)`,
+  `setSpacing(10)`, `addSpacing` entre secciones).
+- Sliders del grid 2×2: altura fija `22px`, ancho mínimo `110px`, spinboxes `72×30px`.
+- Preview IP: `minHeight` aumentado a `300px`.
+- Campo usuario y contraseña: `setFixedHeight(34)`, más anchos (`160px`).
+
+**Archivos modificados:** `src/ui/service.py`
+
+#### Cambio 64 — Rediseño estético de la sección Cámaras IP
+
+**Motivación:** El diseño inicial de la sección IP en `CameraCalibTab` tenía controles
+apilados de forma desordenada: 3 filas de controles, spinboxes muy chicos, todo estaba
+apretado y sin jerarquía visual clara.
+
+**Mejoras:**
+- Selector de slot + URL + botones Conectar/Desconectar + badge de estado → **una sola fila**.
+- Usuario/Contraseña → fila compacta separada con `addSpacing` para claridad visual.
+- Badge de estado (label con borde y fondo) en lugar de texto suelto.
+- Sliders de parámetros → **grid 2×2** (Brillo | Contraste / Saturación | Nitidez).
+  Ahorra espacio vertical, aprovecha el ancho disponible.
+- Spinboxes con altura fija (`setFixedHeight(28)`) y spinners visibles.
+- Botones Guardar / Aplicar con alturas uniformes (32px), tipografía consistente.
+- Dos separadores `QFrame.HLine` para delimitar visualmente las secciones.
+- Preview con `minHeight=240` (antes 460) — permite que la sección sea más compacta.
+- Stretch de la sección IP bajado de 3 → 2 para mejor balance con la sección USB.
+
+**Archivos modificados:**
+- `src/ui/service.py`: `_build_ip_camera_section` en `CameraCalibTab` rediseñado.
+  Stretch del GroupBox IP en `_build_ui` cambiado de 3 → 2.
+
+#### Cambio 63 — Segunda cámara IP + parámetros de imagen en tab Cámara
+
+**Motivación:** La sección de cámara IP en `CameraCalibTab` solo soportaba una cámara.
+Se quería conectar y configurar una segunda cámara IP independiente, y poder ajustar
+parámetros de imagen (brillo, contraste, saturación, nitidez) de igual forma que para
+las cámaras USB.
+
+**Diseño:**
+- Dos slots independientes: "IP Cám 1" / "IP Cám 2", seleccionables con combo.
+- Cada slot tiene su propio estado (`_ip_workers[2]`, `_ip_caps[2]`, `_ip_timers[2]`).
+- Ambas cámaras pueden estar conectadas simultáneamente; el preview muestra la del slot activo.
+- Al cambiar de slot se cargan URL/credenciales/parámetros desde `camera.yaml`.
+- Campos de usuario y contraseña ahora son visibles y editables en la UI (antes ocultos).
+- Parámetros de imagen con sliders: Brillo / Contraste / Saturación / Nitidez.
+  - Rangos Axis VAPIX: Brillo/Contraste/Saturación = −100..100; Nitidez = 0..100.
+  - Botón **Guardar config** → escribe en `config/camera.yaml` bajo `ip_camera_1` / `ip_camera_2`.
+  - Botón **Aplicar a cámara (VAPIX/Axis)** → envía comandos HTTP GET a
+    `{base}/axis-cgi/param.cgi?action=update&ImageSource.I0.Sensor.Brightness=N&...`
+    con Basic Auth. Estado (OK/Error) visible en etiqueta inline.
+
+**Archivos modificados:**
+- `src/ui/service.py`:
+  - `_IP_PARAM_DEFS`, `_IP_VAPIX_MAP` agregados a nivel módulo (después de `_PARAM_DEFS`).
+  - `CameraCalibTab.__init__`: `_ip_worker/_ip_cap/_ip_timer` → `_ip_workers[2]`,
+    `_ip_caps[2]`, `_ip_timers[2]`; agrega `_ip_slot`, `_ip_param_sliders`, `_ip_param_spinboxes`.
+  - `_build_ip_camera_section`: reescrito completo con selector de slot, URL, campos usuario/pass,
+    panel de parámetros con sliders, botones Guardar/Aplicar, y preview.
+  - Métodos nuevos: `_on_ip_slot_changed`, `_load_ip_slot_settings`, `_disconnect_ip_slot`,
+    `_save_ip_settings`, `_apply_ip_params`.
+  - Métodos actualizados: `_on_ip_connect`, `_on_ip_disconnect`, `_on_ip_error`,
+    `_on_ip_frame_ready`, `_refresh_ip_camera` (ahora reciben `slot: int`).
+  - `_ip_auth_settings` eliminado de `CameraCalibTab` (reemplazado por campos explícitos).
+- `config/camera.yaml`: agregadas secciones `ip_camera_1` y `ip_camera_2` con URL, credenciales
+  y valores de parámetros de imagen por defecto.
+
+**Validación:**
+- `python -m compileall src/ui/service.py` OK.
+- Construcción de `CameraCalibTab` en modo offscreen: OK.
+  - `ip_slot_combo` tiene ítems ["IP Cám 1", "IP Cám 2"].
+  - `_ip_workers = [None, None]`, `_ip_param_sliders` keys = brightness/contrast/saturation/sharpness.
+
+---
+
 ### Sesion 2026-05-28 - Codex
 
 #### Cambio 62 - Camara IP movida a tab Camara con preview grande

@@ -40,62 +40,62 @@ max_inspection_hz: 15
 #     consecutive_nok_frames: 6
 models:
   modelo_A:
-    # Esterilla (scanner_2) — calibrar en planta con histograma de areas.
+    # Esterilla (scanner_2)
+    # ESTADO: CALIBRACION EN CURSO — tolerancias blandas para reducir falsas cruces.
+    # Ajustar con material real una vez que la deteccion sea estable.
     #
     # Geometría del patrón (holes.json modelo_A):
-    #   dx=68px, dy=38px — grilla rectangular (sin escalonado)
-    #   Filas impares (cj=1,3,...): 4 agujeros PEQUENOS  r≈14px, area≈627px²
-    #   Filas pares  (cj=2,4,...): 5 agujeros GRANDES   r≈25px, area≈2023px²
-    #   113 celdas unicas (117 puntos — 4 duplicados por error de redondeo en build)
+    #   dx=66px, dy=38px, stagger_x_odd=26px
+    #   Filas impares (cj=1,3,...): 4 agujeros CHICOS   r≈14px, area≈627px²
+    #   Filas pares  (cj=2,4,...): 4-5 agujeros GRANDES r≈25px, area≈2023px²
+    #   ~88 puntos en patron actual (reconstruir con imagen OK limpia en planta)
     #
     # ── Deteccion ─────────────────────────────────────────────────────────────
-    polarity: bright            # backlight encendido → agujeros brillantes
-    # IMPORTANTE: min_area DEBE ser <= min_area_small para que agujeros chicos
-    # pasen el filtro global antes del filtro de tipo.
-    # Floor efectivo: max(min_area, min_area_small) para chicos.
-    min_area: 150.0             # piso global; agujeros chicos con blur pueden bajar a ~200px²
-    circularity_min: 0.55       # permisivo: blur severo reduce circularidad a 0.5-0.6
-    aspect_ratio_max: 2.5       # permite agujeros levemente deformados
+    polarity: bright
+    # Umbral de binarizacion: bajar ayuda a detectar agujeros con iluminacion pareja.
+    threshold: 140
+    min_area: 80.0              # BLANDO: captura agujeros chicos con blur o iluminacion baja
+    circularity_min: 0.35       # BLANDO: acepta agujeros deformados por perspectiva/blur
+    aspect_ratio_max: 3.0       # BLANDO: acepta ligeras deformaciones
     # ── Clasificacion por tipo (chico / grande) ────────────────────────────────
-    hole_type_split_area: 1000.0  # gap natural entre 627px² (chico) y 2023px² (grande)
-    # Calibrar con histograma de areas en planta (scripts/_debug_areas.py).
-    min_area_small: 150.0        # <= min_area; chico real ≈627px²; con blur puede bajar a ~150px²
-    max_area_small: 2000.0       # margen amplio para no perder detecciones borderline
-    min_area_large: 400.0        # grande real ≈2023px²; bajo para iluminacion no ideal
-    max_area_large: 7000.0       # excluye suciedad / reflejo muy grande
+    hole_type_split_area: 1000.0
+    min_area_small: 80.0        # BLANDO: igual al piso global
+    max_area_small: 2000.0
+    min_area_large: 300.0       # BLANDO: acepta grandes con iluminacion no ideal
+    max_area_large: 8000.0      # BLANDO: margen amplio
     # ── Matching ──────────────────────────────────────────────────────────────
-    # tol_xy_px DEBE ser < dy/2 = 19px para evitar ambigüedad entre filas adyacentes
-    tol_xy_px: 18.0             # ~47% de dy=38; máximo seguro sin ambigüedad de fila
-    align_match_tol_px: 150.0   # más permisivo para fallback RANSAC
-    min_match_count: 4          # patron puede estar parcialmente fuera de frame
+    # tol_xy_px < dy/2 = 19px para evitar ambigüedad entre filas.
+    # Con stagger_x_odd=26, el margen real en X es ~13px → no aumentar más.
+    tol_xy_px: 18.0
+    align_match_tol_px: 250.0   # BLANDO: mas permisivo para alineacion inicial
+    min_match_count: 3          # BLANDO: permite alinear con pocos agujeros visibles
     # ── Bordes ────────────────────────────────────────────────────────────────
-    edge_margin_px: 5.0         # reducido: 15px descartaba agujeros reales en bordes de ROI
-    pattern_edge_margin_px: 40.0  # excluye agujeros de borde en build-pattern
+    edge_margin_px: 3.0         # muy bajo: no descartar agujeros en borde de ROI
+    pattern_edge_margin_px: 40.0
     # ── Grid ──────────────────────────────────────────────────────────────────
-    grid_min_spacing: 30.0      # dy=38 > 30 → estimate_spacing encuentra dy correcto
-    # Valores fijos de dx/dy para este patron. Evitan que estimate_spacing devuelva
-    # 64 en lugar de 66 cuando la muestra de agujeros mixta sesga el modo.
+    grid_min_spacing: 30.0
     grid_dx: 66.0
     grid_dy: 38.0
-    # 112 agujeros en patron. 25 = ~22% — permisivo durante calibracion.
-    grid_max_missing: 25
-    bbox_filter_margin_px: 30.0   # ampliado: grilla dispersa (dy=38) necesita mas margen
-    # Affine refinement: corrige deriva Y acumulada (dy_real≈37px vs dy_stored=38px).
-    # Requiere fix de stagger en _fit_affine_to_grid para grillas escalonadas.
+    # BLANDO: 50 = ~57% de 88 agujeros. Permite mucha variacion mientras se calibra.
+    grid_max_missing: 50
+    bbox_filter_margin_px: 50.0  # BLANDO: margen amplio alrededor del bbox esperado
     grid_affine_refinement: true
     # ── Extras ────────────────────────────────────────────────────────────────
-    extra_min_dist_factor: 2.0  # extras deben estar >2×18px=36px de todo expected
+    extra_min_dist_factor: 1.5   # BLANDO: umbral = 1.5×18px = 27px
+    # ── Umbral visual de cruces ───────────────────────────────────────────────
+    # Cuantos agujeros faltantes se toleran ANTES de mostrar estado NOK en overlay.
+    # BLANDO: 35 — el operador solo ve cruces rojas masivas cuando faltan >35 agujeros.
+    # Bajar a 5-8 cuando el patron este bien calibrado.
+    frame_missing_nok_threshold: 35
     # ── Temporal / produccion ─────────────────────────────────────────────────
-    consecutive_nok_frames: 8
-    continuous_position_threshold: 0.0  # inspeccionar cada frame
-    # Agujeros faltantes permitidos por frame antes de NOK de visualizacion.
-    # 8 = permisivo durante calibracion. Bajar a 3-5 con material real calibrado.
-    frame_missing_nok_threshold: 8
-    # ── Parada virtual de máquina ──────────────────────────────────────────
-    machine_stop_enabled: true
-    machine_stop_missing_frames: 5
-    machine_stop_min_missing: 1
-    machine_stop_same_zone_px: 35.0
+    consecutive_nok_frames: 9999  # CALIBRACION: FAULT deshabilitado
+    continuous_position_threshold: 0.0
+    # ── Parada virtual de máquina ─────────────────────────────────────────────
+    # Deshabilitada durante calibracion para no generar alertas falsas.
+    machine_stop_enabled: false
+    machine_stop_missing_frames: 8
+    machine_stop_min_missing: 2
+    machine_stop_same_zone_px: 40.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
