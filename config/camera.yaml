@@ -38,7 +38,7 @@ ip_camera_1:
   username: admin
   password: admin
 ip_camera_2:
-  ip_address: ''
-  url: ''
+  ip_address: 192.168.1.13
+  url: http://192.168.1.13/oneshotimage.jpg
   username: admin
   password: admin

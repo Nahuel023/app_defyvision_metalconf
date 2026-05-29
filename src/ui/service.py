@@ -80,6 +80,124 @@ _WARN   = "#fbbf24"
 
 
 # ==================================================================
+# Barra de salud del sistema
+# ==================================================================
+
+class _HealthChip(QLabel):
+    """Chip pill colorizado que muestra el estado de un componente."""
+
+    _STYLES: dict[str, tuple] = {
+        "ok":      ("#22c55e", "#052e16", "#16a34a"),   # fg, bg, border
+        "warn":    ("#fbbf24", "#1c1507", "#b45309"),
+        "error":   ("#f87171", "#1f0606", "#dc2626"),
+        "neutral": (_MUTED,   "#0d1929", _BORDER),
+    }
+
+    def __init__(self, label: str, parent=None) -> None:
+        super().__init__(parent)
+        self._base_label = label
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(26)
+        self.setMinimumWidth(90)
+        self.set_state("—", "neutral")
+
+    def set_state(self, detail: str, kind: str = "neutral") -> None:
+        fg, bg, border = self._STYLES.get(kind, self._STYLES["neutral"])
+        dot = "●" if kind in ("ok", "error") else ("◑" if kind == "warn" else "○")
+        self.setText(f"{dot}  {self._base_label}  {detail}")
+        self.setStyleSheet(
+            f"color:{fg};background:{bg};border:1px solid {border};"
+            "border-radius:12px;padding:0 12px;"
+            "font-size:11px;font-weight:700;letter-spacing:0.3px;"
+        )
+
+
+class _HealthBar(QWidget):
+    """Barra horizontal con chips de estado: PLC · Scanners · Cámaras IP."""
+
+    def __init__(self, system: "InspectionSystem",
+                 cam_tab_ref: "list[CameraCalibTab | None]",
+                 parent=None) -> None:
+        super().__init__(parent)
+        self._system   = system
+        self._cam_ref  = cam_tab_ref   # mutable list[1] → se rellena después de construir el tab
+        self.setFixedHeight(38)
+        self.setStyleSheet(
+            f"background:{_PANEL};border-radius:8px;"
+            f"border:1px solid {_BORDER};"
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setSpacing(8)
+
+        self._plc_chip = _HealthChip("PLC", self)
+        lay.addWidget(self._plc_chip)
+
+        self._scan_chips: dict[str, _HealthChip] = {}
+        for sid in system.scanner_ids():
+            chip = _HealthChip(sid.replace("scanner_", "Scnr "), self)
+            self._scan_chips[sid] = chip
+            lay.addWidget(chip)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setStyleSheet(f"color:{_BORDER};")
+        lay.addWidget(sep)
+
+        self._ip_chips: list[_HealthChip] = []
+        for i in range(2):
+            chip = _HealthChip(f"IP Cám {i+1}", self)
+            self._ip_chips.append(chip)
+            lay.addWidget(chip)
+
+        lay.addStretch()
+
+    def refresh(self) -> None:
+        # PLC
+        plc_ok = self._system.plc.connected
+        self._plc_chip.set_state(
+            "Conectado" if plc_ok else "Desconectado",
+            "ok" if plc_ok else "error",
+        )
+
+        # Scanners
+        _state_kind = {
+            "RUNNING": "ok", "IDLE": "neutral",
+            "FAULT":   "error", "STOPPED": "warn",
+        }
+        for sid, chip in self._scan_chips.items():
+            try:
+                s     = self._system.scanner(sid).get_status()
+                state = s["state"].value.upper()
+                kind  = _state_kind.get(state, "neutral")
+                chip.set_state(state, kind)
+            except Exception:
+                chip.set_state("—", "neutral")
+
+        # Cámaras IP
+        cam_tab = self._cam_ref[0] if self._cam_ref else None
+        for i, chip in enumerate(self._ip_chips):
+            if cam_tab is None:
+                chip.set_state("—", "neutral")
+                continue
+            fps = cam_tab._ip_fps_value[i] if hasattr(cam_tab, "_ip_fps_value") else 0
+            connected = (
+                cam_tab._ip_workers[i] is not None or
+                cam_tab._ip_caps[i] is not None
+            ) if hasattr(cam_tab, "_ip_workers") else False
+            retry_count = cam_tab._ip_retry_counts[i] if hasattr(cam_tab, "_ip_retry_counts") else 0
+
+            if connected and fps > 0:
+                chip.set_state(f"{fps:.0f} fps", "ok")
+            elif connected:
+                chip.set_state("Conectando", "warn")
+            elif retry_count > 0:
+                chip.set_state(f"Reintento {retry_count}", "warn")
+            else:
+                chip.set_state("Sin señal", "neutral")
+
+
+# ==================================================================
 # Qt logging handler
 # ==================================================================
 
@@ -3172,6 +3290,20 @@ class CameraCalibTab(QWidget):
 
         lay.addLayout(bottom_row)
 
+        # ── Historial de conexión ─────────────────────────────────────
+        self._ip_log = QTextEdit()
+        self._ip_log.setReadOnly(True)
+        self._ip_log.setFixedHeight(72)
+        self._ip_log.setStyleSheet(
+            f"QTextEdit {{ background:#070e1c;color:{_MUTED};"
+            f"border:1px solid {_BORDER};border-radius:6px;"
+            "font-size:10px;font-family:Consolas,monospace;padding:4px 8px; }}"
+            f"QScrollBar:vertical {{ background:{_DARK};width:6px; }}"
+            f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:3px; }}"
+        )
+        self._ip_log.setPlaceholderText("Historial de conexiones...")
+        lay.addWidget(self._ip_log)
+
         self._load_ip_slot_settings(0)
         return grp
 
@@ -3525,6 +3657,29 @@ class CameraCalibTab(QWidget):
             self._ip_caps[slot] = cap
             self._ip_timers[slot].start(200)
 
+    def _log_ip_event(self, slot: int, msg: str, kind: str = "info") -> None:
+        """Agrega una línea al historial de conexión con timestamp."""
+        if not hasattr(self, "_ip_log"):
+            return
+        colors = {"ok": _OK, "warn": _WARN, "error": _NOK, "info": _MUTED}
+        color  = colors.get(kind, _MUTED)
+        ts     = datetime.now().strftime("%H:%M:%S")
+        prefix = {"ok": "✓", "warn": "◑", "error": "✗", "info": "·"}[kind]
+        line   = (
+            f'<span style="color:#475569">[{ts}]</span> '
+            f'<span style="color:#64748b">Cám {slot+1}</span> '
+            f'<span style="color:{color}">{prefix} {msg}</span>'
+        )
+        self._ip_log.append(line)
+        # Mantener máximo 80 líneas
+        doc = self._ip_log.document()
+        if doc.blockCount() > 80:
+            cursor = self._ip_log.textCursor()
+            cursor.movePosition(cursor.MoveOperation.Start)
+            cursor.select(cursor.SelectionType.BlockUnderCursor)
+            cursor.removeSelectedText()
+            cursor.deleteChar()
+
     def _on_ip_connect(self) -> None:
         slot = self._ip_slot
         url = self._ip_url_edit.text().strip()
@@ -3535,6 +3690,7 @@ class CameraCalibTab(QWidget):
             return
         self._ip_manual_disc[slot] = False
         self._set_ip_status("Conectando...", "warn")
+        self._log_ip_event(slot, f"Conectando a {url[:50]}", "info")
         user     = self._ip_user_edit.text().strip() or None
         password = self._ip_pass_edit.text().strip() or None
         self._start_ip_connection(slot, url, user, password)
@@ -3549,6 +3705,7 @@ class CameraCalibTab(QWidget):
     def _on_ip_disconnect(self) -> None:
         slot = self._ip_slot
         self._ip_manual_disc[slot] = True
+        self._log_ip_event(slot, "Desconectado por el operador", "warn")
         self._disconnect_ip_slot(slot)
         if hasattr(self, "_ip_preview"):
             self._ip_preview.setPixmap(QPixmap())
@@ -3580,6 +3737,7 @@ class CameraCalibTab(QWidget):
         delay = min(5 + self._ip_retry_counts[slot] * 5, 30)
         self._ip_retry_counts[slot] += 1
         self._ip_retry_timers[slot].start(delay * 1000)
+        self._log_ip_event(slot, f"Error: {msg[:60]} — reintento en {delay}s", "error")
         self._save_ip_diagnostic_snapshot(slot, f"error_{msg}")
         if slot == self._ip_slot:
             n = self._ip_retry_counts[slot]
@@ -3611,6 +3769,7 @@ class CameraCalibTab(QWidget):
         user     = cfg.get("username") or None
         password = cfg.get("password") or None
         self._ip_reconnect_total[slot] += 1
+        self._log_ip_event(slot, f"Reconectando intento {self._ip_retry_counts[slot]}...", "warn")
         self._start_ip_connection(slot, url, user, password)
         if slot == self._ip_slot:
             n = self._ip_retry_counts[slot]
@@ -3684,6 +3843,9 @@ class CameraCalibTab(QWidget):
             self._ip_fps_last_t[slot] = now
         fh, fw = frame.shape[:2]
         self._ip_last_res[slot] = f"{fw}x{fh}"
+        # Log solo en el primer frame recibido tras conectar
+        if self._ip_fps_count[slot] == 1 and self._ip_retry_counts[slot] == 0:
+            self._log_ip_event(slot, f"Señal recibida  {fw}x{fh}", "ok")
         if slot == self._ip_slot:
             frozen = self._update_ip_freeze_watchdog(frame, slot, now)
             fps_str = (f"{self._ip_fps_value[slot]:.0f} fps"
@@ -4233,14 +4395,18 @@ class ServiceWindow(QMainWindow):
         self._rec_tab    = RecordingTab(self._system)
         self._cam_tab    = CameraCalibTab(self._system)
 
-        self._tabs.addTab(self._plc_tab,    "PLC I/O")
-        self._tabs.addTab(self._diag_tab,   "Diagnóstico HW")
-        self._tabs.addTab(self._sys_tab,    "Sistema")
-        self._tabs.addTab(self._log_tab,    "Logs")
-        self._tabs.addTab(self._cfg_tab,    "Configuración")
-        self._tabs.addTab(self._rec_tab,    "Grabación")
-        self._tabs.addTab(self._cam_tab,    "Cámara")
+        self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
+        self._tabs.addTab(self._diag_tab,   "  Diagnóstico  ")
+        self._tabs.addTab(self._sys_tab,    "  Sistema  ")
+        self._tabs.addTab(self._log_tab,    "  Logs  ")
+        self._tabs.addTab(self._cfg_tab,    "  Config  ")
+        self._tabs.addTab(self._rec_tab,    "  Grabación  ")
+        self._tabs.addTab(self._cam_tab,    "  Cámara  ")
 
+        # Health bar — referencia al cam_tab se pasa por lista mutable
+        self._cam_ref: list = [self._cam_tab]
+        self._health_bar = _HealthBar(self._system, self._cam_ref, central)
+        root.addWidget(self._health_bar)
         root.addWidget(self._tabs, stretch=1)
 
     def _build_header(self) -> QWidget:
@@ -4355,6 +4521,9 @@ class ServiceWindow(QMainWindow):
                 f"color:{_OK if connected else _NOK};"
                 "font-size:11px;font-weight:600;background:transparent;"
             )
+        # Health bar — siempre actualizada
+        self._health_bar.refresh()
+
         idx = self._tabs.currentIndex()
         if idx == 0:
             self._plc_tab.refresh()
