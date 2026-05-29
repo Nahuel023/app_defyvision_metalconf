@@ -45,6 +45,90 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-05-29 — Tadeo + Claude (noche)
 
+#### Cambio 73 - Limpieza total de mojibake + test preventivo
+
+**Motivacion:** Seguian apareciendo textos con caracteres deformados en distintas tabs
+de la UI, sobre todo en botones y estados de `service.py`.
+
+**Cambios:**
+- `src/ui/service.py`:
+  - Se eliminaron secuencias rotas en botones y estados (`Conectar`, `Desconectar`,
+    `Iniciar`, `Detener`, `Ingrese una URL`, `No se pudo conectar`, `ANALIZANDO`).
+  - Se quitaron simbolos decorativos rotos para evitar depender de codificaciones
+    ambiguas del sistema.
+- `tests/test_text_encoding.py`:
+  - Nuevo test que recorre `src/`, `config/`, `tests/`, `CHANGELOG.md` y `AGENTS.md`
+    buscando secuencias tipicas de mojibake.
+  - Si vuelve a entrar texto roto, `pytest` falla y lo marca con archivo y linea.
+
+**Resultado:** La UI queda con texto estable y el repo gana una barrera automatica
+contra nuevas cadenas mal codificadas.
+
+---
+
+#### Cambio 72 — _HTTPSnapshotReader: keep-alive + 30fps objetivo
+
+**Problema:** Cámara IP en 192.168.1.26 usa URL `oneshotimage.jpg` (foto única, no
+stream MJPEG). `interval_ms=250` → 4fps. `urllib.urlopen` abría nueva conexión TCP
+por frame → overhead handshake ~10-20ms/frame.
+
+**Cambios:**
+- `interval_ms` default: 250 → **33ms** (~30fps)
+- Mínimo: 100 → **20ms** (techo 50fps)
+- `urllib.request` reemplazado por `http.client.HTTPConnection` con
+  `Connection: keep-alive` — reutiliza la TCP entre frames
+- Soporte HTTPS con SSL sin verificación de certificado
+- Reconexión automática si la conexión se rompe, sin disparar error_occurred
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+
+#### Cambio 72 - Soporte Sony IP + URL de stream editable
+
+**Motivacion:** Se cambio la camara IP de Axis a Sony (`192.168.1.26`) y la app
+no podia mostrar imagen porque asumía un stream MJPEG fijo. Ademas, la URL quedaba
+demasiado atada a Axis para el operador.
+
+**Validacion real sobre la camara Sony SNC-EB600B:**
+- `http://192.168.1.26/oneshotimage.jpg` responde `200 OK` con imagen JPEG valida.
+- `/mjpeg` devuelve `404`, por eso no servia tratarla como Axis MJPEG.
+- Login verificado con `admin/admin`.
+
+**Cambios:**
+- `src/ui/service.py`:
+  - Se agrego `_HTTPSnapshotReader` para camaras HTTP que entregan snapshots JPEG.
+  - La conexion IP ahora detecta URLs tipo `oneshot/snapshot/.jpg/.jpeg` y usa polling
+    de snapshots; si no, mantiene MJPEG/USB/RTSP segun corresponda.
+  - El campo `URL stream` queda editable para pegar cualquier endpoint manualmente.
+  - Si el operador cambia solo la IP, la app intenta conservar la ruta del stream ya
+    conocida para esa camara en vez de volver a forzar Axis.
+- `config/camera.yaml`:
+  - `ip_camera_1` pasa a `192.168.1.26` con URL
+    `http://192.168.1.26/oneshotimage.jpg` y credenciales `admin/admin`.
+
+**Resultado:** La Sony puede verse usando snapshot HTTP, y la URL ya no queda bloqueada
+ni amarrada a una sola marca de camara.
+
+---
+
+#### Cambio 71b — Marcadores de error huecos (sin relleno)
+
+**Problema:** Los marcadores de agujero faltante (cruces rojas) tenían un círculo
+relleno oscuro de fondo que tapaba la imagen. El operario no podía ver qué había
+en la posición del error (agujero parcial, suciedad, reflejo).
+
+**Fix en `src/pipeline/annotate.py` → `draw_compare_overlay()`:**
+- Eliminado `cv2.circle(..., -1)` (relleno opaco)
+- Reemplazado por: sombra negra hueca (grosor 3) + borde rojo (grosor 2)
+- Cruz: sombra negra (grosor 4) + cruz roja (grosor 2) — sin relleno
+- Número del faltante: sombra negra gruesa + texto blanco fino encima
+- El interior del marcador queda completamente transparente → el operario
+  puede ver a través del marcador la imagen real debajo
+
+---
+
 #### Cambio 70 — Paralelización de inspect_folder (CLI 3.1×) + diagnóstico esterilla
 
 **Mejora de rendimiento — `src/inspection.py` → `inspect_folder`:**
@@ -2109,13 +2193,13 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 
 ---
 
-### SesiÃ³n 2026-05-26 â€” Tadeo + Codex
+### Sesión 2026-05-26 — Tadeo + Codex
 
-#### Cambio 38 â€” Parada por agujero tapado persistente en material continuo
+#### Cambio 38 — Parada por agujero tapado persistente en material continuo
 
-**MotivaciÃ³n:** Un agujero tapado desde el inicio de la secuencia no activaba
+**Motivación:** Un agujero tapado desde el inicio de la secuencia no activaba
 `DETENCION DE MAQUINA`. La causa era doble:
-1. El tracker buscaba persistencia en la misma posiciÃ³n `(x,y)`, pero la chapa avanza
+1. El tracker buscaba persistencia en la misma posición `(x,y)`, pero la chapa avanza
    verticalmente y el mismo defecto aparece con `x` similar y `y` cambiante.
 2. Los faltantes eran descartados como near-miss porque en la grilla densa siempre hay
    un agujero vecino cerca.
@@ -2123,30 +2207,30 @@ calibrar `center_offset_tol_px` con datos reales de la grabación de referencia.
 **Cambios:**
 - `src/pipeline/machine_stop.py`:
   - Las zonas persistentes ahora matchean por columna `X` (`abs(dx) <= same_zone_px`).
-  - `Y` se sigue actualizando para visualizaciÃ³n, pero ya no resetea la racha.
+  - `Y` se sigue actualizando para visualización, pero ya no resetea la racha.
   - Los near-miss persistentes ya no se descartan antes del tracking; la persistencia
     por columna es el filtro contra falsos positivos.
 - `src/inspection.py`:
   - Si `machine_stop=True`, `final_status` pasa a `NOK`.
   - `_apply_temporal_rule()` marca `decision_status=NOK` inmediatamente para machine stop.
 - `src/controller/scanner_controller.py`:
-  - En producciÃ³n, `result.machine_stop=True` fuerza `ScannerState.FAULT` inmediato,
+  - En producción, `result.machine_stop=True` fuerza `ScannerState.FAULT` inmediato,
     sin esperar `consecutive_nok_frames`.
 
-**ValidaciÃ³n en `20260519_121741`:**
+**Validación en `20260519_121741`:**
 - `machine_stop_frames=22`.
 - El defecto persistente inicial dispara desde `frame_0006.png`:
-  - `frame_0006.png` a `frame_0009.png` â†’ `NOK/NOK`, `machine_stop=True`.
+  - `frame_0006.png` a `frame_0009.png` → `NOK/NOK`, `machine_stop=True`.
 - `frame_0037.png` sigue `LOW_QUALITY` y no decide.
 - `python -m compileall src` OK.
 
 ---
 
-#### Cambio 37 â€” Mapeo fijo de cÃ¡maras por scanner
+#### Cambio 37 — Mapeo fijo de cámaras por scanner
 
-**MotivaciÃ³n:** Asegurar que la UI y el control nunca intercambien feeds:
-`scanner_1` debe usar siempre cÃ¡mara Ã­ndice 0 y `scanner_2` siempre cÃ¡mara Ã­ndice 1.
-Si una cÃ¡mara no abre, su scanner queda sin imagen; no debe ocupar el lugar del otro.
+**Motivación:** Asegurar que la UI y el control nunca intercambien feeds:
+`scanner_1` debe usar siempre cámara índice 0 y `scanner_2` siempre cámara índice 1.
+Si una cámara no abre, su scanner queda sin imagen; no debe ocupar el lugar del otro.
 
 **Cambio:**
 - `src/controller/system.py`:
@@ -2154,41 +2238,41 @@ Si una cÃ¡mara no abre, su scanner queda sin imagen; no debe ocupar el lugar d
   - `InspectionSystem` usa ese mapeo como autoridad por encima de `config/io_map.yaml`.
   - Si el YAML difiere, emite warning y mantiene el mapeo fijo.
 
-**ValidaciÃ³n:**
+**Validación:**
 - `python -m compileall src/controller/system.py` OK.
-- InstanciaciÃ³n de `InspectionSystem(disable_plc_outputs=True)`:
+- Instanciación de `InspectionSystem(disable_plc_outputs=True)`:
   - `scanner_1: camera_index=0`
   - `scanner_2: camera_index=1`
 
 ---
 
-#### Cambio 36 â€” Sensibilidad de patrÃ³n desalineado menos agresiva
+#### Cambio 36 — Sensibilidad de patrón desalineado menos agresiva
 
-**MotivaciÃ³n:** La mÃ©trica nueva de `pattern_center_zigzag_*` quedÃ³ demasiado sensible:
+**Motivación:** La métrica nueva de `pattern_center_zigzag_*` quedó demasiado sensible:
 marcaba 129/185 frames como NOK en la carpeta `20260519_121741`. El problema era conceptual:
 usar la mediana X de todos los agujeros por banda reacciona a la alternancia natural de filas
-del microperforado, aun cuando el patrÃ³n fÃ­sico estÃ¡ correcto.
+del microperforado, aun cuando el patrón físico está correcto.
 
 **Cambios:**
 - `src/pipeline/edge_centering.py`:
-  - `_pattern_center_by_band()` ahora calcula el centro como promedio entre borde fÃ­sico
-    izquierdo y derecho del patrÃ³n por banda.
+  - `_pattern_center_by_band()` ahora calcula el centro como promedio entre borde físico
+    izquierdo y derecho del patrón por banda.
   - Evita falsos zigzag por filas alternadas del microperforado.
 - `config/tolerancias.yaml` y `src/utils/config.py`:
-  - `pattern_align_abs_max_px: 15.0 â†’ 30.0`
-  - `pattern_center_zigzag_std_max_px: 8.0 â†’ 4.0`
-  - `pattern_center_zigzag_abs_max_px: 18.0 â†’ 6.5`
+  - `pattern_align_abs_max_px: 15.0 → 30.0`
+  - `pattern_center_zigzag_std_max_px: 8.0 → 4.0`
+  - `pattern_center_zigzag_abs_max_px: 18.0 → 6.5`
 - `src/inspection.py`:
   - Si `frame_geometry_quality == "UNSTABLE"`, no se permite que `pattern_alignment_warn`
     convierta el frame en NOK. La imagen inestable se analiza, pero no decide.
 
-**ValidaciÃ³n en `20260519_121741`:**
+**Validación en `20260519_121741`:**
 - Antes: 129/185 NOK por sensibilidad excesiva.
-- DespuÃ©s: 9/185 NOK + 1 frame `LOW_QUALITY`.
+- Después: 9/185 NOK + 1 frame `LOW_QUALITY`.
 - Frames pedidos:
-  - `frame_0121.png` â†’ NOK por `PATRON DESALINEADO`
-  - `frame_0122.png` â†’ NOK por `PATRON DESALINEADO`
-  - `frame_0124.png` â†’ NOK por `PATRON DESALINEADO`
+  - `frame_0121.png` → NOK por `PATRON DESALINEADO`
+  - `frame_0122.png` → NOK por `PATRON DESALINEADO`
+  - `frame_0124.png` → NOK por `PATRON DESALINEADO`
 - `frame_0037.png` queda `LOW_QUALITY / IMAGEN INESTABLE - NO DECIDE`, sin forzar NOK.
 - Overlays de prueba guardados en `data/output/sensibilidad_patron_ajustada_v2/`.
 - `python -m compileall src` OK.

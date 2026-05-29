@@ -33,20 +33,12 @@ scanner_2:
   auto_exposure: false
   auto_white_balance: true
 ip_camera_1:
-  ip_address: 192.168.1.17
-  url: http://192.168.1.17/axis-cgi/mjpg/video.cgi?resolution=640x480&fps=10
-  username: root
-  password: defy2026
-  brightness: 0
-  contrast: 0
-  saturation: 0
-  sharpness: 50
+  ip_address: 192.168.1.26
+  url: http://192.168.1.26/oneshotimage.jpg
+  username: admin
+  password: admin
 ip_camera_2:
   ip_address: ''
   url: ''
-  username: ''
-  password: ''
-  brightness: 0
-  contrast: 0
-  saturation: 0
-  sharpness: 50
+  username: admin
+  password: admin

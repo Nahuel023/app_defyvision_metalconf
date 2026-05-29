@@ -64,9 +64,12 @@ models:
     min_area_large: 300.0       # BLANDO: acepta grandes con iluminacion no ideal
     max_area_large: 8000.0      # BLANDO: margen amplio
     # ── Matching ──────────────────────────────────────────────────────────────
-    # tol_xy_px < dy/2 = 19px para evitar ambigüedad entre filas.
-    # Con stagger_x_odd=26, el margen real en X es ~13px → no aumentar más.
-    tol_xy_px: 18.0
+    # tol_xy_px seguro hasta ~26px para este patron:
+    #   distancia minima entre cualquier par de posiciones esperadas = sqrt(26^2+38^2) = 46px
+    #   Max seguro = 46/2 = 23px sin ambiguedad teorica.
+    #   Con stagger_x_odd=26, vecino incorrecto mas cercano siempre a >28px → 25px es seguro.
+    #   El diagnostico muestra near-misses a 18-26px por deriva Y acumulada (dy_real~37 vs 38).
+    tol_xy_px: 25.0
     align_match_tol_px: 250.0   # BLANDO: mas permisivo para alineacion inicial
     min_match_count: 3          # BLANDO: permite alinear con pocos agujeros visibles
     # ── Bordes ────────────────────────────────────────────────────────────────
@@ -81,7 +84,7 @@ models:
     bbox_filter_margin_px: 50.0  # BLANDO: margen amplio alrededor del bbox esperado
     grid_affine_refinement: true
     # ── Extras ────────────────────────────────────────────────────────────────
-    extra_min_dist_factor: 1.5   # BLANDO: umbral = 1.5×18px = 27px
+    extra_min_dist_factor: 1.5   # umbral = 1.5×25px = 37px
     # ── Umbral visual de cruces ───────────────────────────────────────────────
     # Cuantos agujeros faltantes se toleran ANTES de mostrar estado NOK en overlay.
     # BLANDO: 35 — el operador solo ve cruces rojas masivas cuando faltan >35 agujeros.
