@@ -1352,14 +1352,17 @@ class _HTTPSnapshotReader(QThread):
         parent=None,
         username: str | None = None,
         password: str | None = None,
-        interval_ms: int = 33,          # 33 ms ≈ 30 fps objetivo
+        interval_ms: int = 150,         # 150 ms ≈ 6-7 fps (el preview solo muestra a 5 fps)
     ) -> None:
         super().__init__(parent)
         self._url = url
         self._stop_flag = False
         self._username = username or ""
         self._password = password or ""
-        self._interval_ms = max(20, interval_ms)   # mín 20 ms (50 fps techo)
+        # El preview de diagnóstico se refresca a ~5 fps (timer de 200 ms). Capturar
+        # a 30 fps saturaba CPU y el WiFi decodificando JPEG que nunca se mostraban.
+        # 150 ms da margen sobre el preview sin desperdiciar red/CPU.
+        self._interval_ms = max(50, interval_ms)   # mín 50 ms (20 fps techo)
 
     def stop(self) -> None:
         self._stop_flag = True
@@ -2723,10 +2726,16 @@ class RecordingTab(QWidget):
         if meta_path.exists():
             try:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
+                # NOTA: NO forzar el modelo desde meta.json. El operador elige el
+                # modelo con los botones Esterilla/Microperforado y esa selección
+                # debe mandar (una grabación puede estar mal etiquetada o querer
+                # reanalizarse con otro patrón). meta.model_display es solo informativo.
                 model_display = meta.get("model_display", "")
-                if model_display:
-                    self._model_combo.setCurrentText(model_display)
-                    self._sync_model_buttons()
+                if model_display and model_display != self._model_combo.currentText():
+                    logger.info(
+                        f"[Grabación] meta indica modelo '{model_display}' pero se "
+                        f"respeta la selección actual '{self._model_combo.currentText()}'"
+                    )
                 fps_saved = meta.get("fps")
                 if fps_saved:
                     self._fps_spin.setValue(fps_saved)

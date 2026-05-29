@@ -45,6 +45,56 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-05-29 — Tadeo + Claude (noche)
 
+#### Cambio 74 — Esterilla "todo rojo" + lentitud modo servicio (regresión WiFi)
+
+**Problema 1 — Esterilla detectaba todo como NOK (cruces rojas):**
+Al cargar una carpeta de grabación esterilla en modo servicio, el overlay mostraba
+casi todo rojo. Dos causas encadenadas:
+1. `_load_folder` forzaba el modelo desde `meta.json` (`setCurrentText(model_display)`).
+   La grabación de prueba `Patron_Esterilla_METALCONF` quedó mal etiquetada como
+   `Microperforado` (modelo_B). Resultado: imágenes esterilla analizadas con el patrón
+   microperforado (255 agujeros) → missing=168 → NOK total.
+2. El patrón **global** `data/patterns/modelo_A/holes.json` estaba viejo (117 pts, sin
+   `stagger_x_odd`, ROI 1204px) y NO coincidía con el calibrado en
+   `scanner_2/modelo_A` (88 pts, staggered, ROI x=870 w=380, cambios 51/52). Como la
+   UI por defecto usa `scanner_1` y no existe `scanner_1/modelo_A`, el fallback caía al
+   patrón global stale → missing≈32 aun con modelo_A.
+
+**Diagnóstico (CLI, frame_0162.png, 1920×1080):**
+- modelo_B/scanner_1: expected=255 missing=168 → NOK (el "todo rojo")
+- modelo_A/scanner_2 (bueno): expected=83 missing=9 → OK
+- modelo_A/scanner_1 (fallback global stale): expected=113 missing=32
+
+**Cambios:**
+- `src/ui/service.py` → `_load_folder`: ya NO fuerza el modelo desde `meta.json`.
+  Respeta la selección del operador (botones Esterilla/Microperforado), coherente con
+  el diseño ya documentado en `_on_scanner_changed`. `meta.model_display` queda solo
+  como log informativo. Se sigue cargando `fps` de meta.
+- `data/patterns/modelo_A/{holes.json,roi.json}`: sincronizados desde `scanner_2/modelo_A`
+  (el patrón esterilla calibrado). Backups `.bak` creados. Ahora modelo_A resuelve al
+  patrón correcto desde cualquier scanner vía fallback. Seguro: producción usa
+  `scanner_2/modelo_A`; el global solo se usa como fallback de análisis.
+
+**Resultado:** carpeta completa (200 frames) pasó de 0/200 OK (todo NOK rojo) a
+**178/200 OK status**, mayoría verde. Quedan ~22 frames NOK por deriva de fase del grid
+escalonado (missing 48-77 en frames puntuales) — problema de calibración fina del grid
+documentado (cambios 51/52), no regresión. La decisión temporal sigue OK
+(`consecutive_nok_frames: 9999`).
+
+**Problema 2 — Modo servicio muy lento tras cambios de cámara IP/WiFi:**
+El cambio 72 subió el polling de snapshot HTTP de la cámara IP a 33 ms (30 fps), pero el
+preview de diagnóstico solo se refresca a 5 fps (timer de 200 ms). Se capturaban y
+decodificaban ~6× más JPEG de los que se muestran → saturación de CPU y WiFi, UI lenta.
+
+**Cambio:**
+- `src/ui/service.py` → `_HTTPSnapshotReader.__init__`: `interval_ms` default 33 → **150**
+  (≈6-7 fps, con margen sobre el preview de 5 fps). Mínimo subido de 20 → 50 ms.
+
+**Archivos modificados:** `src/ui/service.py`, `data/patterns/modelo_A/holes.json`,
+`data/patterns/modelo_A/roi.json`
+
+---
+
 #### Cambio 73 - Limpieza total de mojibake + test preventivo
 
 **Motivacion:** Seguian apareciendo textos con caracteres deformados en distintas tabs
