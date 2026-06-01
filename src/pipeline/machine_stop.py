@@ -42,7 +42,10 @@ class MachineStopDetector:
         same_column_tol_cells: int = 0,
     ) -> None:
         self._enabled               = enabled
-        self._missing_frames        = max(1, missing_frames)
+        # Faltantes: SIEMPRE requiere persistencia (>=2). Un solo frame con faltantes
+        # NUNCA debe parar la maquina (el metal pudo haberse corrido). La verticalidad,
+        # en cambio, puede parar con un solo frame (se maneja fuera del detector).
+        self._missing_frames        = max(2, missing_frames)
         self._min_missing           = max(1, min_missing)
         self._same_zone_px          = max(1.0, same_zone_px)
         self._ignore_near_miss      = ignore_near_miss

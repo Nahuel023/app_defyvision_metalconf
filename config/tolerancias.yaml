@@ -121,15 +121,25 @@ models:
     # ── Temporal / produccion ─────────────────────────────────────────────────
     consecutive_nok_frames: 9999  # CALIBRACION: FAULT deshabilitado
     continuous_position_threshold: 0.0
-    # ── Parada virtual de máquina ─────────────────────────────────────────────
-    # Deshabilitada durante calibracion para no generar alertas falsas.
-    machine_stop_enabled: false
-    machine_stop_missing_frames: 8
-    machine_stop_min_missing: 2
+    # ── Parada de máquina ─────────────────────────────────────────────────────
+    machine_stop_enabled: true
+    # FALTANTES: solo paran por PERSISTENCIA. Un solo frame con faltantes NUNCA para
+    # (el metal pudo correrse), sin importar la cantidad. Requiere 5 frames consecutivos
+    # con el mismo agujero faltante en la misma columna.
+    machine_stop_missing_frames: 5
+    # 1 = detecta un solo punzón roto (1 agujero faltante persistente en una columna),
+    # igual que microperforado. La persistencia (5 frames) evita falsas paradas.
+    machine_stop_min_missing: 1
     machine_stop_same_zone_px: 40.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
+    # INCLINACION: cuando la chapa esta inclinada NO se debe parar NUNCA la maquina,
+    # porque con la chapa inclinada el patron NO se lee bien (lecturas no confiables).
+    # El frame inclinado igual se marca NOK (no se acepta), pero jamas dispara la parada.
+    # Ademas, los frames inclinados se pasan como baja calidad al detector de faltantes,
+    # asi tampoco disparan la parada por faltantes.
+    machine_stop_on_tilt: false
 
   modelo_B:
     # ── Detección ──────────────────────────────────────────────────────────

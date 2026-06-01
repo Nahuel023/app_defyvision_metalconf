@@ -194,6 +194,10 @@ def _inspect_bgr(
     # |tilt| supera grid_derotate_min_deg.
     grid_derotate          = bool(tolerances.get("grid_derotate", False))
     grid_derotate_min_deg  = float(tolerances.get("grid_derotate_min_deg", 0.4))
+    # Verticalidad: si la chapa esta desviada (|tilt|>tilt_warn_deg), un solo frame
+    # puede DETENER LA MAQUINA (parada inmediata). Los faltantes, en cambio, solo paran
+    # por persistencia. Default False; se activa por modelo.
+    machine_stop_on_tilt   = bool(tolerances.get("machine_stop_on_tilt", False))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
@@ -541,9 +545,9 @@ def _inspect_bgr(
     # Pass missing_cells so grid-mode tracking can key by column ci instead
     # of pixel X — the same broken punch is then recognised across frames
     # even as the sheet advances vertically.
-    # Inclinacion (tilt) de la grilla → aviso. Calculado antes de machine_stop para
-    # poder suprimirlo: una chapa inclinada genera muchos faltantes que NO son punzon
-    # roto, asi que NUNCA debe disparar "DETENER MAQUINA".
+    # Inclinacion (tilt) de la grilla. Un frame inclinado suelto = NOK (sin parar);
+    # solo si la inclinacion PERSISTE varios frames consecutivos se dispara la parada
+    # por verticalidad (igual logica que los faltantes persistentes).
     tilt_warn = bool(
         tilt_warn_deg > 0.0
         and not math.isnan(sheet_tilt_deg)
@@ -553,8 +557,10 @@ def _inspect_bgr(
     machine_stop = False
     _ms_reason   = "AGUJERO PERSISTENTE FALTANTE"
     if _ms_detector is not None:
-        # Frames inclinados se tratan como baja calidad para el detector, asi su
-        # racha no acumula ni dispara la parada de maquina por la inclinacion.
+        # FALTANTES: solo paran por PERSISTENCIA (>=2 frames). Los frames inclinados se
+        # pasan como baja calidad para que la inclinacion (que genera muchos faltantes
+        # que NO son punzon roto) no contamine ni dispare la parada por faltantes.
+        # Un solo frame con faltantes NUNCA para (el metal pudo correrse).
         _ms_fq = "LOW_QUALITY" if tilt_warn else frame_quality
         machine_stop, _ms_positions = _ms_detector.update(
             report.missing_points, near_miss_pairs, _ms_fq, img_h,
@@ -565,10 +571,14 @@ def _inspect_bgr(
             if cols:
                 col_str  = ", ".join(str(c) for c in cols)
                 _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
+
+    # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
+    # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
+    if tilt_warn and machine_stop_on_tilt:
+        machine_stop = True
+        _ms_reason   = f"PATRON DESALINEADO - VERTICALIDAD {sheet_tilt_deg:+.1f} grados"
     if tilt_warn:
-        # La chapa inclinada nunca debe mostrar "DETENER MAQUINA", pero el frame es NOK.
-        machine_stop = False
-        final_status = "NOK"
+        final_status = "NOK"   # inclinado siempre NOK (pare o no)
     if machine_stop:
         final_status = "NOK"
 

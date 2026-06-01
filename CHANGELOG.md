@@ -45,6 +45,115 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-01 — Tadeo + Claude
 
+#### Cambio 87 — Inclinación NUNCA detiene la máquina (revierte parada por verticalidad del Cambio 84)
+
+**Aclaración del operador:** cuando la chapa está INCLINADA no se debe detener NUNCA la
+máquina, porque con la chapa inclinada el patrón NO se lee bien (lecturas no confiables) —
+no es base válida para parar.
+
+**Cambio:** `config/tolerancias.yaml` modelo_A → `machine_stop_on_tilt: true` → **false**.
+Revierte la parada inmediata por verticalidad que se había puesto en el Cambio 84.
+
+**Comportamiento resultante para frames inclinados (|tilt|>tilt_warn_deg):**
+- Se marcan **NOK** (no se aceptan) y muestran "CHAPA INCLINADA" + número arriba-izquierda.
+- **NUNCA** disparan `machine_stop` (sin banner "DETENCION DE MAQUINA").
+- Se pasan como LOW_QUALITY al detector de faltantes → tampoco disparan la parada por
+  faltantes (la lectura inclinada no contamina la racha).
+
+**Faltantes persistentes** siguen pudiendo parar (Cambio 84): un punzón roto persistente N
+frames → parada. Solo la inclinación quedó excluida de parar.
+
+**Validación:** frames 0083 (-3.98°), 0090 (-3.18°) → NOK, `machine_stop=False`; normales OK.
+Tests 4/4.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+#### Cambio 86 — Texto de parada sin la palabra "VIRTUAL"
+
+**Pedido:** En las fotos/overlays que marcan error o parada, el texto debía decir
+`DETENCION DE MAQUINA` y no `DETENCION VIRTUAL DE MAQUINA`, tanto para
+`modelo_A` como para `modelo_B`.
+
+**Cambios:**
+- `src/pipeline/annotate.py` → el banner superior de parada ahora muestra
+  `! DETENCION DE MAQUINA`.
+- `src/controller/scanner_controller.py` → el warning asociado a la parada
+  persistente usa el mismo texto (`DETENCION DE MAQUINA`) para mantener
+  consistencia entre overlay y logs.
+
+**No tocado:** La lógica de `machine_stop`, el bloqueo de hardware y el carácter
+virtual de la acción siguen igual; solo cambió el texto visible.
+
+**Archivos modificados:** `src/pipeline/annotate.py`,
+`src/controller/scanner_controller.py`
+
+#### Cambio 85 — Grabación: navegación eficiente (overlays JPEG, libera ~1.6 GB) + saca flecha central
+
+**Problema 1 — la PC se trababa al navegar tras el análisis.** `self._results` mantenía
+200 `InspectionResult`, cada uno con `overlay` (1920×1080×3 ≈ 6 MB) + `mask` (≈2 MB) →
+~1.6 GB en RAM → swap → freeze.
+
+**Fix (`src/ui/service.py`):**
+- `_on_ana_done`: tras el análisis, cada overlay se comprime a JPEG (q=92, ~295 KB vs
+  6 MB → ~20×) en `self._overlay_jpegs`, y se liberan los arrays pesados de cada resultado
+  (`object.__setattr__(r,"overlay",None)`, `mask=None`). 200 frames: ~1.6 GB → ~58 MB.
+- Nuevo `_result_bgr(idx)`: decodifica el overlay del JPEG bajo demanda (rápido). Usado por
+  el navegador (`_show_frame`), `_save_current_frame` y `_export_range`.
+- `_px_cache_max` 40→24 (decodificar JPEG es barato, baja la RAM del caché de pixmaps).
+- `_overlay_jpegs` se limpia en `_on_analyze` junto con `_results`.
+
+**Problema 2 — flecha central de inclinación molestaba.** `draw_centering_overlay` dibujaba
+una flecha (sheet-center→pattern-center) en el medio del frame.
+
+**Fix (`src/pipeline/annotate.py`):** eliminada la flecha (y el círculo de fallback) del
+centro. La inclinación queda solo como número arriba-izquierda (`draw_tilt_indicator`) y el
+offset en el texto inferior. El resto del overlay de centrado se mantiene.
+
+**Validación:** compile OK, tests 4/4, roundtrip JPEG verificado (6075 KB→295 KB, decode
+1920×1080 OK, frozen dataclass liberado), smoke test de `RecordingTab`, overlay confirmado
+sin flecha central.
+
+**Archivos modificados:** `src/ui/service.py`, `src/pipeline/annotate.py`.
+
+---
+
+#### Cambio 84 — Parada de máquina: faltantes solo por persistencia, verticalidad inmediata (ambos patrones)
+
+**Pedido del operador (regla para AMBOS patrones):**
+- Un solo frame con faltantes **NUNCA** puede parar la máquina, sin importar cuántos
+  falten (el metal pudo correrse). → siempre requiere persistencia.
+- Un solo frame con **desvío de verticalidad SÍ** puede parar (falla mecánica). → inmediato.
+
+**Esterilla (modelo_A) — antes tenía `machine_stop_enabled: false`. Cambios:**
+- `config/tolerancias.yaml`: `machine_stop_enabled: true`, `machine_stop_missing_frames: 5`
+  (persistencia), `machine_stop_min_missing: 1` (detecta un solo punzón roto persistente,
+  como microperforado), nuevo `machine_stop_on_tilt: true` (verticalidad → parada inmediata).
+- `src/inspection.py`: cuando `tilt_warn` (|sheet_tilt_deg|>`tilt_warn_deg`) y
+  `machine_stop_on_tilt`, `machine_stop=True` en ese mismo frame con razón
+  "PATRON DESALINEADO - VERTICALIDAD". Los faltantes pasan al detector como LOW_QUALITY
+  cuando hay tilt, para no contaminar la racha de faltantes. (Reemplaza la lógica de
+  persistencia de tilt que se había planteado: ahora la verticalidad es inmediata.)
+- `src/utils/config.py`: default `machine_stop_on_tilt: False`.
+
+**Refuerzo defensivo (ambos patrones):**
+- `src/pipeline/machine_stop.py`: `missing_frames` se fuerza a `max(2, ...)` — un solo
+  frame con faltantes nunca puede disparar la parada, aunque se configure 1.
+
+**Microperforado (modelo_B) — ya cumplía, sin cambios:** `machine_stop_missing_frames: 5`
+(persistencia), verticalidad inmediata vía `pattern_align_enabled` ("PATRON DESALINEADO").
+
+**Validación:**
+- Detector directo: 1 frame con 50 faltantes → para? **False** (nunca para por 1 frame).
+- frames inclinados (0083=-3.98°, 0090=-3.18°) → `machine_stop=True` inmediato (NOK,
+  "PATRON DESALINEADO - VERTICALIDAD"); normales (0162, 0016) → False.
+- `run-folder` Patron_Esterilla (200 frames): 9 machine_stop = todos por verticalidad
+  (inclinados), 0 por faltantes (material bueno). Tests 4/4.
+
+**Archivos modificados:** `config/tolerancias.yaml`, `src/inspection.py`,
+`src/utils/config.py`, `src/pipeline/machine_stop.py`.
+
+---
+
 #### Cambio 83 — Esterilla: de-rotación por tilt (fixea falsos missing) + tilt→NOK sin DETENER MAQUINA
 
 **Contexto:** carpeta nueva `Patron_Esterilla_METALCONF` (201 frames, 63 únicas). El usuario

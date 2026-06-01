@@ -576,7 +576,7 @@ class ScannerController:
                 self._fault_count += 1
 
         if machine_stop_triggered:
-            logger.warning(f"[{self._id}] DETENCION VIRTUAL — agujero faltante persistente (sin accion de hardware)")
+            logger.warning(f"[{self._id}] DETENCION DE MAQUINA — agujero faltante persistente (sin accion de hardware)")
         if fault_triggered:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
             self._io.write(f"{self._id}.solenoid",  False)

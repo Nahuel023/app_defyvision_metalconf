@@ -303,7 +303,7 @@ def draw_machine_stop_badge(
     h, w = out.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
 
-    main_label = "! DETENCION VIRTUAL DE MAQUINA"
+    main_label = "! DETENCION DE MAQUINA"
     main_scale, main_thick = 1.3, 3
     (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
 
@@ -463,23 +463,10 @@ def draw_centering_overlay(
     else:
         cv2.line(out, (hx, 0), (hx, h - 1), _ptc_color, 1)
 
-    # --- Offset arrow: from sheet-center to pattern-center at mid-frame height ---
-    # Evaluate each center polyline at mid_y to get a single X per line.
-    # If per-band data is available use its fitted line; otherwise fall back to scalars.
+    # Flecha central de offset (sheet-center → pattern-center) ELIMINADA a pedido:
+    # molestaba para ver el patrón. La info de inclinación queda solo como número
+    # arriba-izquierda (draw_tilt_indicator) y el offset en el texto de abajo.
     color = (0, 200, 0) if centering.within_tol else (0, 0, 255)
-    mid_y = h // 2
-    def _pts_x_at_y(pts, fallback: int) -> int:
-        if len(pts) >= 4:
-            c = _fit_line_robust([(x - roi_x, y - roi_y) for x, y in pts])
-            if c is not None:
-                return int(round(_line_x_at_y(c, mid_y - roi_y) + roi_x))
-        return fallback
-    cx_real = _pts_x_at_y(sheet_ctr_pts, cx)
-    hx_real = _pts_x_at_y(pat_ctr_pts,  hx)
-    if abs(hx_real - cx_real) >= 3:
-        cv2.arrowedLine(out, (cx_real, mid_y), (hx_real, mid_y), color, 3, tipLength=0.3)
-    else:
-        cv2.circle(out, (cx_real, mid_y), 6, (0, 200, 0), -1)
 
     # --- Text: margins, delta, offset, verticality ---
     lm = centering.left_margin_px

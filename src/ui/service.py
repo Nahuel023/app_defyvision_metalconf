@@ -1484,7 +1484,10 @@ class RecordingTab(QWidget):
         # QPixmap cache: (idx, overlay_bool) -> QPixmap.  Avoids re-converting BGR->QPixmap
         # on every navigation click. Cleared when a new analysis/load replaces the data.
         self._px_cache: dict = {}
-        self._px_cache_max = 40  # keep last ~40 pixmaps (~320 MB for 1920x1080)
+        self._px_cache_max = 24  # keep last ~24 pixmaps (decode JPEG es barato; baja RAM)
+        # Overlays comprimidos a JPEG (bytes) por frame analizado. Evita mantener 200
+        # arrays BGR de 1920x1080 (~6 MB c/u) en RAM, que saturaban la PC al navegar.
+        self._overlay_jpegs: list = []
 
         # Track last result-card state to skip redundant setStyleSheet calls.
         self._last_card_state: str | None = None
@@ -2389,6 +2392,7 @@ class RecordingTab(QWidget):
         self._px_cache.clear()
         self._last_card_state = None
         self._results.clear()
+        self._overlay_jpegs.clear()
         self._stats_lbl.setText("")
         self._export_status_lbl.setText("")
         self._ana_progress.setText("Analizando...")
@@ -2461,6 +2465,24 @@ class RecordingTab(QWidget):
                 parts.append(f"centro avg={avg_off:+.1f}px  max={max_off:.1f}px")
             self._stats_lbl.setText("    ".join(parts))
 
+        # Comprimir overlays a JPEG y liberar los arrays BGR/mask de cada resultado.
+        # 200 overlays de 1920x1080x3 (~6 MB) + masks (~2 MB) son ~1.6 GB en RAM, lo que
+        # hacía swapear la PC al navegar. Comprimidos quedan ~60-120 MB; se decodifican
+        # bajo demanda (rápido) y se cachean como pixmaps.
+        self._overlay_jpegs = [None] * len(results)
+        for _i, _r in enumerate(results):
+            _ov = getattr(_r, "overlay", None)
+            if _ov is not None:
+                _ok, _buf = cv2.imencode(".jpg", _ov, [cv2.IMWRITE_JPEG_QUALITY, 92])
+                if _ok:
+                    self._overlay_jpegs[_i] = _buf
+            # Liberar arrays pesados (dataclass frozen → setattr directo).
+            try:
+                object.__setattr__(_r, "overlay", None)
+                object.__setattr__(_r, "mask", None)
+            except Exception:
+                pass
+
         self._ana_progress.setText("OK Análisis completo")
         self._set_analysis_running(False)
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
@@ -2480,6 +2502,18 @@ class RecordingTab(QWidget):
     # Browser
     # ------------------------------------------------------------------
 
+    def _result_bgr(self, idx: int):
+        """Overlay BGR del resultado `idx`, decodificando del JPEG comprimido si existe.
+
+        Devuelve None si no hay overlay disponible. Usado por el navegador y el export
+        (los arrays BGR crudos se liberan tras el análisis para no saturar la RAM).
+        """
+        if 0 <= idx < len(self._overlay_jpegs) and self._overlay_jpegs[idx] is not None:
+            return cv2.imdecode(self._overlay_jpegs[idx], cv2.IMREAD_COLOR)
+        if 0 <= idx < len(self._results):
+            return getattr(self._results[idx], "overlay", None)
+        return None
+
     def _show_frame(self, idx: int) -> None:
         if not self._frame_paths:
             return
@@ -2492,7 +2526,7 @@ class RecordingTab(QWidget):
         pxm = self._px_cache.get(cache_key)
         if pxm is None:
             if show_ov:
-                bgr = self._results[idx].overlay
+                bgr = self._result_bgr(idx)
             else:
                 bgr = cv2.imread(str(self._frame_paths[idx]))
 
@@ -2593,12 +2627,15 @@ class RecordingTab(QWidget):
         if self._current_idx >= len(self._results):
             return
         result = self._results[self._current_idx]
+        bgr = self._result_bgr(self._current_idx)
+        if bgr is None:
+            return
         out_dir = Path("data/output/export")
         out_dir.mkdir(parents=True, exist_ok=True)
         ts    = _dt.now().strftime("%Y%m%d_%H%M%S")
         fname = f"frame_{self._current_idx:04d}_{result.status}_{ts}.png"
         out_path = out_dir / fname
-        cv2.imwrite(str(out_path), result.overlay)
+        cv2.imwrite(str(out_path), bgr)
         self._export_status_lbl.setText(f"OK  {fname}")
         logger.info(f"[Export] frame guardado -> {out_path}")
 
@@ -2636,7 +2673,9 @@ class RecordingTab(QWidget):
         out_dir.mkdir(parents=True, exist_ok=True)
         for i in range(f_from, f_to):
             r = self._results[i]
-            cv2.imwrite(str(out_dir / f"frame_{i:04d}_{r.status}.png"), r.overlay)
+            bgr = self._result_bgr(i)
+            if bgr is not None:
+                cv2.imwrite(str(out_dir / f"frame_{i:04d}_{r.status}.png"), bgr)
         saved = f_to - f_from
         self._export_status_lbl.setText(f"OK  {saved} frames -> export/rango_{ts}/")
         logger.info(f"[Export] {saved} frames -> {out_dir}")
