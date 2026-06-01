@@ -21,6 +21,50 @@ def estimate_spacing(coords: np.ndarray, min_spacing: float = 30.0) -> float:
     return float(max(1, mode) * 2.0)
 
 
+def rotate_points(pts: np.ndarray, deg: float, cx: float, cy: float) -> np.ndarray:
+    """Rota un array (N,2) `deg` grados alrededor de (cx, cy). Devuelve float32."""
+    if pts is None or len(pts) == 0:
+        return pts
+    t = np.radians(deg)
+    c, s = np.cos(t), np.sin(t)
+    x = pts[:, 0] - cx
+    y = pts[:, 1] - cy
+    return np.stack([c * x - s * y + cx, s * x + c * y + cy], axis=1).astype(np.float32)
+
+
+def estimate_lattice_tilt_deg(
+    detected_xy: np.ndarray,
+    dx: float,
+    row_dy_tol: float = 20.0,
+) -> float:
+    """Estima la rotación (tilt) de la grilla a partir de los agujeros detectados.
+
+    Para cada agujero busca su vecino más cercano hacia la derecha dentro de la misma
+    fila (Δx en ~[0.5·dx, 1.4·dx], |Δy| < row_dy_tol) y toma el ángulo de ese vector.
+    La mediana de esos ángulos es la inclinación de las filas respecto de la horizontal.
+
+    Es más robusto y directo que medir el borde de la chapa: refleja la orientación real
+    del patrón de agujeros, que es lo que el matching necesita. Devuelve grados
+    (positivo = filas inclinadas hacia abajo a la derecha). NaN si hay muy pocos agujeros.
+    """
+    if detected_xy is None or len(detected_xy) < 8 or dx <= 0:
+        return float("nan")
+    xs = detected_xy[:, 0]
+    ys = detected_xy[:, 1]
+    lo, hi = 0.5 * dx, 1.4 * dx
+    angles: list[float] = []
+    for i in range(len(detected_xy)):
+        ddx = xs - xs[i]
+        ddy = ys - ys[i]
+        m = (ddx > lo) & (ddx < hi) & (np.abs(ddy) < row_dy_tol)
+        if m.any():
+            j = np.where(m)[0][np.argmin(ddx[m])]
+            angles.append(float(np.degrees(np.arctan2(ddy[j], ddx[j]))))
+    if not angles:
+        return float("nan")
+    return float(np.median(angles))
+
+
 def estimate_phase(coords: np.ndarray, spacing: float) -> float:
     """Mode of (coords % spacing) → fractional grid origin (0 … spacing)."""
     fracs = coords % spacing

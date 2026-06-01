@@ -16,12 +16,19 @@ def preprocess_for_holes(
     blur_ksize: int = 5,
     open_ksize: int = 3,
     close_ksize: int = 5,
+    use_adaptive: bool = False,
+    adaptive_block_size: int = 61,
+    adaptive_c: float = -5.0,
 ) -> np.ndarray:
     """
     Devuelve una máscara binaria donde los agujeros quedan en blanco (255).
 
     use_clahe: aplica ecualización adaptativa (CLAHE) antes de umbralizar.
                Ideal para iluminación no uniforme (backlight lateral).
+    use_adaptive: umbral adaptativo local (cv2.adaptiveThreshold gaussiano) en lugar
+               de Otsu/umbral fijo global. Captura agujeros tenues en zonas más oscuras
+               o levemente desenfocadas donde un único umbral global los pierde.
+               Tiene precedencia sobre use_otsu. adaptive_block_size debe ser impar.
     """
     if use_channel not in _VALID_CHANNELS:
         raise ValueError(f"use_channel debe ser uno de {_VALID_CHANNELS}.")
@@ -52,7 +59,16 @@ def preprocess_for_holes(
     ksize = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
     blur = cv2.GaussianBlur(channel, (ksize, ksize), 0)
     thresh_mode = cv2.THRESH_BINARY if polarity == "bright" else cv2.THRESH_BINARY_INV
-    if use_otsu:
+    if use_adaptive:
+        block = int(adaptive_block_size)
+        if block % 2 == 0:
+            block += 1
+        block = max(3, block)
+        th = cv2.adaptiveThreshold(
+            blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, thresh_mode,
+            block, float(adaptive_c),
+        )
+    elif use_otsu:
         _, th = cv2.threshold(blur, 0, 255, thresh_mode | cv2.THRESH_OTSU)
     else:
         _, th = cv2.threshold(blur, threshold, 255, thresh_mode)

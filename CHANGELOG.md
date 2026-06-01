@@ -43,6 +43,305 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-01 — Tadeo + Claude
+
+#### Cambio 83 — Esterilla: de-rotación por tilt (fixea falsos missing) + tilt→NOK sin DETENER MAQUINA
+
+**Contexto:** carpeta nueva `Patron_Esterilla_METALCONF` (201 frames, 63 únicas). El usuario
+reportó (1) frames con demasiados faltantes que deberían detectarse bien, y (2) pidió que la
+chapa inclinada se marque NOK pero **nunca** muestre "DETENER MAQUINA".
+
+**Diagnóstico (`scripts/_esterilla_tilt_diag.py`, `_esterilla_derotate_exp.py`):**
+6/63 frames NOK con missing 36–98. correlación tilt↔missing = 0.65. Dos modos:
+- tilt alto (0083=-3.98°, 0090=-3.18°): chapa inclinada → fase del grid falla.
+- tilt bajo (0016=-1.67°, 0120=-1.59°): fallo de fase igual (amplificado por el bbox=10).
+La detección estaba bien (det 104–110); el problema era el matching de la grilla
+(asume ejes alineados). Experimento de-rotando los agujeros: missing 0016 55→0, 0090 98→0,
+0120 89→0, sin regresión en frames buenos.
+
+**Implementado:**
+- `src/pipeline/grid_fitting.py`: `rotate_points(pts, deg, cx, cy)`.
+- `src/inspection.py` (grid path): mide `sheet_tilt_deg`, de-rota los agujeros antes de
+  `grid_compare_points` y rota las posiciones esperadas DE VUELTA al espacio original
+  (donde se compara y dibuja). Gated por `grid_derotate` + `grid_derotate_min_deg`.
+- `src/inspection.py` (machine_stop): `tilt_warn` se calcula antes; si la chapa está
+  inclinada (|tilt|>`tilt_warn_deg`) → `final_status="NOK"`, `machine_stop=False` (jamás
+  DETENER MAQUINA) y se pasa `frame_quality="LOW_QUALITY"` al detector para no contaminar la
+  racha. `import math` agregado a nivel módulo.
+- `config/tolerancias.yaml` modelo_A: `grid_derotate: true`, `grid_derotate_min_deg: 0.4`.
+  `src/utils/config.py`: defaults `grid_derotate=False`, `grid_derotate_min_deg=0.4`.
+
+**Resultado (63 únicas):** missing media 7.7→**0.4** (máx 98→4), NOK-por-missing 6/63→**0/63**.
+Frames inclinados (0083, 0090) ahora matchean bien (missing 0–1) pero quedan **NOK +
+"CHAPA INCLINADA"** sin "DETENER MAQUINA" (verificado en overlay). frame_0016 (antes 55
+faltantes en la mitad inferior) → todo verde OK. Tests 4/4.
+
+**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`,
+`config/tolerancias.yaml`, `src/utils/config.py`.
+
+---
+
+#### Cambio 82 — Grabación: chip de TIPO DE PLACA junto a Analizar + fix colisión _btn_stop
+
+**Pedido:** un cartel al lado del botón Analizar que indique si se está analizando
+MICROPERFORADO o ESTERILLA, para no confundirse.
+
+**Bug encontrado y corregido (regresión del Cambio 78):** el botón "Detener" del análisis
+se había nombrado `self._btn_stop`, igual que el botón "DETENER" de **grabación**
+(`_build_recording_section`). Como `_build_analysis_section` corre después, el de análisis
+**sobrescribía** al de grabación → el botón DETENER de grabación quedaba huérfano (su
+`clicked.connect(self._on_stop)` en realidad cableaba el botón de análisis) y `_on_start`
+habilitaba el botón equivocado. Se renombró el de análisis a **`_btn_stop_analyze`** en
+todos sus usos (creación, `_set_analysis_running`, `_on_stop_analyze`). Ahora son
+independientes (verificado: `rec_stop is analyze_stop == False`).
+
+**Cambio (chip):** en `_build_analysis_section`, junto a Analizar/Detener, se agregó
+`Tipo:` + `_analyze_model_chip` (QLabel prominente, 13px bold, color por familia:
+celeste=Microperforado, verde=Esterilla). `_update_model_chip` ahora actualiza ambos chips
+(el nuevo guardado con `hasattr`). Se sincroniza con el selector de modelo y queda bloqueado
+junto con él durante el análisis.
+
+**Validación:** compile OK, tests 4/4, smoke test offscreen: chip refleja
+Microperforado/Esterilla al togglear; botones de grabación y análisis independientes;
+selector bloqueado durante análisis.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 81 — Esterilla: limpieza de "extras" de borde (bbox_filter_margin_px 50→10)
+
+**Pedido:** corregir los agujeros "extra" (diamantes naranjas) que el sistema marcaba.
+
+**Diagnóstico (`scripts/_esterilla_extras_diag.py`, 17 únicas, 124 extras / ~7.3 por frame):**
+distribución por zona — TOP-center 57, MIDDLE-left 32, BOTTOM-center 20. Son **agujeros
+reales de borde** del band (no espurios) que el patrón no registra; parte del top apareció
+al recortar la fila superior (Cambio 79). No son ruido.
+
+**Insight:** el círculo VERDE se dibuja sobre TODOS los agujeros detectados (`holes`),
+mientras que los "extra" salen de `detected_in_bbox`. Achicando el margen del bounding-box
+del patrón, los agujeros de borde quedan fuera del conteo de extras (sin diamante) PERO
+siguen en verde.
+
+**Cambio:** `config/tolerancias.yaml` → `modelo_A`: `bbox_filter_margin_px` 50→**10**.
+
+**Resultado (17 únicas):** extras **7.3 → 1.8** por frame (mediana 2, máx 3), missing sin
+cambios (mediana 0), 0 NOK. Overlay verificado: todo verde de arriba a abajo, sin cruces y
+prácticamente sin diamantes (1 residual en borde izquierdo). Tests 4/4.
+
+**Archivos modificados:** `config/tolerancias.yaml`.
+
+---
+
+#### Cambio 80 — Esterilla: medición de inclinación (tilt) de la grilla + aviso CHAPA INCLINADA
+
+**Pedido del operador:** en frames donde la chapa se inclina, el patrón queda "totalmente
+corrido" y no detecta bien. ¿Se puede medir la inclinación para detectar corrimientos?
+
+**Diagnóstico (`scripts/_esterilla_tilt_diag.py` sobre 17 únicas):** el set REDUCIDO no
+tiene frames muy inclinados (tilt de grilla ~1° máx). Hallazgo clave: el Hough actual
+(`align_image_by_right_edge`, mide el BORDE de la chapa) reporta 0.00° en casi todos,
+pero la grilla real tiene ~-1° → el Hough no refleja la inclinación del patrón. La grilla
+se puede medir directo desde los agujeros (mediana del ángulo del vecino en la fila),
+que es lo que el matching necesita.
+
+**Causa de "se corre todo" con tilt grande:** `grid_compare_points` asume grilla alineada
+a los ejes (barre fase X y luego Y). Con la chapa inclinada una fila ya no está a `y`
+constante → no engancha. El affine refinement podría absorber rotación pero (1) limita
+shear a ~8.5° y (2) tiene problema huevo-gallina: sin matches no estima rotación.
+
+**Implementado (medición + aviso):**
+- `src/pipeline/grid_fitting.py`: `estimate_lattice_tilt_deg(detected_xy, dx)` — tilt de la
+  grilla desde los agujeros (robusto, mediana de ángulos de vecino en fila).
+- `src/inspection.py`: calcula `sheet_tilt_deg` por frame, nuevo campo en `InspectionResult`
+  (`sheet_tilt_deg`, `tilt_warn`). Si `|tilt| > tilt_warn_deg` agrega causa y marca aviso.
+- `src/pipeline/annotate.py`: `draw_tilt_indicator` muestra "Inclinacion: X.X grados" al
+  borde izquierdo (bajo el STATUS); rojo + badge "CHAPA INCLINADA" cuando supera el umbral.
+- `src/utils/config.py`: default `tilt_warn_deg=0.0` (solo medir). `config/tolerancias.yaml`
+  `modelo_A`: `tilt_warn_deg=2.5` (tilt normal ~1°).
+
+**Validación:** compile OK, tests 4/4, overlay frame_0162 muestra "Inclinacion: -1.0 grados".
+Medición verificada: 0162=-1.03°, 0172=+0.60°, 0182=+0.60°, 0186=-1.06° (warn=False, todos
+bajo 2.5°). Es informativo (NO fuerza NOK por ahora).
+
+**PENDIENTE (corrección, requiere datos):** la CORRECCIÓN de detección con tilt (de-rotar
+los agujeros usando `sheet_tilt_deg` antes del grid fit, rompiendo el huevo-gallina) queda
+para implementar — falta una grabación con la chapa realmente inclinada para construir y
+validar sin regresar los frames buenos.
+
+**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`,
+`src/pipeline/annotate.py`, `src/utils/config.py`, `config/tolerancias.yaml`.
+
+---
+
+#### Cambio 79 — Esterilla: sin cruces falsas arriba + estado OK/NOK al borde izquierdo
+
+**Pedido del operador:** (1) se veían cruces rojas en la fila superior del patrón;
+(2) el texto de estado OK/NOK tapaba los agujeros y debía ir al borde izquierdo.
+
+**Problema 1 — cruces falsas arriba:** La fila superior del patrón (cj mínimo, 4 celdas)
+caía consistentemente como missing en TODOS los frames. Diagnóstico
+(`scripts/_esterilla_top_diag.py`): los agujeros superiores SÍ se detectan (verde), pero
+la posición esperada de esa fila quedaba ~24px por encima por un artefacto de fase del grid
+escalonado (fila de borde superior poco confiable). 4 cruces rojas por frame.
+
+**Fix 1:** se quitó la fila superior del patrón (`scripts/_esterilla_trim_top.py`, elimina
+el `cj` mínimo). scanner_2 + global: 119→115 celdas. Backup `.bak` previo.
+Resultado 17 únicas: missing media 5.5→**1.9**, mediana 4→**0** (mayoría 0 faltantes),
+0 NOK. Sin cruces en la parte superior (verificado visualmente).
+
+**Problema 2 — estado tapaba agujeros:** `draw_compare_overlay` dibujaba el STATUS/panel
+NOK en coordenadas de la ROI (x≈880 en frame completo) → sobre los agujeros.
+
+**Fix 2 (`src/pipeline/annotate.py` + `src/inspection.py`):**
+- Nueva función `draw_status_indicator(img, status, nok_reasons, badge_count)` que dibuja
+  el estado pegado al borde IZQUIERDO (OK → texto; NOK → panel de causas).
+- `draw_compare_overlay`: nuevo flag `draw_status` (default True). Inspección lo llama con
+  `draw_status=False` y dibuja el estado con `draw_status_indicator` sobre el frame COMPLETO
+  (zona oscura izquierda), después de los badges. Ya no tapa el patrón.
+
+**Validación:** compile OK, tests 4/4, overlay frame_0162 verificado (STATUS arriba-izq,
+patrón todo verde sin cruces).
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`,
+`data/patterns/scanner_2/modelo_A/holes.json`, `data/patterns/modelo_A/holes.json`.
+
+---
+
+#### Cambio 78 — Grabación: botón Detener análisis + bloqueo de tipo de placa
+
+**Pedido del operador:** poder frenar el análisis una vez iniciado, y que el tipo de placa
+(Esterilla/Microperforado) no se pueda cambiar mientras se está analizando.
+
+**Cambios en `src/ui/service.py`:**
+- `_AnalysisWorker`: nuevo flag `_cancel` + método `cancel()` (thread-safe) y señal
+  `cancelled(int)`. Ambos loops (secuencial con MachineStop y paralelo) chequean el flag y
+  abortan limpiamente; el loop paralelo pasa a manejar el `ThreadPoolExecutor` manualmente
+  con `shutdown(wait=False, cancel_futures=True)` para frenar rápido.
+- `RecordingTab`: nuevo botón **"Detener"** (rojo) junto a "Analizar", deshabilitado salvo
+  durante el análisis. Handler `_on_stop_analyze` llama `worker.cancel()`.
+- Nuevo helper `_set_analysis_running(running)`: durante el análisis bloquea botones
+  Esterilla/Microperforado, el combo de scanner y "Abrir grabación"; reactiva al terminar.
+  Garantiza que todos los frames se evalúen contra el mismo modelo.
+- `_on_analyze`/`_on_ana_done`/`_on_ana_error` usan el helper; nuevo `_on_ana_cancelled`
+  restaura controles y muestra "Análisis detenido (N frames)".
+
+**Validación:** `py_compile` OK, tests 4/4, smoke test offscreen de `RecordingTab`:
+running → Detener habilitado y selector/scanner bloqueados; stopped → reactivados.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 77 — Esterilla: umbral ADAPTATIVO → detección casi completa (missing 21→4)
+
+**Problema (reporte del operador):** El sistema no marcaba en verde varios agujeros, como
+si no los reconociera. Diagnóstico (`scripts/_esterilla_detect_diag.py`):
+- `draw_compare_overlay` pinta verde TODO agujero detectado → un agujero sin verde = NO
+  detectado (no es problema de patrón).
+- Relajar min_area/circularidad/aspect NO recuperaba agujeros (relaxed==current) → no era
+  filtro de contorno.
+- Causa real: el preprocess usaba **Otsu global** (un único umbral para toda la ROI). En
+  la zona inferior del encuadre (más oscura / levemente desenfocada) los agujeros tenues
+  caían bajo el umbral y no formaban contorno en la máscara.
+
+**Experimento (`scripts/_esterilla_thresh_exp.py`):** umbral adaptativo gaussiano local
+detecta muchos más agujeros sin falsos positivos:
+- frame_0162: 106→126, frame_0177: 80→122, frame_0172: 71→131.
+
+**Cambios:**
+- `src/pipeline/preprocess.py`: nuevo modo `use_adaptive` (cv2.adaptiveThreshold gaussiano)
+  con `adaptive_block_size` (impar) y `adaptive_c`. Precedencia sobre `use_otsu`.
+- `src/utils/config.py`: defaults `use_adaptive=False`, `adaptive_block_size=61`,
+  `adaptive_c=-5.0` (opt-in, no afecta otros modelos).
+- `src/inspection.py` y `src/patterns/pattern_build.py`: leen y propagan los 3 params al
+  preprocess (mismo masking en inspección y en build).
+- `config/tolerancias.yaml` → `modelo_A`: `use_adaptive: true`, `adaptive_block_size: 61`,
+  `adaptive_c: -5.0`.
+- Patrón `scanner_2/modelo_A` reconstruido con adaptivo: 88→**100 puntos** (más completo),
+  duplicados de celda 2→1. Sincronizado a global. Backup `.20260601_084919.bak`.
+
+**Resultado (17 únicas):** missing media **21.0 → 4.0** (rango 7–51 → 4–4, constante).
+Escenas 0159/0172 (antes missing 50/51) → **4**. NOK 0/17 mantenido. Detección 122–135
+agujeros/frame. Tests 4/4 OK.
+
+**Extras de borde (resuelto):** se bajó `pattern_edge_margin_px` 40→**22** para que el
+patrón REGISTRE los agujeros de borde (antes "extra"/diamante naranja). Patrón reconstruido:
+119 puntos, 0 duplicados, stagger 26px estable. Resultado 17 únicas: extras ~20→**~7**
+(media 6.9), missing media 4.0→**5.5** (mediana 4, max 29), ratio 126%→**109%**, NOK 0/17.
+Nota: con margen 12 (122 pts) un frame puntual (0186) se desestabilizaba a missing=77; 22
+es el equilibrio sin NOK. Riesgo conocido: si la lámina se corre mucho en producción, los
+agujeros de borde registrados pueden salir del encuadre y contar como faltantes — validar
+con material real en movimiento.
+
+**Archivos modificados:** `src/pipeline/preprocess.py`, `src/utils/config.py`,
+`src/inspection.py`, `src/patterns/pattern_build.py`, `config/tolerancias.yaml`,
+`data/patterns/scanner_2/modelo_A/holes.json`, `data/patterns/modelo_A/holes.json`.
+
+---
+
+#### Cambio 76 — Cámaras IP: conexión 100% manual (sin auto-connect ni reintento infinito)
+
+**Problema:** El programa quedaba lento y las cámaras WiFi no terminaban de conectar al
+iniciar. Causa: el auto-connect (Cambio 66) disparaba polling HTTP/MJPEG en background
+apenas se abría el tab Cámara, y ante fallo el `_on_ip_error` arrancaba un bucle de
+reintento incremental (5→30s) que seguía golpeando la red/CPU indefinidamente cuando la
+cámara estaba inalcanzable → UI lenta y reconexión perpetua.
+
+**Cambios en `src/ui/service.py` (CameraCalibTab):**
+- `showEvent`: ya NO llama `_auto_connect_if_saved()`. Al abrir el tab no se conecta nada;
+  el operador debe presionar **"Conectar"**.
+- `_on_ip_error`: eliminado el reintento automático (ya no arranca `_ip_retry_timers`).
+  Ante error muestra estado "Sin conexion", reactiva el botón "Conectar" y los campos de
+  IP/URL/usuario/clave para que el operador reintente manualmente cuando quiera.
+
+**No tocado:** `_on_ip_connect` (Conectar manual), `_save_ip_settings` (Guardar config
+sigue conectando porque es acción explícita del operador), producción `run` (usa cámaras
+USB por index 0/1 en `io_map.yaml`, no IP → no afectada). `_auto_connect_if_saved` y
+`_on_ip_retry` quedan en el código pero ya no se invocan (sin efecto).
+
+**Resultado:** Arranque sin polling WiFi en background; sin bucle de reconexión; conexión
+solo cuando el operador la pide.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 75 — Esterilla: corrección de geometría de grid (grid_dy 38→36, grid_dx 66→65)
+
+**Diagnóstico sobre carpeta `Esterilla_REDUCIDO` (49 archivos, 17 únicas reales, 32 duplicados):**
+Análisis de las métricas (missing media 21, missing→detectado-más-cercano media 73px,
+centrado -38px constante, ratio 109%) indicó que el problema NO era detección
+(detección sana, ratio>100%) ni tolerancia, sino **patrón + fase**.
+
+**Medición de geometría real** (`scripts/_esterilla_lattice.py`, frame_0162, sub-redes
+grande/chico por separado):
+- GRANDES: lattice dx=64.6, dy=72.3
+- CHICOS: lattice dx=64.7, dy=72.7, offset (-25.2, +35.6) respecto de grandes
+- → medio-período vertical real (fila a fila) = 72.3/2 = **36.1px**, no 38.
+- El `grid_dy=38` acumulaba ~45px de deriva Y sobre 24 filas → missing en filas inferiores
+  y picos de missing=50 en escenas puntuales (las 2 escenas NOK del set).
+
+**Cambios:**
+- `config/tolerancias.yaml` → `models.modelo_A`: `grid_dx` 66→65, `grid_dy` 38→36.
+- Reconstruido `data/patterns/scanner_2/modelo_A/holes.json` desde frame_0162 con
+  `build-pattern --model modelo_A --scanner scanner_2`. Sincronizado a global `modelo_A`.
+  Backups `.20260601_083711.bak` de holes.json (scanner_2 + global) y tolerancias.yaml.
+
+**Resultado (17 únicas):** NOK (missing≥35) **2/17 → 0/17**. Escena 0159 missing 50→27,
+0172 missing 51→34. Missing media 21.0→19.9. Duplicados de celda en build 5→2.
+
+**Pendiente (próxima iteración):** missing media (~20) y extras (~22) siguen altos =
+**patrón incompleto** (~20 celdas reales no registradas) + ajuste fino de `stagger_x_odd`
+(build auto-detectó 18px; offset medido entre sub-redes = -25px → revisar parity/signo).
+Scripts de diagnóstico nuevos: `scripts/_esterilla_geom.py`, `_esterilla_lattice.py`,
+`_esterilla_eval.py` (este último deduplica por MD5 y evalúa solo frames únicos).
+
+**Archivos modificados:** `config/tolerancias.yaml`,
+`data/patterns/scanner_2/modelo_A/holes.json`, `data/patterns/modelo_A/holes.json`.
+
+---
+
 ### Sesión 2026-05-29 — Tadeo + Claude (noche)
 
 #### Cambio 74 — Esterilla "todo rojo" + lentitud modo servicio (regresión WiFi)

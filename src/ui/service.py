@@ -1033,9 +1033,10 @@ class ConfigTab(QWidget):
 # ==================================================================
 
 class _AnalysisWorker(QThread):
-    progress = pyqtSignal(int, int)          # (done, total)
-    finished = pyqtSignal(list)              # list[InspectionResult]
-    error    = pyqtSignal(str)
+    progress  = pyqtSignal(int, int)          # (done, total)
+    finished  = pyqtSignal(list)              # list[InspectionResult]
+    error     = pyqtSignal(str)
+    cancelled = pyqtSignal(int)               # (frames_analizados antes de cancelar)
 
     def __init__(self, model: str, frame_paths: list, scanner_id: str | None = None,
                  parent=None) -> None:
@@ -1043,6 +1044,11 @@ class _AnalysisWorker(QThread):
         self._model      = model
         self._paths      = frame_paths
         self._scanner_id = scanner_id
+        self._cancel     = False
+
+    def cancel(self) -> None:
+        """Solicita la cancelación del análisis (thread-safe: flag booleano)."""
+        self._cancel = True
 
     def run(self) -> None:
         import os
@@ -1085,6 +1091,9 @@ class _AnalysisWorker(QThread):
                 # the main thread event loop with cross-thread signal deliveries.
                 _emit_every = max(1, n // 50)
                 for i, path in enumerate(self._paths):
+                    if self._cancel:
+                        self.cancelled.emit(i)
+                        return
                     results[i] = inspect_image(
                         self._model, path,
                         scanner_id=self._scanner_id,
@@ -1100,23 +1109,31 @@ class _AnalysisWorker(QThread):
 
                 def _worker(args):
                     idx, path = args
+                    if self._cancel:
+                        return idx, None
                     return idx, inspect_image(
                         self._model, path,
                         scanner_id=self._scanner_id,
                         _preloaded=_pre,
                     )
 
-                with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                executor = ThreadPoolExecutor(max_workers=n_workers)
+                try:
                     futures = {
                         executor.submit(_worker, (i, p)): i
                         for i, p in enumerate(self._paths)
                     }
                     for future in as_completed(futures):
+                        if self._cancel:
+                            self.cancelled.emit(done)
+                            return
                         idx, result = future.result()
                         results[idx] = result
                         done += 1
                         if done % _emit_every == 0 or done == n:
                             self.progress.emit(done, n)
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
 
             self.finished.emit(results)
         except Exception as exc:
@@ -1877,8 +1894,26 @@ class RecordingTab(QWidget):
         self._btn_load    = self._mk_btn("Abrir grabación", "#374151", h=36, fs=11)
         self._btn_analyze = self._mk_btn("Analizar",         "#1d4ed8", h=36, fs=12)
         self._btn_analyze.setEnabled(False)
+        self._btn_stop_analyze = self._mk_btn("Detener",     "#b91c1c", h=36, fs=12)
+        self._btn_stop_analyze.setEnabled(False)
+        self._btn_stop_analyze.clicked.connect(self._on_stop_analyze)
         row1.addWidget(self._btn_load)
         row1.addWidget(self._btn_analyze)
+        row1.addWidget(self._btn_stop_analyze)
+        row1.addSpacing(10)
+
+        # Chip de TIPO DE PLACA en análisis — al lado de Analizar, para no confundir
+        # el modelo que se está analizando (Esterilla vs Microperforado).
+        _tipo_prefix = QLabel("Tipo:")
+        _tipo_prefix.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;"
+        )
+        row1.addWidget(_tipo_prefix)
+        self._analyze_model_chip = QLabel("-")
+        self._analyze_model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._analyze_model_chip.setFixedHeight(36)
+        self._analyze_model_chip.setMinimumWidth(170)
+        row1.addWidget(self._analyze_model_chip)
         row1.addSpacing(12)
 
         self._ana_progress = QLabel("")
@@ -2329,6 +2364,21 @@ class RecordingTab(QWidget):
     # Analysis
     # ------------------------------------------------------------------
 
+    def _set_analysis_running(self, running: bool) -> None:
+        """Bloquea/activa los controles que NO deben cambiar durante el análisis.
+
+        Mientras se analiza, el tipo de placa (Esterilla/Microperforado) y el scanner
+        quedan bloqueados para garantizar que todos los frames se evalúen contra el mismo
+        modelo. El botón Detener queda activo solo mientras corre el análisis.
+        """
+        self._btn_analyze.setEnabled(not running and bool(self._frame_paths))
+        self._btn_stop_analyze.setEnabled(running)
+        self._btn_load.setEnabled(not running)
+        self._btn_model_esterilla.setEnabled(not running)
+        self._btn_model_microperf.setEnabled(not running)
+        if hasattr(self, "_scanner_combo"):
+            self._scanner_combo.setEnabled(not running)
+
     def _on_analyze(self) -> None:
         if not self._frame_paths:
             return
@@ -2338,12 +2388,12 @@ class RecordingTab(QWidget):
             self._write_executor = None
         self._px_cache.clear()
         self._last_card_state = None
-        self._btn_analyze.setEnabled(False)
         self._results.clear()
         self._stats_lbl.setText("")
         self._export_status_lbl.setText("")
         self._ana_progress.setText("Analizando...")
         self._set_rec_badge("analyzing", len(self._frame_paths), self._rec_dir)
+        self._set_analysis_running(True)
 
         self._worker = _AnalysisWorker(
             self._active_model(), list(self._frame_paths),
@@ -2353,7 +2403,20 @@ class RecordingTab(QWidget):
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
         self._worker.error.connect(self._on_ana_error)
+        self._worker.cancelled.connect(self._on_ana_cancelled)
         self._worker.start()
+
+    def _on_stop_analyze(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._btn_stop_analyze.setEnabled(False)
+            self._ana_progress.setText("Deteniendo...")
+
+    def _on_ana_cancelled(self, done: int) -> None:
+        self._ana_progress.setText(f"Análisis detenido ({done} frames)")
+        self._set_analysis_running(False)
+        self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
+        logger.info(f"[Grabación] análisis detenido por el operador tras {done} frames")
 
     def _on_ana_progress(self, done: int, total: int) -> None:
         self._ana_progress.setText(f"Analizando  {done} / {total}...")
@@ -2399,7 +2462,7 @@ class RecordingTab(QWidget):
             self._stats_lbl.setText("    ".join(parts))
 
         self._ana_progress.setText("OK Análisis completo")
-        self._btn_analyze.setEnabled(True)
+        self._set_analysis_running(False)
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
         self._update_model_chip()
         self._update_export_range_max()
@@ -2409,7 +2472,7 @@ class RecordingTab(QWidget):
 
     def _on_ana_error(self, msg: str) -> None:
         self._ana_progress.setText(f"ALERTA  Error: {msg}")
-        self._btn_analyze.setEnabled(True)
+        self._set_analysis_running(False)
         self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
         logger.error(f"[Grabación] error de análisis: {msg}")
 
@@ -2599,6 +2662,14 @@ class RecordingTab(QWidget):
             f"background:{_DARK};border:1px solid {border};"
             "border-radius:7px;padding:0 14px;"
         )
+        # Chip prominente al lado del botón Analizar (mismo color por tipo de placa).
+        if hasattr(self, "_analyze_model_chip"):
+            self._analyze_model_chip.setText(name_upper)
+            self._analyze_model_chip.setStyleSheet(
+                f"color:{color};font-size:13px;font-weight:800;letter-spacing:2px;"
+                f"background:{_DARK};border:2px solid {border};"
+                "border-radius:7px;padding:0 12px;"
+            )
 
     def _set_rec_badge(self, state: str, n_frames: int,
                        folder: Optional[Path]) -> None:
@@ -3599,7 +3670,10 @@ class CameraCalibTab(QWidget):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        self._auto_connect_if_saved()
+        # Conexión manual: NO se auto-conecta al abrir el tab. El auto-connect
+        # disparaba polling WiFi en background apenas se mostraba la pestaña, lo
+        # que saturaba red/CPU y ralentizaba la UI cuando la cámara no respondía.
+        # Ahora el operador debe presionar "Conectar" para iniciar la conexión.
 
     def _auto_connect_if_saved(self) -> None:
         """Conecta automáticamente los slots con URL guardada que no fueron
@@ -3743,17 +3817,20 @@ class CameraCalibTab(QWidget):
         self._disconnect_ip_slot(slot)
         if self._ip_manual_disc[slot]:
             return
-        delay = min(5 + self._ip_retry_counts[slot] * 5, 30)
-        self._ip_retry_counts[slot] += 1
-        self._ip_retry_timers[slot].start(delay * 1000)
-        self._log_ip_event(slot, f"Error: {msg[:60]} — reintento en {delay}s", "error")
+        # Sin reintento automático: si la cámara WiFi queda inalcanzable, un bucle
+        # de reconexión satura red/CPU y deja la UI lenta. Mostramos el error y
+        # dejamos que el operador reintente manualmente con "Conectar".
         self._save_ip_diagnostic_snapshot(slot, f"error_{msg}")
+        self._log_ip_event(slot, f"Error: {msg[:60]} — presione Conectar para reintentar", "error")
         if slot == self._ip_slot:
-            n = self._ip_retry_counts[slot]
-            self._set_ip_status(f"Reintento {n} - en {delay}s", "error")
-            self._btn_ip_connect.setEnabled(False)
-            self._btn_ip_disconnect.setEnabled(True)
+            self._set_ip_status("Sin conexion", "error")
+            self._btn_ip_connect.setEnabled(True)
+            self._btn_ip_disconnect.setEnabled(False)
             self._btn_ip_capture.setEnabled(False)
+            self._ip_host_edit.setEnabled(True)
+            self._ip_url_edit.setEnabled(True)
+            self._ip_user_edit.setEnabled(True)
+            self._ip_pass_edit.setEnabled(True)
 
     def _on_ip_retry(self, slot: int) -> None:
         if self._ip_manual_disc[slot]:
