@@ -55,6 +55,9 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "machine_stop_ignore_near_miss": True,
     "machine_stop_track_by_grid": True,
     "machine_stop_same_column_tol_cells": 0,
+    # Verticalidad: un solo frame con la chapa desviada puede parar la maquina
+    # (inmediato). Los faltantes solo paran por persistencia (machine_stop_missing_frames).
+    "machine_stop_on_tilt": False,
     "use_hungarian_matching": False,
     "verticality_quality_enabled": False,
     "chapa_zigzag_std_max_px": 4.0,
