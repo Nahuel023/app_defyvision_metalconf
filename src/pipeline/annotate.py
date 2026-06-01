@@ -121,6 +121,7 @@ def draw_compare_overlay(
     near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
     nok_reasons: List[str] = (),
     nok_panel_badge_count: int = 0,
+    draw_status: bool = True,
 ) -> np.ndarray:
     """Draw inspection overlay.
 
@@ -130,6 +131,9 @@ def draw_compare_overlay(
     nok_reasons: list of human-readable cause strings drawn as a panel when NOK.
     nok_panel_badge_count: number of top machine-stop/desalignment banners that
     will be drawn later on the full frame. Used to push the NOK panel below them.
+    draw_status: when False, the OK/NOK status indicator is NOT drawn here. The
+    caller is expected to draw it later via draw_status_indicator() on the full
+    frame (so it lands on the left edge, not over the holes in the ROI).
     """
     out = img_bgr.copy()
 
@@ -166,17 +170,64 @@ def draw_compare_overlay(
         cv2.drawMarker(out, (int(x), int(y)), (0, 165, 255),
                        markerType=cv2.MARKER_DIAMOND, markerSize=20, thickness=2)
 
-    # Panel de causas NOK (siempre visible cuando es NOK)
-    if status == "NOK" and nok_reasons:
-        y_start = max(0, int(nok_panel_badge_count) * _BADGE_H)
-        _draw_nok_reasons_panel(out, list(nok_reasons), y_start=y_start)
-    else:
-        # Status compacto cuando es OK o sin razones
-        color = (0, 220, 0) if status == "OK" else (0, 200, 255)
-        cv2.putText(out, f"STATUS: {status}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, cv2.LINE_AA)
+    # Indicador de estado (OK/NOK). Por defecto aquí; con draw_status=False el
+    # caller lo dibuja sobre el frame completo (borde izquierdo) vía draw_status_indicator.
+    if draw_status:
+        draw_status_indicator(out, status, nok_reasons, nok_panel_badge_count)
 
     return out
+
+
+def draw_status_indicator(
+    img: np.ndarray,
+    status: str,
+    nok_reasons: List[str] = (),
+    badge_count: int = 0,
+) -> np.ndarray:
+    """Dibuja el estado OK/NOK pegado al BORDE IZQUIERDO de la imagen.
+
+    Pensado para llamarse sobre el frame COMPLETO (no sobre el recorte ROI), de modo
+    que el texto/panel quede en la zona oscura de la izquierda y no tape los agujeros.
+    NOK → panel de causas; OK → texto compacto. Dibuja in-place y devuelve img.
+    """
+    if status == "NOK" and nok_reasons:
+        y_start = max(0, int(badge_count) * _BADGE_H)
+        _draw_nok_reasons_panel(img, list(nok_reasons), y_start=y_start)
+    else:
+        color = (0, 220, 0) if status == "OK" else (0, 200, 255)
+        cv2.putText(img, f"STATUS: {status}", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, cv2.LINE_AA)
+    return img
+
+
+def draw_tilt_indicator(
+    img: np.ndarray,
+    tilt_deg: float,
+    warn: bool = False,
+    y: int = 62,
+) -> np.ndarray:
+    """Muestra la inclinación de la grilla al borde izquierdo, bajo el STATUS.
+
+    Texto normal (cian) cuando está dentro de lo esperado; amarillo/rojo + badge
+    "CHAPA INCLINADA" cuando `warn` es True. NaN → no dibuja nada. In-place.
+    """
+    import math
+    if tilt_deg is None or (isinstance(tilt_deg, float) and math.isnan(tilt_deg)):
+        return img
+    color = (0, 0, 255) if warn else (200, 200, 80)
+    cv2.putText(img, f"Inclinacion: {tilt_deg:+.1f} grados", (10, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
+    cv2.putText(img, f"Inclinacion: {tilt_deg:+.1f} grados", (10, y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+    if warn:
+        label = "! CHAPA INCLINADA"
+        (tw, th), bl = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
+        bx, by = 10, y + 14
+        cv2.rectangle(img, (bx, by), (bx + tw + 14, by + th + bl + 12), (0, 0, 150), -1)
+        cv2.rectangle(img, (bx, by), (bx + tw + 14, by + th + bl + 12), (0, 0, 255), 2)
+        cv2.putText(img, label, (bx + 7, by + th + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+    return img
 
 
 def _draw_edge_polyline(

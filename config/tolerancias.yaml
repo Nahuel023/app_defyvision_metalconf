@@ -54,6 +54,17 @@ models:
     polarity: bright
     # Umbral de binarizacion: bajar ayuda a detectar agujeros con iluminacion pareja.
     threshold: 140
+    # Umbral ADAPTATIVO local: captura agujeros tenues en zonas mas oscuras o levemente
+    # desenfocadas (parte inferior del encuadre) donde el Otsu global los perdia.
+    # Sube la deteccion de ~106 a ~126 agujeros/frame sin falsos positivos.
+    # block impar; c negativo = mas permisivo (mas agujeros). Tiene precedencia sobre use_otsu.
+    use_adaptive: true
+    adaptive_block_size: 61
+    adaptive_c: -5.0
+    # Inclinacion (tilt) de la grilla medida desde los agujeros. Avisa "CHAPA INCLINADA"
+    # si |tilt| supera este umbral (grados). El tilt normal medido es ~1°, asi que 2.5°
+    # marca solo inclinaciones reales. 0.0 = solo medir sin avisar.
+    tilt_warn_deg: 2.5
     min_area: 80.0              # BLANDO: captura agujeros chicos con blur o iluminacion baja
     circularity_min: 0.35       # BLANDO: acepta agujeros deformados por perspectiva/blur
     aspect_ratio_max: 3.0       # BLANDO: acepta ligeras deformaciones
@@ -74,14 +85,31 @@ models:
     min_match_count: 3          # BLANDO: permite alinear con pocos agujeros visibles
     # ── Bordes ────────────────────────────────────────────────────────────────
     edge_margin_px: 3.0         # muy bajo: no descartar agujeros en borde de ROI
-    pattern_edge_margin_px: 40.0
+    # Bajado 40→22: el patron REGISTRA los agujeros de borde (antes quedaban como
+    # "extra"/diamante naranja). Extras ~20→~7 sin introducir NOK. Contrapartida: si la
+    # lamina se corre mucho en produccion, los agujeros de borde pueden salir del encuadre
+    # y contar como faltantes — revisar con material real en movimiento.
+    pattern_edge_margin_px: 22.0
     # ── Grid ──────────────────────────────────────────────────────────────────
     grid_min_spacing: 30.0
-    grid_dx: 66.0
-    grid_dy: 38.0
+    # Geometria real medida sobre frame_0162 (sub-redes grande/chico):
+    #   dx_real≈64.6  dy_columna≈72.3 → medio-periodo (fila a fila) = 36.1
+    # Antes dx=66/dy=38 (dy=38 acumulaba ~45px de deriva Y en 24 filas → missing abajo).
+    grid_dx: 65.0
+    grid_dy: 36.0
+    # De-rotación: cuando la chapa se inclina, la búsqueda de fase del grid falla y
+    # aparecen muchos falsos faltantes. Se de-rotan los agujeros según el tilt medido
+    # antes de ajustar la grilla (corrige inclinados Y el drift inferior). Validado:
+    # frames 0016/0090/0120 pasaron de missing 55/98/89 a 0.
+    grid_derotate: true
+    grid_derotate_min_deg: 0.4
     # BLANDO: 50 = ~57% de 88 agujeros. Permite mucha variacion mientras se calibra.
     grid_max_missing: 50
-    bbox_filter_margin_px: 50.0  # BLANDO: margen amplio alrededor del bbox esperado
+    # Bajado 50→10: las detecciones mas alla del patron (agujeros de borde sup/inf/lat
+    # que el patron no registra) quedan fuera del bbox → NO cuentan como "extra" (sin
+    # diamante naranja). Siguen dibujandose en verde (el verde usa TODOS los detectados).
+    # Solo se marcan extras los detectados espurios DENTRO del area del patron.
+    bbox_filter_margin_px: 10.0
     grid_affine_refinement: true
     # ── Extras ────────────────────────────────────────────────────────────────
     extra_min_dist_factor: 1.5   # umbral = 1.5×25px = 37px

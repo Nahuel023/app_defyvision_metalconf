@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -10,12 +11,12 @@ from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
 from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator
 from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
 from src.pipeline.edge_centering import CenteringResult, compute_centering
-from src.pipeline.grid_fitting import grid_compare_points
+from src.pipeline.grid_fitting import grid_compare_points, estimate_lattice_tilt_deg, rotate_points
 from src.pipeline.preprocess import preprocess_for_holes
 from src.utils.config import load_tolerances
 
@@ -51,6 +52,8 @@ class InspectionResult:
     pattern_zigzag_max_px: float = 0.0
     pattern_center_zigzag_std_px: float = 0.0
     pattern_center_zigzag_max_px: float = 0.0
+    sheet_tilt_deg: float = 0.0        # inclinación de la grilla (grados); NaN si no medible
+    tilt_warn: bool = False            # True cuando |sheet_tilt_deg| supera tilt_warn_deg
 
 
 @dataclass(frozen=True)
@@ -166,6 +169,9 @@ def _inspect_bgr(
     clahe_clip          = float(tolerances.get("clahe_clip", 2.0))
     clahe_tile          = int(tolerances.get("clahe_tile", 8))
     use_otsu            = bool(tolerances.get("use_otsu", False))
+    use_adaptive        = bool(tolerances.get("use_adaptive", False))
+    adaptive_block_size = int(tolerances.get("adaptive_block_size", 61))
+    adaptive_c          = float(tolerances.get("adaptive_c", -5.0))
     blur_ksize          = int(tolerances.get("blur_ksize", 5))
     open_ksize          = int(tolerances.get("open_ksize", 3))
     close_ksize         = int(tolerances.get("close_ksize", 5))
@@ -180,6 +186,14 @@ def _inspect_bgr(
     max_extra             = int(tolerances.get("max_extra", -1))
     bbox_filter_margin_px = float(tolerances.get("bbox_filter_margin_px", 0.0))
     grid_affine_refinement = bool(tolerances.get("grid_affine_refinement", False))
+    # Umbral (grados) de inclinacion de la grilla para avisar "CHAPA INCLINADA".
+    # 0.0 = solo medir, sin badge. La medicion siempre se calcula e informa.
+    tilt_warn_deg          = float(tolerances.get("tilt_warn_deg", 0.0))
+    # De-rotacion: corrige el matching cuando la chapa esta inclinada (de-rota los
+    # agujeros segun el tilt medido antes de ajustar la grilla). Se aplica solo si
+    # |tilt| supera grid_derotate_min_deg.
+    grid_derotate          = bool(tolerances.get("grid_derotate", False))
+    grid_derotate_min_deg  = float(tolerances.get("grid_derotate_min_deg", 0.4))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
@@ -221,6 +235,7 @@ def _inspect_bgr(
         threshold=threshold, use_channel=use_channel, polarity=polarity,
         use_clahe=use_clahe, clahe_clip=clahe_clip, clahe_tile=clahe_tile,
         use_otsu=use_otsu,
+        use_adaptive=use_adaptive, adaptive_block_size=adaptive_block_size, adaptive_c=adaptive_c,
         blur_ksize=blur_ksize, open_ksize=open_ksize, close_ksize=close_ksize,
     )
     detect_kw = dict(
@@ -272,13 +287,32 @@ def _inspect_bgr(
     n_expected_total = len(pattern.points)
 
     compare_cells: list[tuple[int, int]] = []
+    sheet_tilt_deg = float("nan")
 
     if pattern.has_grid and detected_points:
         detected_arr = np.array(detected_points, dtype=np.float32)
         tol_affine = tol_xy_px * 1.5 if grid_affine_refinement else 0.0
         stagger_x_odd = float(pattern.stagger_x_odd) if pattern.stagger_x_odd is not None else 0.0
+
+        # ── De-rotación por inclinación de la chapa ────────────────────────────
+        # grid_compare_points asume grilla alineada a los ejes (barre fase X/Y). Con
+        # la chapa inclinada una fila ya no está a `y` constante y la fase no engancha
+        # → muchos falsos faltantes. Medimos el tilt de la grilla desde los agujeros,
+        # de-rotamos los detectados, ajustamos la grilla en ese espacio y rotamos las
+        # posiciones esperadas DE VUELTA al espacio original (donde se compara y dibuja).
+        sheet_tilt_deg = estimate_lattice_tilt_deg(detected_arr, float(pattern.dx))
+        _derotate = (
+            grid_derotate
+            and not math.isnan(sheet_tilt_deg)
+            and abs(sheet_tilt_deg) > grid_derotate_min_deg
+        )
+        _cx, _cy = img_w / 2.0, img_h / 2.0
+        det_for_grid = (
+            rotate_points(detected_arr, -sheet_tilt_deg, _cx, _cy)
+            if _derotate else detected_arr
+        )
         compare_points, compare_cells = grid_compare_points(
-            detected_arr,
+            det_for_grid,
             pattern.cells,
             pattern.dx,
             pattern.dy,
@@ -290,6 +324,13 @@ def _inspect_bgr(
             tol_affine=tol_affine,
             stagger_x_odd=stagger_x_odd,
         )
+        # Posiciones esperadas de vuelta al espacio original (imagen sin de-rotar).
+        if _derotate and compare_points:
+            compare_points = [
+                (float(x), float(y)) for x, y in
+                rotate_points(np.array(compare_points, dtype=np.float32),
+                              sheet_tilt_deg, _cx, _cy)
+            ]
     else:
         transform = _estimate_alignment_transform(
             pattern.points, holes,
@@ -500,11 +541,23 @@ def _inspect_bgr(
     # Pass missing_cells so grid-mode tracking can key by column ci instead
     # of pixel X — the same broken punch is then recognised across frames
     # even as the sheet advances vertically.
+    # Inclinacion (tilt) de la grilla → aviso. Calculado antes de machine_stop para
+    # poder suprimirlo: una chapa inclinada genera muchos faltantes que NO son punzon
+    # roto, asi que NUNCA debe disparar "DETENER MAQUINA".
+    tilt_warn = bool(
+        tilt_warn_deg > 0.0
+        and not math.isnan(sheet_tilt_deg)
+        and abs(sheet_tilt_deg) > tilt_warn_deg
+    )
+
     machine_stop = False
     _ms_reason   = "AGUJERO PERSISTENTE FALTANTE"
     if _ms_detector is not None:
+        # Frames inclinados se tratan como baja calidad para el detector, asi su
+        # racha no acumula ni dispara la parada de maquina por la inclinacion.
+        _ms_fq = "LOW_QUALITY" if tilt_warn else frame_quality
         machine_stop, _ms_positions = _ms_detector.update(
-            report.missing_points, near_miss_pairs, frame_quality, img_h,
+            report.missing_points, near_miss_pairs, _ms_fq, img_h,
             missing_cells=report.missing_cells,
         )
         if machine_stop:
@@ -512,6 +565,10 @@ def _inspect_bgr(
             if cols:
                 col_str  = ", ".join(str(c) for c in cols)
                 _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
+    if tilt_warn:
+        # La chapa inclinada nunca debe mostrar "DETENER MAQUINA", pero el frame es NOK.
+        machine_stop = False
+        final_status = "NOK"
     if machine_stop:
         final_status = "NOK"
 
@@ -538,6 +595,9 @@ def _inspect_bgr(
     if not alignment_ok:
         nok_reasons.append("ALINEACION FALLBACK")
 
+    if tilt_warn:
+        nok_reasons.append(f"CHAPA INCLINADA {sheet_tilt_deg:+.1f} grados")
+
     badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
@@ -545,7 +605,8 @@ def _inspect_bgr(
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs,
                                        nok_reasons=nok_reasons,
-                                       nok_panel_badge_count=badge_count)
+                                       nok_panel_badge_count=badge_count,
+                                       draw_status=False)  # estado se dibuja en el frame completo (izquierda)
     overlay_roi = _draw_warnings(overlay_roi, detection_ratio, alignment_ok,
                                  min_detection_ratio, capture_quality_degraded,
                                  frame_quality, frame_geometry_quality)
@@ -578,6 +639,11 @@ def _inspect_bgr(
     elif pattern_alignment_warn:
         overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
 
+    # Estado OK/NOK dibujado al borde IZQUIERDO del frame completo (zona oscura),
+    # para no tapar los agujeros del patrón (que viven en la ROI, a la derecha).
+    overlay = draw_status_indicator(overlay, final_status, nok_reasons, badge_count)
+    overlay = draw_tilt_indicator(overlay, sheet_tilt_deg, warn=tilt_warn)
+
     return InspectionResult(
         model=model,
         image_path=image_path,
@@ -605,6 +671,8 @@ def _inspect_bgr(
         pattern_zigzag_max_px=pattern_zigzag_max_px,
         pattern_center_zigzag_std_px=pattern_center_zigzag_std_px,
         pattern_center_zigzag_max_px=pattern_center_zigzag_max_px,
+        sheet_tilt_deg=float(sheet_tilt_deg),
+        tilt_warn=tilt_warn,
     )
 
 
