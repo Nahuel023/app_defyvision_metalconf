@@ -598,7 +598,7 @@ class MachineStopDialog(QDialog):
         root.addWidget(reason_lbl)
 
         # ── Botón ACEPTAR ─────────────────────────────────────────────
-        btn = QPushButton("✓   ACEPTAR — HE VISTO EL PROBLEMA")
+        btn = QPushButton("ACEPTAR")
         btn.setMinimumHeight(70)
         btn.setStyleSheet(
             "background:#991b1b;color:#ffffff;"
