@@ -34,6 +34,7 @@ from PyQt6.QtWidgets import (
 
 from src.controller.system import InspectionSystem
 from src.utils.config import load_tolerances, save_model_overrides
+from src.utils.model_names import to_display
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -145,19 +146,13 @@ class _ScannerTolerancePanel(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        # ── Título scanner ────────────────────────────────────────────
-        title = QLabel(self._id.replace("_", " ").upper())
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            f"color:{_ACCENT};font-size:14px;font-weight:700;"
-            f"letter-spacing:2px;background:transparent;"
-        )
-        root.addWidget(title)
-
-        self._model_lbl = QLabel("Modelo: —")
+        # ── Título: scanner + tipo de placa ──────────────────────────
+        _num = self._id.split("_")[-1]
+        self._model_lbl = QLabel(f"Scanner {_num}  ·  —")
         self._model_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._model_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:11px;background:transparent;"
+            f"color:{_TEXT};font-size:14px;font-weight:700;"
+            f"letter-spacing:1px;background:transparent;"
         )
         root.addWidget(self._model_lbl)
 
@@ -245,7 +240,9 @@ class _ScannerTolerancePanel(QWidget):
 
     def _load_values(self) -> None:
         model = self._model()
-        self._model_lbl.setText(f"Modelo: {model or '—'}")
+        _num = self._id.split("_")[-1]
+        display = to_display(model) if model else "—"
+        self._model_lbl.setText(f"Scanner {_num}  ·  {display}")
         if not model:
             return
         tols = load_tolerances(model)
@@ -292,7 +289,7 @@ class _ScannerTolerancePanel(QWidget):
             QMessageBox.information(
                 self,
                 "Guardado",
-                f"Tolerancias de {model} ({self._id}) guardadas correctamente.",
+                f"Tolerancias de {to_display(model)} guardadas correctamente.",
             )
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{exc}")
@@ -324,17 +321,17 @@ class ToleranceWindow(QMainWindow):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
-        # ── Aviso prominente ──────────────────────────────────────────
+        # ── Aviso ─────────────────────────────────────────────────────
         warn = QLabel(
-            "⚠  SOLO MODIFICAR SI EL ANÁLISIS TIENE DEMASIADOS FALSOS ERRORES\n"
-            "O NO DETECTA EFICIENTEMENTE DEFECTOS REALES"
+            "⚠   Solo modificar si el análisis tiene demasiados falsos errores "
+            "o no detecta eficientemente defectos reales."
         )
         warn.setWordWrap(True)
         warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         warn.setStyleSheet(
-            f"color:#0f172a;font-size:15px;font-weight:700;"
-            f"background:{_WARN};border-radius:10px;padding:16px 20px;"
-            "letter-spacing:0.5px;"
+            f"color:#78350f;font-size:11px;font-weight:600;"
+            f"background:#fef3c7;border:1px solid #fbbf24;"
+            "border-radius:6px;padding:8px 14px;"
         )
         root.addWidget(warn)
 
