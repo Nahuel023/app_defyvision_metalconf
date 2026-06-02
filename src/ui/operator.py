@@ -83,7 +83,7 @@ _STATUS_REFRESH_MS      = 200
 _OVERLAY_HOLD_MS        = 2500
 _OVERLAY_HOLD_FAULT_MS  = 30_000
 
-_HEADER_WING_W = 310
+_HEADER_WING_W = 370
 
 
 # ------------------------------------------------------------------
@@ -804,10 +804,10 @@ class OperatorWindow(QMainWindow):
             b.clicked.connect(slot)
             return b
 
-        metrics_btn   = _hbtn("Métricas",     "#1e40af", "#ffffff", self._open_metrics)
-        errors_btn    = _hbtn("Ver errores",   "#7f1d1d", "#fca5a5", self._open_errors)
-        tolerance_btn = _hbtn("Tolerancias",   "#065f46", "#6ee7b7", self._open_tolerances)
-        service_btn   = _hbtn("Modo Servicio", "#334155", "#94a3b8", self._open_service)
+        metrics_btn   = _hbtn("Métricas",    "#1e40af", "#ffffff", self._open_metrics)
+        errors_btn    = _hbtn("Errores",     "#7f1d1d", "#fca5a5", self._open_errors)
+        tolerance_btn = _hbtn("Tolerancias", "#065f46", "#6ee7b7", self._open_tolerances)
+        service_btn   = _hbtn("Servicio",    "#334155", "#94a3b8", self._open_service)
 
         btn_row.addWidget(metrics_btn)
         btn_row.addWidget(errors_btn)
