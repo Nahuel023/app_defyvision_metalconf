@@ -27,8 +27,8 @@ from PyQt6.QtGui import QFont, QIcon, QImage, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QFrame,
-
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -36,7 +36,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
-
     QVBoxLayout,
     QWidget,
 )
@@ -94,7 +93,8 @@ _HEADER_WING_W = 310
 class ScannerPanel(QWidget):
     """Panel de un scanner: cámara + estado + métricas + controles."""
 
-    _sig_overlay = pyqtSignal(object, int)
+    _sig_overlay    = pyqtSignal(object, int)
+    _sig_stop_alert = pyqtSignal(object, str, str)  # (overlay, label, reason)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
                  parent: QWidget | None = None) -> None:
@@ -471,7 +471,15 @@ class ScannerPanel(QWidget):
     def _on_result(self, result: InspectionResult, streak: int) -> None:
         if result.machine_stop:
             until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_FAULT_MS
-            self._sig_overlay.emit(result.overlay.copy(), until_ms)
+            overlay = result.overlay.copy()
+            self._sig_overlay.emit(overlay, until_ms)
+            # Alerta a pantalla completa con el frame del error
+            from src.utils.model_names import to_display as _td
+            _num  = self._id.split("_")[-1]
+            model = self._system.io.scanner_config(self._id).get("model", "")
+            label = f"SCANNER {_num}  ·  {_td(model) if model else '—'}"
+            reason = _stop_reason(result)
+            self._sig_stop_alert.emit(overlay, label, reason)
 
     def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
         self._last_overlay     = overlay
@@ -506,9 +514,111 @@ class ScannerPanel(QWidget):
                 self.model_combo.setCurrentText(disp)
         self.model_combo.blockSignals(False)
 
-    def _log(self, msg: str) -> None:
-        ts = datetime.now().strftime("%H:%M:%S")
-        self._sig_log.emit(f"[{ts}] {msg}")
+
+# ------------------------------------------------------------------
+# Helper: razón de parada legible desde InspectionResult
+# ------------------------------------------------------------------
+
+def _stop_reason(result: InspectionResult) -> str:
+    if getattr(result, "tilt_warn", False):
+        return "Chapa inclinada"
+    if getattr(result, "pattern_alignment_warn", False):
+        return "Patrón desalineado"
+    missing = getattr(result.report, "missing", 0)
+    return f"{missing} agujero{'s' if missing != 1 else ''} faltante{'s' if missing != 1 else ''} persistente{'s' if missing != 1 else ''}"
+
+
+# ------------------------------------------------------------------
+# Diálogo de alerta de parada — ocupa toda la ventana
+# ------------------------------------------------------------------
+
+class MachineStopDialog(QDialog):
+    """
+    Modal a pantalla completa que bloquea la UI hasta que el operario
+    presiona ACEPTAR. Muestra el frame con el defecto detectado.
+    """
+
+    def __init__(
+        self,
+        overlay: np.ndarray,
+        scanner_label: str,
+        reason: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("DETENCIÓN DE MÁQUINA")
+        self.setModal(True)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint
+        )
+        self._overlay = overlay
+        self._scanner_label = scanner_label
+        self._reason = reason
+        self._build_ui()
+        # Maximizar para ocupar toda la pantalla
+        self.showMaximized()
+
+    def _build_ui(self) -> None:
+        self.setStyleSheet("background:#0d0000;")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Banner rojo superior ──────────────────────────────────────
+        header = QLabel(f"  ⚠   DETENCIÓN DE MÁQUINA   —   {self._scanner_label}")
+        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setStyleSheet(
+            "background:#7f1d1d;color:#fecaca;"
+            "font-size:22px;font-weight:700;letter-spacing:2px;padding:18px;"
+        )
+        root.addWidget(header)
+
+        # ── Imagen del frame con el defecto ───────────────────────────
+        self._img_lbl = QLabel()
+        self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._img_lbl.setStyleSheet("background:#000000;")
+        self._img_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        root.addWidget(self._img_lbl, stretch=1)
+
+        # ── Motivo ────────────────────────────────────────────────────
+        reason_lbl = QLabel(f"Motivo detectado:   {self._reason}")
+        reason_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        reason_lbl.setStyleSheet(
+            "background:#1a0000;color:#fca5a5;"
+            "font-size:15px;font-weight:600;padding:12px;"
+        )
+        root.addWidget(reason_lbl)
+
+        # ── Botón ACEPTAR ─────────────────────────────────────────────
+        btn = QPushButton("✓   ACEPTAR — HE VISTO EL PROBLEMA")
+        btn.setMinimumHeight(70)
+        btn.setStyleSheet(
+            "background:#991b1b;color:#ffffff;"
+            "font-size:22px;font-weight:700;letter-spacing:1px;"
+            "border:none;border-top:2px solid #7f1d1d;"
+            "QPushButton:hover { background:#dc2626; }"
+            "QPushButton:pressed { background:#7f1d1d; }"
+        )
+        btn.clicked.connect(self.accept)
+        root.addWidget(btn)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_image()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_image()
+
+    def _update_image(self) -> None:
+        if self._overlay is None or self._img_lbl is None:
+            return
+        rect = self._img_lbl.contentsRect()
+        w, h = max(1, rect.width() - 8), max(1, rect.height() - 8)
+        pix = _bgr_to_pixmap(self._overlay, w, h)
+        self._img_lbl.setPixmap(pix)
 
 
 # ------------------------------------------------------------------
@@ -518,10 +628,11 @@ class ScannerPanel(QWidget):
 class OperatorWindow(QMainWindow):
     def __init__(self, system: InspectionSystem) -> None:
         super().__init__()
-        self._system      = system
+        self._system         = system
         self._service_win    = None
         self._metrics_win    = None
         self._tolerance_win  = None
+        self._stop_alert_dlg: Optional[MachineStopDialog] = None
         self.setWindowTitle("DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
@@ -561,6 +672,7 @@ class OperatorWindow(QMainWindow):
 
         for sid in self._system.scanner_ids():
             panel = ScannerPanel(sid, self._system)
+            panel._sig_stop_alert.connect(self._show_stop_alert)
             frame = QFrame()
             frame.setStyleSheet(
                 f"QFrame {{ background:{_PANEL};border-radius:8px;"
@@ -720,6 +832,14 @@ class OperatorWindow(QMainWindow):
             self._plc_badge.show()
         for panel in self._panels.values():
             panel.refresh_status()
+
+    def _show_stop_alert(self, overlay: np.ndarray, label: str, reason: str) -> None:
+        """Muestra el diálogo de parada a pantalla completa. Solo uno a la vez."""
+        if self._stop_alert_dlg is not None and self._stop_alert_dlg.isVisible():
+            return
+        self._stop_alert_dlg = MachineStopDialog(overlay, label, reason, parent=self)
+        self._stop_alert_dlg.exec()
+        self._stop_alert_dlg = None
 
     def _open_metrics(self) -> None:
         from src.ui.metrics_window import MetricsWindow
