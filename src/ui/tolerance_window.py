@@ -208,11 +208,32 @@ class _ScannerTolerancePanel(QWidget):
             sb.setSingleStep(p["vstep"])
             sb.setDecimals(p.get("decimals", 1))
 
-        sb.setFixedWidth(90)
-        sb.setFixedHeight(32)
+        sb.setFixedWidth(110)
+        sb.setFixedHeight(36)
         sb.setStyleSheet(
-            f"background:#0f172a;color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:5px;font-size:13px;font-weight:600;padding:0 4px;"
+            f"QSpinBox, QDoubleSpinBox {{"
+            f"  background:#0f172a; color:{_TEXT};"
+            f"  border:1px solid {_BORDER}; border-radius:4px;"
+            f"  font-size:14px; font-weight:700; padding:2px 4px;"
+            f"}}"
+            f"QSpinBox::up-button, QDoubleSpinBox::up-button {{"
+            f"  width:22px; border-left:1px solid {_BORDER};"
+            f"  background:#243044; border-top-right-radius:4px;"
+            f"}}"
+            f"QSpinBox::down-button, QDoubleSpinBox::down-button {{"
+            f"  width:22px; border-left:1px solid {_BORDER};"
+            f"  background:#243044; border-bottom-right-radius:4px;"
+            f"}}"
+            f"QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,"
+            f"QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{"
+            f"  background:#38bdf8;"
+            f"}}"
+            f"QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{"
+            f"  width:8px; height:8px;"
+            f"}}"
+            f"QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{"
+            f"  width:8px; height:8px;"
+            f"}}"
         )
         top_row.addWidget(sb)
 
