@@ -58,6 +58,25 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     # Verticalidad: un solo frame con la chapa desviada puede parar la maquina
     # (inmediato). Los faltantes solo paran por persistencia (machine_stop_missing_frames).
     "machine_stop_on_tilt": False,
+    # Desalineacion del patron (corrimiento de verticalidad/cizalla): si la fraccion de
+    # esperados sin ajustar supera el ratio → DETENER MAQUINA (un frame alcanza).
+    # ── Grabación de evidencia pre-evento ────────────────────────────────
+    "events_enabled": False,           # activar en producción
+    "events_max_disk_gb": 10.0,        # presupuesto total de data/events
+    "pre_event_seconds": 60.0,         # 1 minuto antes de la parada
+    "post_event_seconds": 30.0,        # 30 segundos después de la parada
+    "pre_event_fps": 5.0,              # fotogramas/s a acumular en buffer
+    "pre_event_jpeg_quality": 80,      # calidad JPEG del buffer (10-95)
+    "pre_event_max_ram_mb": 256.0,     # 1 min × 5 fps × ~100 KB ≈ 30 MB; 256 con margen
+    # ─────────────────────────────────────────────────────────────────────
+    "pattern_desalign_enabled": False,
+    "pattern_desalign_missing_ratio": 0.5,
+    "pattern_desalign_min_angle_deg": 0.0,
+    "pattern_desalign_zigzag_std_px": 0.0,
+    "pattern_desalign_center_std_px": 0.0,
+    "pattern_desalign_center_abs_px": 0.0,
+    "pattern_desalign_bottom_shift_px": 0.0,
+    "grid_extend_rows_after": 0,
     "use_hungarian_matching": False,
     "verticality_quality_enabled": False,
     "chapa_zigzag_std_max_px": 4.0,
@@ -121,6 +140,29 @@ def load_tolerances(model: str | None = None) -> dict[str, Any]:
         cfg.update({k: v for k, v in model_overrides.items() if v is not None})
 
     return cfg
+
+
+def save_model_overrides(model: str, updates: dict[str, Any]) -> None:
+    """Actualiza solo los overrides de un modelo en tolerancias.yaml.
+
+    Lee el archivo completo, parchea únicamente `models.<model>` con los
+    valores de `updates` y lo reescribe. No toca parámetros globales ni
+    otros modelos.
+    """
+    cfg_path = tolerances_path()
+    data: dict = {}
+    if cfg_path.exists():
+        with cfg_path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+    data.setdefault("models", {})[model] = dict(
+        data["models"].get(model) or {},
+        **{k: v for k, v in updates.items() if v is not None},
+    )
+
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    with cfg_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
 
 
 def save_tolerances(data: dict[str, Any]) -> None:

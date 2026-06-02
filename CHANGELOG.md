@@ -43,8 +43,207 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-02 — Tadeo + Claude
+
+#### Cambio 92 — Grabación 1 min pre + 30 s post parada; ventana tolerancias limpia
+
+**Grabación pre/post evento:**
+- `pre_event_seconds: 60` (1 minuto antes de la parada).
+- `post_event_seconds: 30` (30 segundos después de la parada) — nuevo parámetro.
+- `pre_event_max_ram_mb: 256` (60 s × 5 fps × ~100 KB ≈ 30 MB efectivos; 256 con margen).
+- `src/utils/config.py`: defaults actualizados al mismo valor.
+- `src/controller/scanner_controller.py`: pasa `post_seconds` al `EventRecorder`.
+
+**Lógica post-evento en `EventRecorder`:**
+- `_post_dir / _post_until / _post_idx` controlan la grabación post-parada.
+- `add_frame`: si está dentro de la ventana post-evento, escribe `post_NNNN.jpg`
+  directamente a disco sin pasar por el buffer RAM.
+- `_flush_sync`: tras guardar frames pre-evento, activa el modo post-evento.
+- `_finalize_manifest`: actualiza `post_frames_count` y `total_bytes` cuando expira
+  la ventana. Corre en hilo background.
+- Manifest ahora tiene: `pre_frames_count`, `post_frames_count`, `total_bytes`.
+
+**Ventana de tolerancias:**
+- Eliminado el control `pre_event_seconds` (los tiempos de grabación son fijos y no
+  deben cambiar por el operario).
+- Aviso superior reemplazado por banner prominente amarillo oscuro, texto grande en
+  negro, cubre todo el ancho: "SOLO MODIFICAR SI EL ANÁLISIS TIENE DEMASIADOS
+  FALSOS ERRORES O NO DETECTA EFICIENTEMENTE DEFECTOS REALES".
+
+**Validación:** compile OK, tests 16/16.
+
+**Archivos modificados:** `src/pipeline/event_recorder.py`, `src/controller/scanner_controller.py`,
+`src/utils/config.py`, `config/tolerancias.yaml`, `src/ui/tolerance_window.py`,
+`tests/test_event_recorder.py`
+
+---
+
+#### Cambio 91 — Ventana de tolerancias por scanner + grabación de evidencia siempre activa
+
+**Grabación siempre activa:**
+- `config/tolerancias.yaml`: `events_enabled: false` → `true`.
+  Desde este commit, cada parada (machine_stop o FAULT) guarda automáticamente
+  los frames previos en `data/events/`.
+
+**Nueva ventana "Tolerancias":**
+- `src/ui/tolerance_window.py` — `ToleranceWindow` + `_ScannerTolerancePanel`.
+- Accesible desde el botón **"Tolerancias"** (verde) en el header del operador.
+- Una columna por scanner, con los 6 parámetros seguros para el operario:
+
+| Parámetro | Rango | Efecto |
+|---|---|---|
+| `frame_missing_nok_threshold` | 1–60 | Cuántos faltantes para marcar NOK |
+| `machine_stop_missing_frames` | 2–20 | Frames persistentes antes de parar |
+| `tol_xy_px` | 5–40 px | Tolerancia de posición del agujero |
+| `tilt_warn_deg` | 0–10 ° | Ángulo para aviso CHAPA INCLINADA |
+| `consecutive_nok_frames` | 2–9999 | Frames NOK antes de FAULT |
+| `pre_event_seconds` | 5–60 s | Buffer de evidencia a grabar |
+
+- **Qué NO se expone:** geometría de grilla, parámetros de detección (min_area,
+  circularity, CLAHE), alineación/RANSAC, pattern_desalign. Esos solo desde Servicio.
+- Botón "Guardar" por scanner → llama `save_model_overrides(model, updates)` que
+  actualiza ÚNICAMENTE el bloque `models.<model>` en `tolerancias.yaml` sin tocar
+  parámetros globales ni otros modelos. Luego llama `scanner.set_model(same_model)`
+  para recargar `consecutive_nok_frames` en el controlador activo.
+- Aviso visual si `consecutive_nok_frames >= 500` (modo calibración): pide confirmación
+  antes de guardar.
+- Botón "Recargar" relée el YAML y resetea todos los spinboxes.
+
+**`src/utils/config.py`:** nueva función `save_model_overrides(model, updates)`.
+**`src/ui/operator.py`:** botón "Tolerancias" en el header; `_tolerance_win` cerrado en closeEvent.
+
+**Validación:** compile OK, tests 16/16.
+
+**Archivos nuevos:** `src/ui/tolerance_window.py`
+**Archivos modificados:** `src/utils/config.py`, `src/ui/operator.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 90 — Sistema de grabación de evidencia pre-evento (EventRecorder)
+
+**Objetivo:** mantener un buffer circular de frames originales (sin overlay) por scanner
+y volcarlo a disco al detectar `machine_stop` o transición a `FAULT`, sin superar nunca
+un presupuesto fijo de disco (`events_max_disk_gb: 10 GB`).
+
+**Arquitectura:**
+- `src/pipeline/event_recorder.py` — clase `EventRecorder` independiente del pipeline.
+  - Buffer `deque[(timestamp, jpeg_bytes)]` limitado por tiempo (`pre_event_seconds`)
+    y RAM (`pre_event_max_ram_mb`). Nunca acumula frames BGR crudos en RAM.
+  - `add_frame(frame)` comprime a JPEG con rate-limit interno (no satura CPU).
+  - `flush_event(type, reason)` lanza un hilo background para no bloquear el inspector.
+  - `_prune_to_budget(needed)` borra carpetas más viejas (por mtime) hasta que el nuevo
+    evento quepa en el presupuesto. Si un solo evento supera el total, se trunca
+    conservando los frames MÁS RECIENTES (los más cercanos a la parada).
+  - Carpetas: `data/events/DD-MM-YYYY_STOP_N/` con `frame_NNNN.jpg` + `manifest.json`.
+
+**`manifest.json` incluye:** timestamp, scanner_id, event_type, reason, frames_count,
+total_bytes.
+
+**Integración en `src/controller/scanner_controller.py` (cambios mínimos):**
+- `__init__`: inicializa `self._recorder` si `events_enabled=True` (lazy import).
+- `_continuous_loop`: `recorder.add_frame(frame)` después de `get_frame()`, antes de inspección.
+- `_handle_result`: `recorder.flush_event("machine_stop", ...)` y `flush_event("fault", ...)`
+  en los puntos donde ya se loguean esos eventos.
+- `_derive_stop_reason(result)`: método estático que extrae la razón del `InspectionResult`.
+
+**Config (`config/tolerancias.yaml` + `src/utils/config.py`):**
+```yaml
+events_enabled: false        # cambiar a true en producción
+events_max_disk_gb: 10.0
+pre_event_seconds: 10.0
+pre_event_fps: 5.0
+pre_event_jpeg_quality: 80   # ≈ 100-150 KB/frame a 1080p
+pre_event_max_ram_mb: 128.0  # por scanner
+```
+
+**Cómo nunca supera 10 GB:**
+1. `_prune_to_budget(needed)` se llama ANTES de crear la carpeta nueva: borra las más
+   viejas hasta que `total_actual + needed ≤ 10 GB`.
+2. Si el evento sería más grande que el presupuesto entero, se trunca a los frames más
+   recientes que quepan (caso extremo: buffer con JPEG muy grandes).
+3. La poda es determinista (por mtime, oldest-first). No hay carrera si dos scanners
+   escriben simultáneamente (cada uno borra lo que necesita; en el peor caso se borra un
+   poco más — nunca menos).
+
+**Tests: `tests/test_event_recorder.py` (12 casos, todos pasan):**
+- `TestFolderNaming`: secuencia STOP_1/2/3, gap sin salto.
+- `TestPruneByBudget`: borra el más viejo primero, total queda bajo budget, no borra si no hace falta.
+- `TestBufferRamLimit`: presupuesto RAM respetado, ventana temporal expulsa frames viejos.
+- `TestManifest`: campos obligatorios, conteo de frames correcto.
+- `TestTruncation`: evento truncado queda bajo presupuesto, conserva frames más recientes.
+
+**Validación:** compile OK, 16/16 tests (12 nuevos + 4 existentes).
+
+**Archivos nuevos:** `src/pipeline/event_recorder.py`, `tests/test_event_recorder.py`
+**Archivos modificados:** `src/controller/scanner_controller.py`, `src/utils/config.py`,
+`config/tolerancias.yaml`
+
+---
+
+#### Cambio 89 — UI operario: botones INICIAR/DETENER prominentes + overlay solo en machine_stop
+
+**Pedido del operario:** simplificar la pantalla principal para el uso en producción:
+1. INICIAR y DETENER como los dos botones principales de cada scanner (más grandes).
+2. Cámara cruda durante operación normal — sin mostrar el procesamiento.
+3. Overlay con todos los marcadores (verde/rojo) SOLO cuando hay `machine_stop=True`.
+
+**Cambios en `src/ui/operator.py`:**
+- Nuevo `_OVERLAY_HOLD_FAULT_MS = 30_000`: el overlay de error se mantiene 30 s visible.
+- Nuevos métodos `_primary_btn` (h=52px, font 16px bold) y `_secondary_btn` (borde, 11px).
+- `_build_ui` en `ScannerPanel`: INICIAR/DETENER reemplazados por `_primary_btn` como fila
+  principal; RESET pasa a `_secondary_btn` centrado debajo.
+- `_on_result`: overlay solo se emite cuando `result.machine_stop is True` (30 s hold).
+  Antes se emitía para cualquier `streak >= warn_level` (threshold//3). El feed de cámara
+  muestra imagen cruda en operación normal; cuando machine_stop activa, el overlay congela
+  la captura con el banner `! DETENCION DE MAQUINA` y los marcadores rojos.
+- Log reducido a 34 px de altura (antes 54 px) — solo registra eventos críticos.
+
+**Comportamiento resultante:**
+- Operación normal (OK / NOK-streak): cámara cruda en vivo, sin ruido visual.
+- Machine stop: overlay con círculos verdes + cruces rojas + banner visible 30 s.
+- El operario usa únicamente INICIAR / DETENER; RESET solo aparece habilitado en FAULT/STOPPED.
+
+**Validación:** compile OK, tests 4/4.
+
+**Archivos modificados:** `src/ui/operator.py`
+
+---
+
 ### Sesión 2026-06-01 — Tadeo + Claude
 
+#### Cambio 88 — Desalineacion de patron: frame_0028 ya detiene sin reabrir 0080/0081
+
+**Problema retomado:** Había quedado a medias la calibración pedida para:
+- `frame_0080` / `frame_0081`: no debían caer por perder solo 1-2 agujeros.
+- `frame_0028` editado: debía disparar `DETENCION DE MAQUINA` por corrimiento geométrico
+  del patrón, no quedar `OK`.
+
+**Diagnóstico:** La regla agregada para `pattern_desalign` solo miraba `missing/expected`
+alto. Eso alcanzaba para el caso extremo `frame_0027` (74/115), pero dejaba afuera
+`frame_0028` (26/115) aunque tenía `pattern_sheet_slope_delta_max_deg=3.48`. A la vez,
+hacía falta no reabrir falsos casos leves como `frame_0080/0081` (missing=0, dAng≈1.0).
+
+**Cambios:**
+- `src/utils/config.py` → nuevo default `pattern_desalign_min_angle_deg: 0.0`.
+- `src/inspection.py` → la parada por `pattern_desalign` ahora exige DOS condiciones:
+  1. `missing/expected > pattern_desalign_missing_ratio`
+  2. `pattern_sheet_slope_delta_max_deg >= pattern_desalign_min_angle_deg`
+- `config/tolerancias.yaml` modelo_A:
+  - `pattern_desalign_missing_ratio: 0.5 -> 0.2`
+  - nuevo `pattern_desalign_min_angle_deg: 2.5`
+
+**Validación:**
+- Carpeta `Patron_Esterilla_METALCONF` (original):
+  - `frame_0027`, `frame_0028`, `frame_0080`, `frame_0081` → todos `OK`, sin parada.
+- Carpeta `Patron_Esterilla_METALCONF_editado`:
+  - `frame_0027` → `NOK`, `machine_stop=True`
+  - `frame_0028` → `NOK`, `machine_stop=True`
+  - `frame_0080` / `frame_0081` → `OK`, `machine_stop=False`
+- `run-folder` sobre la carpeta editada: `machine_stop_frames=2`, exactamente en
+  `frame_0027` y `frame_0028`.
+
+**Archivos modificados:** `src/utils/config.py`, `src/inspection.py`,
+`config/tolerancias.yaml`
 #### Cambio 87 — Inclinación NUNCA detiene la máquina (revierte parada por verticalidad del Cambio 84)
 
 **Aclaración del operador:** cuando la chapa está INCLINADA no se debe detener NUNCA la

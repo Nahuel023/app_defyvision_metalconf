@@ -33,6 +33,8 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 
+from pathlib import Path
+
 from src.inspection import InspectionResult, save_result_images
 from src.plc.io_map import IOMap
 from src.utils.config import load_tolerances
@@ -94,6 +96,29 @@ class ScannerController:
 
         self._poller_thread:   Optional[threading.Thread] = None
         self._inspector_thread: Optional[threading.Thread] = None
+
+        # Buffer circular de evidencia (opcional — gated por events_enabled)
+        self._recorder = None
+        if tols.get("events_enabled", False):
+            try:
+                from src.pipeline.event_recorder import EventRecorder
+                self._recorder = EventRecorder(
+                    scanner_id=scanner_id,
+                    events_dir=Path("data/events"),
+                    max_disk_gb=float(tols.get("events_max_disk_gb", 10.0)),
+                    pre_seconds=float(tols.get("pre_event_seconds", 60.0)),
+                    post_seconds=float(tols.get("post_event_seconds", 30.0)),
+                    fps=float(tols.get("pre_event_fps", 5.0)),
+                    jpeg_quality=int(tols.get("pre_event_jpeg_quality", 80)),
+                    max_ram_mb=float(tols.get("pre_event_max_ram_mb", 256.0)),
+                )
+                logger.info(
+                    f"[{scanner_id}] EventRecorder activo — "
+                    f"{tols.get('pre_event_seconds', 60)}s pre / "
+                    f"{tols.get('post_event_seconds', 30)}s post"
+                )
+            except Exception as exc:
+                logger.error(f"[{scanner_id}] no se pudo inicializar EventRecorder: {exc}")
 
         # Callbacks opcionales para la UI (llamados fuera de locks)
         self.on_state_changed: Optional[Callable[[ScannerState, OperationMode], None]] = None
@@ -486,6 +511,10 @@ class ScannerController:
                 self._stop_event.wait(timeout=0.033)
                 continue
 
+            # Alimentar buffer de evidencia con frame ORIGINAL (sin overlay)
+            if self._recorder is not None:
+                self._recorder.add_frame(frame)
+
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             pos_thr = self._cont_pos_thr
@@ -577,8 +606,19 @@ class ScannerController:
 
         if machine_stop_triggered:
             logger.warning(f"[{self._id}] DETENCION DE MAQUINA — agujero faltante persistente (sin accion de hardware)")
+            if self._recorder is not None:
+                _ms_reason = self._derive_stop_reason(result)
+                try:
+                    self._recorder.flush_event("machine_stop", _ms_reason)
+                except Exception as _exc:
+                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
         if fault_triggered:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
+            if self._recorder is not None:
+                try:
+                    self._recorder.flush_event("fault", f"racha NOK {streak}")
+                except Exception as _exc:
+                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
             self._io.write(f"{self._id}.solenoid",  False)
             self._io.write(f"{self._id}.backlight", False)
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
@@ -626,6 +666,16 @@ class ScannerController:
         if self._inspector_thread:
             self._inspector_thread.join(timeout=5.0)
             self._inspector_thread = None
+
+    @staticmethod
+    def _derive_stop_reason(result: InspectionResult) -> str:
+        """Extrae una razón legible del InspectionResult para el manifest de evento."""
+        if getattr(result, "tilt_warn", False):
+            return "chapa inclinada"
+        if getattr(result, "pattern_alignment_warn", False):
+            return "patron desalineado"
+        missing = getattr(result.report, "missing", 0)
+        return f"{missing} faltantes persistentes"
 
     def _transition(self, new_state: ScannerState) -> None:
         with self._lock:
