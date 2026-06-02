@@ -68,9 +68,10 @@ _MODE_COLOR = {
     OperationMode.AUTO:   "#1d4ed8",
     OperationMode.MANUAL: "#64748b",
 }
-_CAMERA_REFRESH_MS = 50
-_STATUS_REFRESH_MS = 200
-_OVERLAY_HOLD_MS   = 2500
+_CAMERA_REFRESH_MS      = 50
+_STATUS_REFRESH_MS      = 200
+_OVERLAY_HOLD_MS        = 2500
+_OVERLAY_HOLD_FAULT_MS  = 30_000   # overlay visible 30 s cuando hay machine_stop
 
 # Ancho fijo de cada ala del header — igualar ambos lados centra el título
 _HEADER_WING_W = 310
@@ -192,28 +193,35 @@ class ScannerPanel(QWidget):
         model_row.addWidget(self.model_combo, stretch=1)
         root.addLayout(model_row)
 
-        # ── Botones de control ───────────────────────────────────────
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(6)
-        self.start_btn = self._control_btn("▶  INICIAR", "#15803d")
-        self.stop_btn  = self._control_btn("■  DETENER", "#b91c1c")
-        self.reset_btn = self._control_btn("↺  RESET",   "#1d4ed8")
+        # ── Botones principales: INICIAR / DETENER ───────────────────
+        main_btn_row = QHBoxLayout()
+        main_btn_row.setSpacing(8)
+        self.start_btn = self._primary_btn("▶  INICIAR", "#15803d")
+        self.stop_btn  = self._primary_btn("■  DETENER", "#b91c1c")
         self.start_btn.clicked.connect(self._on_start)
         self.stop_btn.clicked.connect(self._on_stop)
-        self.reset_btn.clicked.connect(self._on_reset)
-        btn_row.addWidget(self.start_btn)
-        btn_row.addWidget(self.stop_btn)
-        btn_row.addWidget(self.reset_btn)
-        root.addLayout(btn_row)
+        main_btn_row.addWidget(self.start_btn)
+        main_btn_row.addWidget(self.stop_btn)
+        root.addLayout(main_btn_row)
 
-        # ── Log — compacto, visual secundario ────────────────────────
+        # ── Botón secundario: RESET ──────────────────────────────────
+        reset_row = QHBoxLayout()
+        reset_row.setSpacing(0)
+        self.reset_btn = self._secondary_btn("↺  RESET FALLA", "#1d4ed8")
+        self.reset_btn.clicked.connect(self._on_reset)
+        reset_row.addStretch()
+        reset_row.addWidget(self.reset_btn)
+        reset_row.addStretch()
+        root.addLayout(reset_row)
+
+        # ── Log — línea única, solo eventos críticos ─────────────────
         self._log_widget = QTextEdit()
         self._log_widget.setReadOnly(True)
-        self._log_widget.setFixedHeight(54)
-        self._log_widget.setFont(QFont("Consolas", 7))
+        self._log_widget.setFixedHeight(34)
+        self._log_widget.setFont(QFont("Consolas", 8))
         self._log_widget.setStyleSheet(
             "background:#f8fafc;color:#94a3b8;"
-            "border:1px solid #e2e8f0;border-radius:5px;padding:3px;"
+            "border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;"
         )
         root.addWidget(self._log_widget)
 
@@ -239,14 +247,30 @@ class ScannerPanel(QWidget):
         lay.addWidget(v)
         return w, v
 
-    def _control_btn(self, text: str, color: str) -> QPushButton:
+    def _primary_btn(self, text: str, color: str) -> QPushButton:
         btn = QPushButton(text)
-        btn.setMinimumHeight(34)
+        btn.setMinimumHeight(52)
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn.setStyleSheet(
             f"background:{color};color:white;font-weight:700;"
-            "border-radius:6px;font-size:12px;border:none;padding:0 8px;"
+            "border-radius:8px;font-size:16px;border:none;padding:0 12px;"
+            f"QPushButton:disabled{{background:#94a3b8;}}"
         )
         return btn
+
+    def _secondary_btn(self, text: str, color: str) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setMinimumHeight(26)
+        btn.setStyleSheet(
+            f"background:transparent;color:{color};font-weight:600;"
+            "border-radius:5px;font-size:11px;"
+            f"border:1px solid {color};padding:0 12px;"
+            f"QPushButton:disabled{{color:#94a3b8;border-color:#94a3b8;}}"
+        )
+        return btn
+
+    def _control_btn(self, text: str, color: str) -> QPushButton:
+        return self._primary_btn(text, color)
 
     # ------------------------------------------------------------------
     # Refresco (hilo principal)
@@ -417,19 +441,15 @@ class ScannerPanel(QWidget):
 
     def _on_result(self, result: InspectionResult, streak: int) -> None:
         threshold = self._nok_threshold
-        warn_level = threshold // 3   # mostrar overlay con marcas rojas a partir de aquí
 
-        # Overlay: solo mostrar cuando la racha NOK alcanza el nivel de advertencia
-        if streak >= warn_level:
-            until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
+        # Overlay: solo cuando hay parada de máquina — muestra toda la info del error
+        if result.machine_stop:
+            until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_FAULT_MS
             self._sig_overlay.emit(result.overlay.copy(), until_ms)
-
-        # Log: solo en hitos relevantes, no en cada frame
-        if streak == 0 and result.status == "OK":
-            pass   # silencioso cuando todo va bien
-        elif streak == 0:
+            self._log("DETENCION DE MAQUINA — ver imagen")
+        elif streak == 0 and result.status != "OK":
             self._log("Racha NOK terminada — material OK")
-        elif streak % 10 == 0:
+        elif streak > 0 and streak % 10 == 0:
             self._log(f"Racha NOK: {streak} / {threshold}")
 
     def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
@@ -478,8 +498,9 @@ class OperatorWindow(QMainWindow):
     def __init__(self, system: InspectionSystem) -> None:
         super().__init__()
         self._system      = system
-        self._service_win = None
-        self._metrics_win = None
+        self._service_win    = None
+        self._metrics_win    = None
+        self._tolerance_win  = None
         self.setWindowTitle("DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
@@ -626,6 +647,14 @@ class OperatorWindow(QMainWindow):
         )
         metrics_btn.clicked.connect(self._open_metrics)
 
+        tolerance_btn = QPushButton("Tolerancias")
+        tolerance_btn.setFixedHeight(22)
+        tolerance_btn.setStyleSheet(
+            "background:#065f46;color:#6ee7b7;border-radius:5px;"
+            "font-size:10px;padding:0 8px;border:none;"
+        )
+        tolerance_btn.clicked.connect(self._open_tolerances)
+
         service_btn = QPushButton("Modo Servicio")
         service_btn.setFixedHeight(22)
         service_btn.setStyleSheet(
@@ -635,6 +664,7 @@ class OperatorWindow(QMainWindow):
         service_btn.clicked.connect(self._open_service)
 
         btn_row.addWidget(metrics_btn)
+        btn_row.addWidget(tolerance_btn)
         btn_row.addWidget(service_btn)
         ctrl_lay.addLayout(btn_row)
 
@@ -678,6 +708,14 @@ class OperatorWindow(QMainWindow):
         self._metrics_win.raise_()
         self._metrics_win.activateWindow()
 
+    def _open_tolerances(self) -> None:
+        from src.ui.tolerance_window import ToleranceWindow
+        if self._tolerance_win is None or not self._tolerance_win.isVisible():
+            self._tolerance_win = ToleranceWindow(self._system)
+        self._tolerance_win.show()
+        self._tolerance_win.raise_()
+        self._tolerance_win.activateWindow()
+
     def _open_service(self) -> None:
         from src.ui.login_dialog import LoginDialog, service_login_enabled
         from src.ui.service import ServiceWindow
@@ -711,6 +749,8 @@ class OperatorWindow(QMainWindow):
                 self._service_win.close()
             if self._metrics_win is not None and self._metrics_win.isVisible():
                 self._metrics_win.close()
+            if self._tolerance_win is not None and self._tolerance_win.isVisible():
+                self._tolerance_win.close()
             self._system.shutdown()
             event.accept()
         else:

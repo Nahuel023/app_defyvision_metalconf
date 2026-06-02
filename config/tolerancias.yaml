@@ -30,6 +30,18 @@ continuous_position_threshold: 0.0
 # La velocidad real queda limitada por la velocidad de procesamiento (~10-20 fps típico).
 max_inspection_hz: 15
 
+# ── Grabación de evidencia pre-evento ────────────────────────────────────────
+# Al detectar machine_stop o FAULT se vuelca el buffer de frames previos a
+# data/events/<DD-MM-YYYY>_STOP_N/.  Nunca supera events_max_disk_gb.
+# Activar en producción cambiando events_enabled a true.
+events_enabled: true
+events_max_disk_gb: 10.0        # presupuesto total de data/events (GB)
+pre_event_seconds: 60.0         # 1 minuto ANTES de la parada
+post_event_seconds: 30.0        # 30 segundos DESPUÉS de la parada
+pre_event_fps: 5.0              # fotogramas/s a acumular (5 fps = 300 frames/min ≈ 30 MB/min)
+pre_event_jpeg_quality: 80      # calidad JPEG (10-95; 80 ≈ 100-150 KB/frame)
+pre_event_max_ram_mb: 256.0     # presupuesto RAM por scanner
+
 # ── Overrides por modelo ──────────────────────────────────────────────────────
 # Solo especificar los parámetros que difieren del global.
 # Los no especificados heredan los valores de arriba.
@@ -140,6 +152,20 @@ models:
     # Ademas, los frames inclinados se pasan como baja calidad al detector de faltantes,
     # asi tampoco disparan la parada por faltantes.
     machine_stop_on_tilt: false
+    # DESALINEACION del patron (corrimiento de verticalidad / cizalla, ej. frame_0027):
+    # cuando el patron NO se puede ajustar como grilla queda una fraccion masiva de
+    # esperados sin ajustar (>50%) que la de-rotacion/fase/affine no corrigen. Eso SI es
+    # una falla geometrica real → DETENER MAQUINA con un solo frame. Distinto de pocos
+    # faltantes (no para) y de chapa inclinada (de-rota → no entra). Normales/blur llegan
+    # a ~29%; frame_0027 desalineado llega a ~64% → 0.5 separa limpio.
+    pattern_desalign_enabled: true
+    pattern_desalign_missing_ratio: 0.2
+    pattern_desalign_min_angle_deg: 2.5
+    # Corrimientos grandes que el matching puede compensar sin dejar muchos missing.
+    # Detecta deformacion interna del patron aunque missing sea 0.
+    pattern_desalign_zigzag_std_px: 9.0
+    pattern_desalign_center_std_px: 5.5
+    pattern_desalign_center_abs_px: 20.0
 
   modelo_B:
     # ── Detección ──────────────────────────────────────────────────────────
