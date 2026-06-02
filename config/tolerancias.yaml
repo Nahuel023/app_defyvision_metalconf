@@ -7,277 +7,123 @@ tol_xy_px: 22.0
 aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
-consecutive_nok_frames: 9999  # CALIBRACIÓN — deshabilita FAULT temporalmente
+consecutive_nok_frames: 9999
 frame_rate_hz: 5.0
 max_response_sec: 1.6
 edge_margin_px: 15.0
-# Margen para build-pattern: más grande excluye agujeros de borde que desaparecen
-# cuando la lámina se desplaza. Si no se define, usa edge_margin_px.
 pattern_edge_margin_px: 40.0
 use_clahe: true
 clahe_clip: 3.0
 clahe_tile: 8
 use_otsu: true
-# Umbral de diferencia media de píxeles entre el frame actual y el último
-# inspeccionado para considerar que hay suficiente material nuevo y disparar
-# una inspección. Más alto = menos inspecciones (secciones más separadas).
-# Poner en 0.0 para inspeccionar CADA frame (ignorar avance del material).
-# Ajustar en planta según velocidad de avance y tamaño del patrón.
 continuous_position_threshold: 0.0
-
-# Límite máximo de inspecciones por segundo (0 = sin límite, usa toda la CPU).
-# Ejemplos: 10 = máximo 10 fps de inspección, 30 = hasta 30 fps.
-# La velocidad real queda limitada por la velocidad de procesamiento (~10-20 fps típico).
 max_inspection_hz: 15
+# ── Buffer circular de frames OK ─────────────────────────────────────────────
+# Guarda las últimas ok_buffer_count inspecciones correctas (con overlay verde)
+# en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las más viejas.
+# Útil para ver cómo está funcionando la detección sin errores.
+ok_buffer_enabled: true
+ok_buffer_count: 200          # frames a mantener por scanner (~20 MB a 100 KB/frame)
+ok_buffer_every: 3            # guardar 1 de cada 3 frames OK (reduce I/O)
+ok_buffer_jpeg_quality: 75    # calidad JPEG
 
-# ── Grabación de evidencia pre-evento ────────────────────────────────────────
-# Al detectar machine_stop o FAULT se vuelca el buffer de frames previos a
-# data/events/<DD-MM-YYYY>_STOP_N/.  Nunca supera events_max_disk_gb.
-# Activar en producción cambiando events_enabled a true.
 events_enabled: true
-events_max_disk_gb: 10.0        # presupuesto total de data/events (GB)
-pre_event_seconds: 60.0         # 1 minuto ANTES de la parada
-post_event_seconds: 30.0        # 30 segundos DESPUÉS de la parada
-pre_event_fps: 5.0              # fotogramas/s a acumular (5 fps = 300 frames/min ≈ 30 MB/min)
-pre_event_jpeg_quality: 80      # calidad JPEG (10-95; 80 ≈ 100-150 KB/frame)
-pre_event_max_ram_mb: 256.0     # presupuesto RAM por scanner
-
-# ── Overrides por modelo ──────────────────────────────────────────────────────
-# Solo especificar los parámetros que difieren del global.
-# Los no especificados heredan los valores de arriba.
-# Ejemplo:
-#   modelo_B:
-#     min_area: 60.0          # agujeros más chicos
-#     tol_xy_px: 18.0         # distribución más densa
-#     consecutive_nok_frames: 6
+events_max_disk_gb: 10.0
+pre_event_seconds: 60.0
+post_event_seconds: 30.0
+pre_event_fps: 5.0
+pre_event_jpeg_quality: 80
+pre_event_max_ram_mb: 256.0
 models:
   modelo_A:
-    # Esterilla (scanner_2)
-    # ESTADO: CALIBRACION EN CURSO — tolerancias blandas para reducir falsas cruces.
-    # Ajustar con material real una vez que la deteccion sea estable.
-    #
-    # Geometría del patrón (holes.json modelo_A):
-    #   dx=66px, dy=38px, stagger_x_odd=26px
-    #   Filas impares (cj=1,3,...): 4 agujeros CHICOS   r≈14px, area≈627px²
-    #   Filas pares  (cj=2,4,...): 4-5 agujeros GRANDES r≈25px, area≈2023px²
-    #   ~88 puntos en patron actual (reconstruir con imagen OK limpia en planta)
-    #
-    # ── Deteccion ─────────────────────────────────────────────────────────────
     polarity: bright
-    # Umbral de binarizacion: bajar ayuda a detectar agujeros con iluminacion pareja.
     threshold: 140
-    # Umbral ADAPTATIVO local: captura agujeros tenues en zonas mas oscuras o levemente
-    # desenfocadas (parte inferior del encuadre) donde el Otsu global los perdia.
-    # Sube la deteccion de ~106 a ~126 agujeros/frame sin falsos positivos.
-    # block impar; c negativo = mas permisivo (mas agujeros). Tiene precedencia sobre use_otsu.
     use_adaptive: true
     adaptive_block_size: 61
     adaptive_c: -5.0
-    # Inclinacion (tilt) de la grilla medida desde los agujeros. Avisa "CHAPA INCLINADA"
-    # si |tilt| supera este umbral (grados). El tilt normal medido es ~1°, asi que 2.5°
-    # marca solo inclinaciones reales. 0.0 = solo medir sin avisar.
     tilt_warn_deg: 2.5
-    min_area: 80.0              # BLANDO: captura agujeros chicos con blur o iluminacion baja
-    circularity_min: 0.35       # BLANDO: acepta agujeros deformados por perspectiva/blur
-    aspect_ratio_max: 3.0       # BLANDO: acepta ligeras deformaciones
-    # ── Clasificacion por tipo (chico / grande) ────────────────────────────────
+    min_area: 80.0
+    circularity_min: 0.35
+    aspect_ratio_max: 3.0
     hole_type_split_area: 1000.0
-    min_area_small: 80.0        # BLANDO: igual al piso global
+    min_area_small: 80.0
     max_area_small: 2000.0
-    min_area_large: 300.0       # BLANDO: acepta grandes con iluminacion no ideal
-    max_area_large: 8000.0      # BLANDO: margen amplio
-    # ── Matching ──────────────────────────────────────────────────────────────
-    # tol_xy_px seguro hasta ~26px para este patron:
-    #   distancia minima entre cualquier par de posiciones esperadas = sqrt(26^2+38^2) = 46px
-    #   Max seguro = 46/2 = 23px sin ambiguedad teorica.
-    #   Con stagger_x_odd=26, vecino incorrecto mas cercano siempre a >28px → 25px es seguro.
-    #   El diagnostico muestra near-misses a 18-26px por deriva Y acumulada (dy_real~37 vs 38).
-    tol_xy_px: 25.0
-    align_match_tol_px: 250.0   # BLANDO: mas permisivo para alineacion inicial
-    min_match_count: 3          # BLANDO: permite alinear con pocos agujeros visibles
-    # ── Bordes ────────────────────────────────────────────────────────────────
-    edge_margin_px: 3.0         # muy bajo: no descartar agujeros en borde de ROI
-    # Bajado 40→22: el patron REGISTRA los agujeros de borde (antes quedaban como
-    # "extra"/diamante naranja). Extras ~20→~7 sin introducir NOK. Contrapartida: si la
-    # lamina se corre mucho en produccion, los agujeros de borde pueden salir del encuadre
-    # y contar como faltantes — revisar con material real en movimiento.
+    min_area_large: 300.0
+    max_area_large: 8000.0
+    tol_xy_px: 14.0
+    align_match_tol_px: 250.0
+    min_match_count: 3
+    edge_margin_px: 3.0
     pattern_edge_margin_px: 22.0
-    # ── Grid ──────────────────────────────────────────────────────────────────
     grid_min_spacing: 30.0
-    # Geometria real medida sobre frame_0162 (sub-redes grande/chico):
-    #   dx_real≈64.6  dy_columna≈72.3 → medio-periodo (fila a fila) = 36.1
-    # Antes dx=66/dy=38 (dy=38 acumulaba ~45px de deriva Y en 24 filas → missing abajo).
     grid_dx: 65.0
     grid_dy: 36.0
-    # De-rotación: cuando la chapa se inclina, la búsqueda de fase del grid falla y
-    # aparecen muchos falsos faltantes. Se de-rotan los agujeros según el tilt medido
-    # antes de ajustar la grilla (corrige inclinados Y el drift inferior). Validado:
-    # frames 0016/0090/0120 pasaron de missing 55/98/89 a 0.
     grid_derotate: true
     grid_derotate_min_deg: 0.4
-    # BLANDO: 50 = ~57% de 88 agujeros. Permite mucha variacion mientras se calibra.
     grid_max_missing: 50
-    # Bajado 50→10: las detecciones mas alla del patron (agujeros de borde sup/inf/lat
-    # que el patron no registra) quedan fuera del bbox → NO cuentan como "extra" (sin
-    # diamante naranja). Siguen dibujandose en verde (el verde usa TODOS los detectados).
-    # Solo se marcan extras los detectados espurios DENTRO del area del patron.
     bbox_filter_margin_px: 10.0
     grid_affine_refinement: true
-    # ── Extras ────────────────────────────────────────────────────────────────
-    extra_min_dist_factor: 1.5   # umbral = 1.5×25px = 37px
-    # ── Umbral visual de cruces ───────────────────────────────────────────────
-    # Cuantos agujeros faltantes se toleran ANTES de mostrar estado NOK en overlay.
-    # BLANDO: 35 — el operador solo ve cruces rojas masivas cuando faltan >35 agujeros.
-    # Bajar a 5-8 cuando el patron este bien calibrado.
+    extra_min_dist_factor: 1.5
     frame_missing_nok_threshold: 35
-    # ── Temporal / produccion ─────────────────────────────────────────────────
-    consecutive_nok_frames: 9999  # CALIBRACION: FAULT deshabilitado
+    consecutive_nok_frames: 9999
     continuous_position_threshold: 0.0
-    # ── Parada de máquina ─────────────────────────────────────────────────────
     machine_stop_enabled: true
-    # FALTANTES: solo paran por PERSISTENCIA. Un solo frame con faltantes NUNCA para
-    # (el metal pudo correrse), sin importar la cantidad. Requiere 5 frames consecutivos
-    # con el mismo agujero faltante en la misma columna.
     machine_stop_missing_frames: 5
-    # 1 = detecta un solo punzón roto (1 agujero faltante persistente en una columna),
-    # igual que microperforado. La persistencia (5 frames) evita falsas paradas.
     machine_stop_min_missing: 1
     machine_stop_same_zone_px: 40.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
-    # INCLINACION: cuando la chapa esta inclinada NO se debe parar NUNCA la maquina,
-    # porque con la chapa inclinada el patron NO se lee bien (lecturas no confiables).
-    # El frame inclinado igual se marca NOK (no se acepta), pero jamas dispara la parada.
-    # Ademas, los frames inclinados se pasan como baja calidad al detector de faltantes,
-    # asi tampoco disparan la parada por faltantes.
     machine_stop_on_tilt: false
-    # DESALINEACION del patron (corrimiento de verticalidad / cizalla, ej. frame_0027):
-    # cuando el patron NO se puede ajustar como grilla queda una fraccion masiva de
-    # esperados sin ajustar (>50%) que la de-rotacion/fase/affine no corrigen. Eso SI es
-    # una falla geometrica real → DETENER MAQUINA con un solo frame. Distinto de pocos
-    # faltantes (no para) y de chapa inclinada (de-rota → no entra). Normales/blur llegan
-    # a ~29%; frame_0027 desalineado llega a ~64% → 0.5 separa limpio.
     pattern_desalign_enabled: true
     pattern_desalign_missing_ratio: 0.2
     pattern_desalign_min_angle_deg: 2.5
-    # Corrimientos grandes que el matching puede compensar sin dejar muchos missing.
-    # Detecta deformacion interna del patron aunque missing sea 0.
     pattern_desalign_zigzag_std_px: 9.0
     pattern_desalign_center_std_px: 5.5
     pattern_desalign_center_abs_px: 20.0
-
   modelo_B:
-    # ── Detección ──────────────────────────────────────────────────────────
-    # Producción: backlight encendido → agujeros brillantes → polarity bright.
-    # IMPORTANTE: si se reconstruye el patrón con Fotos/1.jpeg (sin backlight),
-    # cambiar temporalmente a polarity: dark, luego volver a bright.
     polarity: bright
-    min_area: 250.0           # blur reduce area aparente; rango real 250-500px² (gap en 200-250)
-    circularity_min: 0.75     # ligeramente más permisivo que global 0.8
+    min_area: 250.0
+    circularity_min: 0.75
     aspect_ratio_max: 2.0
-    # ── Matching ───────────────────────────────────────────────────────────
-    tol_xy_px: 22.0           # < dx=28; cubre drift de borde y blur residual sin ambigüedad
+    tol_xy_px: 10.0
     align_match_tol_px: 120.0
-    min_match_count: 5        # patrón puede estar parcialmente fuera de frame
-    # ── Bordes ─────────────────────────────────────────────────────────────
-    edge_margin_px: 5.0            # 25→5: el filtro de 25px descartaba agujeros reales en borde inferior
+    min_match_count: 5
+    edge_margin_px: 5.0
     pattern_edge_margin_px: 25.0
-    # Número máximo de agujeros faltantes permitidos antes de declarar NOK.
-    # Patrón 258 agujeros. Con affine refinement activado:
-    #   frames buenos → missing 0-5 (antes era 16-29 con tol=12)
-    #   blur de movimiento → missing 10-20
-    #   punzón roto → missing ~29 por fila afectada (acumulado)
-    # VALOR ACTUAL 35: conservador, validar con defecto real.
-    # CANDIDATO: bajar a 20-25 una vez validado que blur no supera ese umbral.
     grid_max_missing: 35
-    # Filtro bbox: descartar detecciones fuera del bounding box del patrón esperado
-    # antes del matching. Elimina agujeros reales del material fuera de la ventana
-    # del patrón y reduce el conteo de 'extra'. Margen en px alrededor del bbox.
     bbox_filter_margin_px: 20.0
-    # Umbral de calidad de captura (0.0 = deshabilitado). Si detection_ratio cae
-    # por debajo de este valor sin llegar a DETECCION_BAJA, se marca CALIDAD_DEGRADADA
-    # en el overlay y en el log (no fuerza NOK). Útil para detectar blur de movimiento.
     quality_ratio_min: 0.0
-    # Frames consecutivos NOK para declarar FAULT. Max streak en material bueno
-    # (blur de movimiento) = 27; punzón roto → racha sostenida >> 40.
-    consecutive_nok_frames: 40
-    # Espaciado mínimo para estimate_spacing en build-pattern.
-    # La grilla micro-perforada tiene agujeros alternados a ~20px en Y → necesita 15.
+    consecutive_nok_frames: 60
     grid_min_spacing: 15.0
-    # Corrección affine local post-fase-global.
-    # Compensa tilt/perspectiva/curvatura del material que desplaza agujeros de borde
-    # >tol_xy_px de su posición esperada. Usa tol_xy_px×1.5 como radio de matching
-    # inicial, requiere ≥12 matches y valida que escala y shear sean razonables (±15%).
     grid_affine_refinement: true
-    # ── Centrado ───────────────────────────────────────────────────────────
-    # Tolerancia de offset para marcar NOK CENTRADO. 0.0 = solo medir, nunca NOK.
-    # offset_px = (left_margin_px - right_margin_px) / 2
-    # Positivo = patrón corrido a la derecha. Negativo = corrido a la izquierda.
-    # En grabación 20260519_121741: mediana ≈ -0.9 px, peor ≈ 7 px.
-    # Activar cuando se calibre la tolerancia de centrado en planta (ej: 15.0).
     center_offset_tol_px: 0.0
-    # Filtro de extras falsos: un detectado sin match solo cuenta como "extra" si
-    # está a más de (extra_min_dist_factor × tol_xy_px) de CUALQUIER posición
-    # esperada. Con tol=22px y factor=2.0 → umbral=44px. Agujeros reales que el
-    # matcher no asignó (por error de fase) suelen estar <44px de su expected.
-    # Los reflejos/ruido espurio están típicamente muy lejos de toda posición esperada.
     extra_min_dist_factor: 2.0
-    # ── Modo continuo ──────────────────────────────────────────────────────
-    # Grabaciones @ 10fps muestran diff máx 5.21px. Global=8.0 nunca dispara
-    # para este material. Con 4.0 se obtienen ~100-140 inspecciones / 321 frames.
     continuous_position_threshold: 4.0
-    # ── Parada de máquina ──────────────────────────────────────────────────────
-    # Si un agujero faltante persiste en la misma zona por N frames consecutivos
-    # se muestra DETENCION DE MAQUINA. Indicador de punzon roto o tapado.
     machine_stop_enabled: true
     machine_stop_missing_frames: 5
     machine_stop_min_missing: 1
     machine_stop_same_zone_px: 35.0
     machine_stop_ignore_near_miss: true
-    # Tracking por identidad de grilla (ci = columna del patrón), no por píxeles X.
-    # Cuando true, el mismo punzón roto se reconoce aunque la chapa avance en Y.
-    # same_column_tol_cells=0 → coincidencia exacta de ci (recomendado).
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
-    # Matching óptimo Hungarian (scipy requerido). false = greedy closest-first.
-    # Activar si hay falsos missing por "robo" de detectados con tol_xy_px ≈ dy.
     use_hungarian_matching: false
-    # ── Calidad geometrica / zigzag ────────────────────────────────────────────
-    # Si los bordes del patron zigzaguean mas de estos umbrales, el frame se marca
-    # IMAGEN INESTABLE y se ignora para rachas NOK y parada de maquina.
-    # Calibrar con frame_0037 (inestable) vs frame_0038 (estable) de 20260519_121741.
     verticality_quality_enabled: true
-    # CHAPA edge zigzag (borde de lámina, backlight) → IMAGEN INESTABLE (vibración/movimiento)
     chapa_zigzag_std_max_px: 4.0
     chapa_zigzag_abs_max_px: 10.0
-    # Si Hough no encuentra líneas confiables del borde externo y la CHAPA
-    # muestra zigzag claro, considerar el frame borroso/inestable y no decidir.
     chapa_no_line_min_used_lines: 1
     chapa_no_line_abs_max_px: 4.5
-    # PATRON edge zigzag (bordes del patrón de agujeros) → DETENER MAQUINA - PATRON DESALINEADO
     pattern_align_enabled: true
     pattern_align_std_max_px: 2.4
     pattern_align_abs_max_px: 6.0
-    # Desalineacion global del patron respecto de la CHAPA.
-    # Detecta corrimientos grandes o inclinacion brusca aunque el patron siga recto.
     pattern_global_offset_max_px: 10.0
     pattern_slope_delta_max_deg: 2.0
-    # PATRON CENTER zigzag (centro entre bordes físicos por banda) — detecta
-    # zigzag interno sin reaccionar a la alternancia normal de filas microperforadas.
     pattern_center_align_enabled: true
     pattern_center_zigzag_std_max_px: 2.2
     pattern_center_zigzag_abs_max_px: 6.0
-    # ── Resolución de muestreo de bordes ──────────────────────────────────────
-    # Bandas horizontales para medir bordes de chapa y patrón.
-    # Más bandas = más resolución espacial para detectar variaciones leves.
-    # Si una banda queda con menos de min_holes_per_band agujeros, se descarta
-    # (evita outliers en zonas vacías). Suavizado previo al cálculo de zigzag
-    # (mediana deslizante de smooth_window bandas) reduce sensibilidad a outliers
-    # aislados sin afectar la geometría de la línea ajustada.
     edge_centering_bands: 24
     pattern_edge_min_holes_per_band: 1
     pattern_edge_smooth_window: 1
-    # Solo tomar borde por banda cuando hay agujeros cerca del borde global real.
-    # Evita que los espacios entre filas alternadas se lean como borde interior.
     pattern_edge_boundary_tol_px: 24.0
+    frame_missing_nok_threshold: 1
+    tilt_warn_deg: 0.0
