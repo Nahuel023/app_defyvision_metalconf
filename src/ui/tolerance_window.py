@@ -321,6 +321,16 @@ class ToleranceWindow(QMainWindow):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(12)
 
+        # ── Título ───────────────────────────────────────────────────
+        title = QLabel("TOLERANCIAS")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:20px;font-weight:700;"
+            f"letter-spacing:4px;background:{_PANEL};"
+            f"border-radius:8px;padding:10px;"
+        )
+        root.addWidget(title)
+
         # ── Aviso ─────────────────────────────────────────────────────
         warn = QLabel(
             "⚠   Solo modificar si el análisis tiene demasiados falsos errores "
