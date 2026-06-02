@@ -848,26 +848,15 @@ class OperatorWindow(QMainWindow):
             panel.refresh_status()
 
     def _open_errors(self) -> None:
-        """Abre el visor de evidencias de error (reutiliza EventBrowserTab del servicio)."""
-        from src.ui.service import EventBrowserTab
-        from PyQt6.QtGui import QIcon
+        """Abre el visor de frames para el operario (paradas + OK recientes)."""
+        from src.ui.frame_viewer import OperatorFrameViewer
         if self._errors_win is None or not self._errors_win.isVisible():
-            win = QMainWindow(self)
-            win.setWindowTitle("Visor de Errores — DEFYVISION")
-            icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
-            if not icon_pix.isNull():
-                win.setWindowIcon(QIcon(icon_pix))
-            win.setStyleSheet("background:#0f172a;")
-            tab = EventBrowserTab(self._system)
-            win.setCentralWidget(tab)
-            win.resize(1200, 750)
-            self._errors_win = win
+            self._errors_win = OperatorFrameViewer(self._system, parent=None)
         self._errors_win.show()
         self._errors_win.raise_()
         self._errors_win.activateWindow()
-        # Recargar eventos al abrir
         try:
-            self._errors_win.centralWidget().reload()
+            self._errors_win.reload()
         except Exception:
             pass
 
