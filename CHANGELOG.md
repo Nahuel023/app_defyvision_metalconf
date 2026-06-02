@@ -78,6 +78,47 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+#### Cambio 93 ? Pesta?a "Evidencias" en Servicio para explorar `data/events`
+
+**Pedido:** sumar una pesta?a en Modo Servicio para revisar todas las evidencias
+almacenadas en `data/events/`, incluso cuando no se quiera navegar carpeta por carpeta
+fuera de la aplicaci?n.
+
+**Implementado en `src/ui/service.py`:**
+- Nueva clase `EventBrowserTab` integrada al `QTabWidget` principal.
+- Nueva pesta?a **`Evidencias`** con est?tica consistente con Servicio.
+- Listado de carpetas de eventos ordenadas de m?s reciente a m?s antigua.
+- Filtros por `scanner`, `tipo` y b?squeda textual.
+- Acciones directas:
+  - `Actualizar`
+  - `Ir al ?ltimo`
+  - `Abrir carpeta`
+  - `Borrar evento` con confirmaci?n
+- Indicadores visibles de uso de disco, cantidad de eventos y cantidad total de frames.
+
+**Navegaci?n de im?genes:**
+- Botones primero / ?ltimo, anterior / siguiente y salto ?10.
+- Slider horizontal para moverse por frames.
+- Bot?n `Ajustar` y soporte de flechas izquierda / derecha.
+- Carga bajo demanda con cach? peque?o de pixmaps para no cargar toda la evidencia en RAM.
+
+**Compatibilidad de datos:**
+- La pesta?a acepta manifests con `frames_count` o con
+  `pre_frames_count + post_frames_count`.
+- Si falta `manifest.json`, igual intenta abrir la carpeta leyendo im?genes.
+
+**Integraci?n:**
+- Al cambiar a la pesta?a `Evidencias`, la lista se refresca autom?ticamente.
+- En el refresh general de Servicio, la pesta?a actualiza sus m?tricas de uso de disco.
+
+**Validaci?n:**
+- `./.venv/Scripts/python.exe -m py_compile src/ui/service.py` OK.
+- `pytest tests/test_event_recorder.py tests/test_io_map.py` muestra fallas preexistentes
+  en `test_event_recorder.py` por diferencias entre el formato actual del manifest y lo
+  que esperan esos tests; no fueron introducidas por esta pesta?a.
+
+**Archivos modificados:** `src/ui/service.py`, `CHANGELOG.md`
+
 #### Cambio 91 — Ventana de tolerancias por scanner + grabación de evidencia siempre activa
 
 **Grabación siempre activa:**
