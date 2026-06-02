@@ -121,6 +121,13 @@ fuera de la aplicaci?n.
 
 
 **Refuerzo posterior de robustez industrial:**
+- `src/controller/scanner_controller.py` / `src/ui/operator.py`:
+  - p?rdida de c?mara en `AUTO RUNNING` ahora genera advertencia inmediata apenas no hay frame;
+  - si la c?mara no vuelve dentro de `camera_missing_error_timeout_s` (default 3.0 s),
+    el scanner pasa a `ERROR`, corta `solenoid` + `backlight` y deja de inspeccionar;
+  - el operador ve `CAMARA DESCONECTADA` con contador en vivo en el panel de imagen y
+    estado resumido en la tarjeta de resultado.
+- `src/utils/config.py`: nuevo default `camera_missing_error_timeout_s: 3.0`.
 - `src/pipeline/event_recorder.py`:
   - si ocurre otro evento durante la ventana post-evento, ya no se pierde silenciosamente;
     ahora se extiende la ventana de grabaci?n post para seguir capturando evidencia.

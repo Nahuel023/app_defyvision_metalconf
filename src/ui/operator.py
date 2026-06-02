@@ -220,6 +220,21 @@ class ScannerPanel(QWidget):
         reset_row.addStretch()
         root.addLayout(reset_row)
 
+        # ── Botón de simulación (solo para pruebas) ───────────────────
+        sim_btn = QPushButton("⚡  Simular parada")
+        sim_btn.setMinimumHeight(28)
+        sim_btn.setStyleSheet(
+            "background:transparent;color:#d29922;font-weight:600;"
+            "border:1px solid #d29922;border-radius:5px;font-size:11px;"
+            "QPushButton:hover{background:#2d2200;}"
+        )
+        sim_btn.clicked.connect(self._on_simulate_stop)
+        sim_row = QHBoxLayout()
+        sim_row.addStretch()
+        sim_row.addWidget(sim_btn)
+        sim_row.addStretch()
+        root.addLayout(sim_row)
+
         # ── Log mínimo ────────────────────────────────────────────────
         self._log_widget = QTextEdit()
         self._log_widget.setReadOnly(True)
@@ -283,6 +298,10 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def refresh_camera(self) -> None:
+        status = self._scanner.get_status()
+        camera_missing = bool(status.get("camera_missing", False))
+        camera_missing_sec = float(status.get("camera_missing_sec", 0.0))
+        camera_missing_timeout_s = float(status.get("camera_missing_timeout_s", 0.0))
         state = self._scanner.state
         mode  = self._scanner.mode
         is_manual_running = (state == ScannerState.RUNNING
@@ -307,6 +326,19 @@ class ScannerPanel(QWidget):
                 f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
             )
 
+        if camera_missing:
+            phase = "RECONECTANDO..." if camera_missing_sec < camera_missing_timeout_s else "ESCALANDO A ERROR..."
+            self.camera_label.setPixmap(QPixmap())
+            self.camera_label.setText(
+                f"CAMARA DESCONECTADA\n{phase}\n{camera_missing_sec:.1f}s / {camera_missing_timeout_s:.1f}s"
+            )
+            self.camera_label.setStyleSheet(
+                f"background:#1a1200;color:{_WARN};border-radius:6px;"
+                f"border:2px solid {_WARN};font-size:15px;font-weight:700;"
+                "letter-spacing:1px;"
+            )
+            return
+
         now_ms = int(time.monotonic() * 1000)
         if self._last_overlay is not None and now_ms < self._overlay_until_ms:
             frame = self._last_overlay
@@ -318,6 +350,9 @@ class ScannerPanel(QWidget):
         rect = self.camera_label.contentsRect()
         w = max(440, rect.width() - 4)
         h = max(280, rect.height() - 4)
+        self.camera_label.setStyleSheet(
+            f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
+        )
         self.camera_label.setPixmap(_bgr_to_pixmap(frame, w, h))
 
     def refresh_status(self) -> None:
@@ -329,6 +364,8 @@ class ScannerPanel(QWidget):
         total       = s["total_inspections"]
         ok_cnt      = s["ok_count"]
         fault_cnt   = s["fault_count"]
+        camera_missing = bool(s.get("camera_missing", False))
+        camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
 
         from src.utils.config import load_tolerances
         _model = self._system.io.scanner_config(self._id).get("model", "")
@@ -382,7 +419,9 @@ class ScannerPanel(QWidget):
             self._result_val[1].setText(health_txt)
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
         elif result is not None:
-            if state == ScannerState.FAULT:
+            if camera_missing and state == ScannerState.RUNNING:
+                health_txt, health_c = f"CAMARA {camera_missing_sec:.1f}s", "#d29922"
+            elif state == ScannerState.FAULT:
                 health_txt, health_c = "FAULT", "#b91c1c"
             elif ratio >= 0.8:
                 health_txt, health_c = f"ALERTA {streak}/{_threshold}", "#b91c1c"
@@ -392,6 +431,9 @@ class ScannerPanel(QWidget):
                 health_txt, health_c = "OK", "#15803d"
             self._result_val[1].setText(health_txt)
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
+        elif camera_missing and state == ScannerState.RUNNING:
+            self._result_val[1].setText(f"CAMARA {camera_missing_sec:.1f}s")
+            self._result_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#d29922;")
 
         # CENTRADO: márgenes laterales y offset del patrón respecto a los bordes de la chapa
         if result is not None and result.centering is not None:
@@ -430,6 +472,10 @@ class ScannerPanel(QWidget):
             self._log("RESET → IDLE")
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
+
+    def _on_simulate_stop(self) -> None:
+        self._scanner.inject_machine_stop("SIMULACION MANUAL")
+        self._log("Simulacion de parada activada")
 
     def _on_model_changed(self, display_name: str) -> None:
         from src.utils.model_names import to_internal

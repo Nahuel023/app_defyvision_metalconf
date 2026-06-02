@@ -89,6 +89,11 @@ class ScannerController:
         self._last_position_diff: float    = 0.0
         self._total_detection_ratio: float = 0.0
         self._align_fail_count:  int       = 0
+        self._camera_missing_since: Optional[float] = None
+        self._camera_missing_warned: bool = False
+        self._camera_missing_timeout_s: float = float(
+            tols.get("camera_missing_error_timeout_s", 3.0)
+        )
 
         self._lock          = threading.Lock()
         self._force_inspect = threading.Event()
@@ -160,6 +165,8 @@ class ScannerController:
             self._last_position_diff      = 0.0
             self._total_detection_ratio   = 0.0
             self._align_fail_count        = 0
+            self._camera_missing_since    = None
+            self._camera_missing_warned   = False
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -250,6 +257,8 @@ class ScannerController:
             self._last_position_diff      = 0.0
             self._total_detection_ratio   = 0.0
             self._align_fail_count        = 0
+            self._camera_missing_since    = None
+            self._camera_missing_warned   = False
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -275,6 +284,58 @@ class ScannerController:
         self._set_lights(red=True)   # poll_loop toma el blink
         self._fire_state_changed()
         return True
+
+    def inject_machine_stop(self, reason: str = "SIMULACION") -> None:
+        """Inyecta un machine_stop sintético sin cambiar el estado FSM.
+
+        Útil para probar el overlay de parada y la grabación de evidencia
+        sin necesidad de un defecto real. Funciona en cualquier estado.
+        """
+        import numpy as _np
+        import cv2 as _cv2
+        from pathlib import Path as _Path
+        from src.inspection import InspectionResult
+        from src.pipeline.compare import CompareReport
+
+        with self._lock:
+            model = self._io.scanner_config(self._id).get("model", "")
+
+        # Overlay sintético con banner de simulación
+        h, w = 480, 640
+        overlay = _np.zeros((h, w, 3), dtype=_np.uint8)
+        overlay[:] = (12, 8, 30)
+        _cv2.rectangle(overlay, (8, 8), (w - 8, h - 8), (180, 30, 30), 2)
+        for y, (txt, fs, clr) in enumerate([
+            ("! SIMULACION DE PARADA !",  0.85, (50, 50, 220)),
+            (reason,                      0.65, (160, 160, 160)),
+            ("Esta imagen es sintetica",  0.55, (80,  80,  80)),
+        ]):
+            _cv2.putText(overlay, txt, (40, 160 + y * 70),
+                         _cv2.FONT_HERSHEY_SIMPLEX, fs, clr, 2)
+
+        report = CompareReport(
+            expected=100, detected=85, missing=15, status="NOK",
+            missing_points=[(float(i * 15), float(i * 10)) for i in range(15)],
+            matched_detected_idx=list(range(85)),
+        )
+        mask = _np.zeros((h, w), dtype=_np.uint8)
+        result = InspectionResult(
+            model=model,
+            image_path=_Path("_sim_stop"),
+            status="NOK",
+            report=report,
+            holes=[],
+            mask=mask,
+            overlay=overlay,
+            angle_deg=0.0,
+            used_lines=0,
+            shift_xy=None,
+            detection_ratio=0.85,
+            alignment_ok=True,
+            machine_stop=True,
+        )
+        self._handle_result(result, model)
+        logger.info(f"[{self._id}] machine_stop simulado — {reason}")
 
     def inject_result(self, is_ok: bool, count: int = 1) -> None:
         """Inyecta resultados sintéticos para probar la FSM. Solo actúa en RUNNING."""
@@ -401,6 +462,12 @@ class ScannerController:
                 "last_position_diff":   self._last_position_diff,
                 "avg_detection_ratio":  avg_detection_ratio,
                 "align_fail_count":     self._align_fail_count,
+                "camera_missing":       self._camera_missing_since is not None,
+                "camera_missing_sec":   (
+                    max(0.0, time.monotonic() - self._camera_missing_since)
+                    if self._camera_missing_since is not None else 0.0
+                ),
+                "camera_missing_timeout_s": self._camera_missing_timeout_s,
             }
 
     # ------------------------------------------------------------------
@@ -508,8 +575,38 @@ class ScannerController:
 
             frame = self._camera.get_frame()
             if frame is None:
+                now = time.monotonic()
+                escalate = False
+                with self._lock:
+                    if self._camera_missing_since is None:
+                        self._camera_missing_since = now
+                    missing_sec = now - self._camera_missing_since
+                    if not self._camera_missing_warned:
+                        self._camera_missing_warned = True
+                        logger.warning(
+                            f"[{self._id}] CAMARA DESCONECTADA - reconectando "
+                            f"(timeout error {self._camera_missing_timeout_s:.1f}s)"
+                        )
+                    if missing_sec >= self._camera_missing_timeout_s:
+                        escalate = (self._state == ScannerState.RUNNING)
+                if escalate:
+                    logger.error(
+                        f"[{self._id}] ERROR por perdida de camara - "
+                        f"sin frames durante {missing_sec:.1f}s"
+                    )
+                    self._io.write(f"{self._id}.solenoid", False)
+                    self._io.write(f"{self._id}.backlight", False)
+                    self._set_lights()
+                    self._transition(ScannerState.ERROR)
+                    return
                 self._stop_event.wait(timeout=0.033)
                 continue
+            else:
+                with self._lock:
+                    if self._camera_missing_since is not None:
+                        logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
+                    self._camera_missing_since = None
+                    self._camera_missing_warned = False
 
             # Alimentar buffer de evidencia con frame ORIGINAL (sin overlay)
             if self._recorder is not None:
