@@ -746,13 +746,29 @@ class ScannerController:
                 self._fault_count += 1
 
         if machine_stop_triggered:
-            logger.warning(f"[{self._id}] DETENCION DE MAQUINA — agujero faltante persistente (sin accion de hardware)")
+            _ms_reason = self._derive_stop_reason(result)
+            logger.warning(f"[{self._id}] DETENCION DE MAQUINA — {_ms_reason}")
+
+            # Detener el scanner sin join (se llama desde el inspector thread;
+            # join causaría deadlock). Los threads ven _stop_event y salen solos.
+            _was_running = False
+            with self._lock:
+                if self._state == ScannerState.RUNNING:
+                    self._state   = ScannerState.STOPPED
+                    _was_running  = True
+            if _was_running:
+                self._io.write(f"{self._id}.solenoid",  False)
+                self._io.write(f"{self._id}.backlight", False)
+                self._set_lights()
+                self._stop_event.set()
+                self._fire_state_changed()
+
             if self._recorder is not None:
-                _ms_reason = self._derive_stop_reason(result)
                 try:
                     self._recorder.flush_event("machine_stop", _ms_reason)
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+
         if fault_triggered:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
             if self._recorder is not None:
