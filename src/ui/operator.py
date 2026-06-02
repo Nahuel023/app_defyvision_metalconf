@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
     QFrame,
-    QGridLayout,
+
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -36,7 +36,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSplitter,
-    QTextEdit,
+
     QVBoxLayout,
     QWidget,
 )
@@ -92,9 +92,8 @@ _HEADER_WING_W = 310
 # ------------------------------------------------------------------
 
 class ScannerPanel(QWidget):
-    """Panel completo para un scanner (cámara + estado + métricas + controles + log)."""
+    """Panel de un scanner: cámara + estado + métricas + controles."""
 
-    _sig_log     = pyqtSignal(str)
     _sig_overlay = pyqtSignal(object, int)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
@@ -107,13 +106,12 @@ class ScannerPanel(QWidget):
 
         self._last_overlay: Optional[np.ndarray] = None
         self._overlay_until_ms: int = 0
-        self._nok_threshold: int = 5   # actualizado en refresh_status
-        self._manual_mode_display: bool = False  # True cuando se muestra aviso MODO MANUAL
+        self._nok_threshold: int = 5
+        self._manual_mode_display: bool = False
 
         self._build_ui()
         self._populate_models()
 
-        self._sig_log.connect(self._log_widget.append)
         self._sig_overlay.connect(self._set_overlay)
 
         self._scanner.on_state_changed = self._on_state_changed
@@ -219,32 +217,6 @@ class ScannerPanel(QWidget):
         reset_row.addWidget(self.reset_btn)
         reset_row.addStretch()
         root.addLayout(reset_row)
-
-        # ── Botón de simulación (solo para pruebas) ───────────────────
-        sim_btn = QPushButton("⚡  Simular parada")
-        sim_btn.setMinimumHeight(28)
-        sim_btn.setStyleSheet(
-            "background:transparent;color:#d29922;font-weight:600;"
-            "border:1px solid #d29922;border-radius:5px;font-size:11px;"
-            "QPushButton:hover{background:#2d2200;}"
-        )
-        sim_btn.clicked.connect(self._on_simulate_stop)
-        sim_row = QHBoxLayout()
-        sim_row.addStretch()
-        sim_row.addWidget(sim_btn)
-        sim_row.addStretch()
-        root.addLayout(sim_row)
-
-        # ── Log mínimo ────────────────────────────────────────────────
-        self._log_widget = QTextEdit()
-        self._log_widget.setReadOnly(True)
-        self._log_widget.setFixedHeight(30)
-        self._log_widget.setFont(QFont("Consolas", 8))
-        self._log_widget.setStyleSheet(
-            f"background:{_CARD};color:{_MUTED};"
-            f"border:1px solid {_BORDER};border-radius:4px;padding:2px 6px;"
-        )
-        root.addWidget(self._log_widget)
 
         self._refresh_buttons(ScannerState.IDLE)
 
@@ -457,53 +429,49 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _on_start(self) -> None:
+        self._feedback(self.start_btn, "▶  INICIAR", "#1a6b3a", "● Iniciando...")
         if not self._scanner.start():
             QMessageBox.warning(self, "Iniciar", f"No se pudo iniciar {self._id}.")
-        else:
-            mode = self._scanner.mode
-            self._log(f"INICIADO ({mode.value.upper()})")
 
     def _on_stop(self) -> None:
+        self._feedback(self.stop_btn, "■  DETENER", "#7f1d1d", "● Deteniendo...")
         self._scanner.stop()
-        self._log("DETENIDO")
 
     def _on_reset(self) -> None:
         if self._scanner.reset():
-            self._log("RESET → IDLE")
+            self._feedback(self.reset_btn, "↺  RESET FALLA", "#1e3a5f", "● Reseteando...")
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
 
-    def _on_simulate_stop(self) -> None:
-        self._scanner.inject_machine_stop("SIMULACION MANUAL")
-        self._log("Simulacion de parada activada")
+    def _feedback(self, btn: QPushButton, label: str, flash_bg: str, badge_txt: str) -> None:
+        """Confirma visualmente que el botón fue recibido por el sistema."""
+        # 1 — badge de estado muestra transición inmediata
+        self.state_badge.setText(badge_txt)
+        self.state_badge.setStyleSheet(
+            f"background:{flash_bg};color:#f0f6fc;border-radius:6px;"
+            "padding:10px 14px;font-size:16px;font-weight:700;letter-spacing:1px;"
+        )
+        # 2 — el badge se actualiza solo en max 200 ms por el timer de status
 
     def _on_model_changed(self, display_name: str) -> None:
         from src.utils.model_names import to_internal
         internal = to_internal(display_name)
         if internal:
             self._scanner.set_model(internal)
-            self._log(f"Modelo → {display_name}")
+            _num = self._id.split("_")[-1]
+            self._title_lbl.setText(f"SCANNER {_num}   ·   {display_name}")
 
     # ------------------------------------------------------------------
     # Callbacks del controller (threads → señales → hilo principal)
     # ------------------------------------------------------------------
 
     def _on_state_changed(self, state: ScannerState, mode: OperationMode) -> None:
-        label = _STATE_LABEL.get(state, state.value.upper())
-        self._log(f"Estado → {label} / {mode.value.upper()}")
+        pass  # el badge de estado se actualiza por el timer de refresh_status
 
     def _on_result(self, result: InspectionResult, streak: int) -> None:
-        threshold = self._nok_threshold
-
-        # Overlay: solo cuando hay parada de máquina — muestra toda la info del error
         if result.machine_stop:
             until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_FAULT_MS
             self._sig_overlay.emit(result.overlay.copy(), until_ms)
-            self._log("DETENCION DE MAQUINA — ver imagen")
-        elif streak == 0 and result.status != "OK":
-            self._log("Racha NOK terminada — material OK")
-        elif streak > 0 and streak % 10 == 0:
-            self._log(f"Racha NOK: {streak} / {threshold}")
 
     def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
         self._last_overlay     = overlay
