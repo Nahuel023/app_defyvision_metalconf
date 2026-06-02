@@ -414,7 +414,7 @@ class ScannerController:
         elif state == ScannerState.RUNNING:
             self._set_lights(green=True)
         elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
-            self._set_lights()  # todas apagadas hasta que el operador actúe
+            self._set_lights(red=True)   # rojo = intervención requerida (estándar industrial)
 
     def set_model(self, model: str) -> None:
         cfg      = self._io.scanner_config(self._id)
@@ -601,6 +601,9 @@ class ScannerController:
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
         if not self._run_startup_selftest(model_init):
+            self._io.write(f"{self._id}.solenoid", False)
+            self._io.write(f"{self._id}.backlight", False)
+            self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
 
@@ -635,7 +638,7 @@ class ScannerController:
                     )
                     self._io.write(f"{self._id}.solenoid", False)
                     self._io.write(f"{self._id}.backlight", False)
-                    self._set_lights()
+                    self._set_lights(red=True)
                     self._transition(ScannerState.ERROR)
                     return
                 self._stop_event.wait(timeout=0.033)
@@ -759,7 +762,7 @@ class ScannerController:
             if _was_running:
                 self._io.write(f"{self._id}.solenoid",  False)
                 self._io.write(f"{self._id}.backlight", False)
-                self._set_lights()
+                self._set_lights(red=True)   # rojo fijo = intervención requerida
                 self._stop_event.set()
                 self._fire_state_changed()
 
@@ -768,6 +771,9 @@ class ScannerController:
                     self._recorder.flush_event("machine_stop", _ms_reason)
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+
+            # No actualizar luces al final del método: el scanner ya está STOPPED
+            return
 
         if fault_triggered:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
