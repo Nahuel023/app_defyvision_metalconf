@@ -248,9 +248,10 @@ class ScannerPanel(QWidget):
         btn.setMinimumHeight(52)
         btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         btn.setStyleSheet(
-            f"background:{color};color:white;font-weight:700;"
-            "border-radius:8px;font-size:16px;border:none;padding:0 12px;"
-            f"QPushButton:disabled{{background:#94a3b8;}}"
+            f"QPushButton {{ background:{color}; color:#ffffff; font-weight:700; "
+            "border-radius:8px; font-size:16px; border:none; padding:0 12px; }"
+            "QPushButton:hover { filter:brightness(1.15); }"
+            "QPushButton:disabled { background:#374151; color:#6b7280; }"
         )
         return btn
 
@@ -258,10 +259,10 @@ class ScannerPanel(QWidget):
         btn = QPushButton(text)
         btn.setMinimumHeight(26)
         btn.setStyleSheet(
-            f"background:transparent;color:{color};font-weight:600;"
-            "border-radius:5px;font-size:11px;"
-            f"border:1px solid {color};padding:0 12px;"
-            f"QPushButton:disabled{{color:#94a3b8;border-color:#94a3b8;}}"
+            f"QPushButton {{ background:transparent; color:{color}; font-weight:600; "
+            f"border-radius:5px; font-size:11px; border:1px solid {color}; padding:0 12px; }}"
+            f"QPushButton:hover {{ background:{color}22; }}"
+            "QPushButton:disabled { color:#4b5563; border-color:#374151; }"
         )
         return btn
 
@@ -502,17 +503,15 @@ class ScannerPanel(QWidget):
         can_reset = (state == ScannerState.STOPPED)
         self.reset_btn.setEnabled(can_reset)
         if can_reset:
-            # Prominente: fondo naranja llamativo para guiar al operario
             self.reset_btn.setStyleSheet(
-                "background:#b45309;color:#ffffff;font-weight:700;"
-                "border-radius:5px;font-size:12px;border:none;padding:0 14px;"
-                "QPushButton:hover{background:#d97706;}"
+                "QPushButton { background:#b45309; color:#ffffff; font-weight:700; "
+                "border-radius:5px; font-size:12px; border:none; padding:0 14px; }"
+                "QPushButton:hover { background:#d97706; }"
             )
         else:
             self.reset_btn.setStyleSheet(
-                f"background:transparent;color:#6b7280;font-weight:600;"
-                "border-radius:5px;font-size:11px;"
-                "border:1px solid #374151;padding:0 12px;"
+                "QPushButton { background:transparent; color:#4b5563; font-weight:600; "
+                "border-radius:5px; font-size:11px; border:1px solid #374151; padding:0 12px; }"
             )
 
     def _populate_models(self) -> None:
@@ -654,6 +653,7 @@ class OperatorWindow(QMainWindow):
         self._metrics_win    = None
         self._tolerance_win  = None
         self._stop_alert_dlg: Optional[MachineStopDialog] = None
+        self._errors_win = None
         self.setWindowTitle("DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
@@ -793,31 +793,24 @@ class OperatorWindow(QMainWindow):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(5)
 
-        metrics_btn = QPushButton("Métricas")
-        metrics_btn.setFixedHeight(22)
-        metrics_btn.setStyleSheet(
-            "background:#1e40af;color:white;border-radius:5px;"
-            "font-size:10px;padding:0 8px;border:none;"
-        )
-        metrics_btn.clicked.connect(self._open_metrics)
+        def _hbtn(label, bg, fg, slot):
+            b = QPushButton(label)
+            b.setFixedHeight(22)
+            b.setStyleSheet(
+                f"QPushButton {{ background:{bg}; color:{fg}; border-radius:5px;"
+                f"font-size:10px; padding:0 8px; border:none; }}"
+                f"QPushButton:hover {{ background:{bg}dd; }}"
+            )
+            b.clicked.connect(slot)
+            return b
 
-        tolerance_btn = QPushButton("Tolerancias")
-        tolerance_btn.setFixedHeight(22)
-        tolerance_btn.setStyleSheet(
-            "background:#065f46;color:#6ee7b7;border-radius:5px;"
-            "font-size:10px;padding:0 8px;border:none;"
-        )
-        tolerance_btn.clicked.connect(self._open_tolerances)
-
-        service_btn = QPushButton("Modo Servicio")
-        service_btn.setFixedHeight(22)
-        service_btn.setStyleSheet(
-            "background:#334155;color:#94a3b8;border-radius:5px;"
-            "font-size:10px;padding:0 8px;border:none;"
-        )
-        service_btn.clicked.connect(self._open_service)
+        metrics_btn   = _hbtn("Métricas",     "#1e40af", "#ffffff", self._open_metrics)
+        errors_btn    = _hbtn("Ver errores",   "#7f1d1d", "#fca5a5", self._open_errors)
+        tolerance_btn = _hbtn("Tolerancias",   "#065f46", "#6ee7b7", self._open_tolerances)
+        service_btn   = _hbtn("Modo Servicio", "#334155", "#94a3b8", self._open_service)
 
         btn_row.addWidget(metrics_btn)
+        btn_row.addWidget(errors_btn)
         btn_row.addWidget(tolerance_btn)
         btn_row.addWidget(service_btn)
         ctrl_lay.addLayout(btn_row)
@@ -853,6 +846,30 @@ class OperatorWindow(QMainWindow):
             self._plc_badge.show()
         for panel in self._panels.values():
             panel.refresh_status()
+
+    def _open_errors(self) -> None:
+        """Abre el visor de evidencias de error (reutiliza EventBrowserTab del servicio)."""
+        from src.ui.service import EventBrowserTab
+        from PyQt6.QtGui import QIcon
+        if self._errors_win is None or not self._errors_win.isVisible():
+            win = QMainWindow(self)
+            win.setWindowTitle("Visor de Errores — DEFYVISION")
+            icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+            if not icon_pix.isNull():
+                win.setWindowIcon(QIcon(icon_pix))
+            win.setStyleSheet("background:#0f172a;")
+            tab = EventBrowserTab(self._system)
+            win.setCentralWidget(tab)
+            win.resize(1200, 750)
+            self._errors_win = win
+        self._errors_win.show()
+        self._errors_win.raise_()
+        self._errors_win.activateWindow()
+        # Recargar eventos al abrir
+        try:
+            self._errors_win.centralWidget().reload()
+        except Exception:
+            pass
 
     def _show_stop_alert(self, overlay: np.ndarray, label: str, reason: str) -> None:
         """Muestra el diálogo de parada a pantalla completa. Solo uno a la vez."""
@@ -913,6 +930,8 @@ class OperatorWindow(QMainWindow):
                 self._metrics_win.close()
             if self._tolerance_win is not None and self._tolerance_win.isVisible():
                 self._tolerance_win.close()
+            if self._errors_win is not None and self._errors_win.isVisible():
+                self._errors_win.close()
             self._system.shutdown()
             event.accept()
         else:
