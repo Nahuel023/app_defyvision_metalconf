@@ -121,6 +121,14 @@ fuera de la aplicaci?n.
 
 
 **Refuerzo posterior de robustez industrial:**
+- `src/controller/scanner_controller.py` / `src/metrics/recorder.py` / `src/ui/metrics_window.py`:
+  - la p?gina `M?tricas` ahora muestra KPIs de efectividad y confiabilidad del sistema,
+    no solo producci?n b?sica;
+  - nuevos indicadores por scanner: `uptime de inspecci?n`, `machine_stop_count`,
+    `camera_missing_events`, `camera_missing_sec`, `low_quality_pct`,
+    `avg_detection_ratio`, `align_fail_count`;
+  - estas m?tricas tambi?n se persisten en `data/metrics/metrics.db` para poder
+    analizarlas luego desde el historial.
 - `src/controller/scanner_controller.py` / `src/ui/operator.py`:
   - p?rdida de c?mara en `AUTO RUNNING` ahora genera advertencia inmediata apenas no hay frame;
   - si la c?mara no vuelve dentro de `camera_missing_error_timeout_s` (default 3.0 s),

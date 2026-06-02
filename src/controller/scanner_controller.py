@@ -84,16 +84,29 @@ class ScannerController:
         self._session_start: Optional[datetime] = None
         self._max_nok_streak:    int       = 0
         self._fault_count:       int       = 0
+        self._machine_stop_count: int      = 0
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
         self._last_position_diff: float    = 0.0
         self._total_detection_ratio: float = 0.0
         self._align_fail_count:  int       = 0
+        self._low_quality_count: int       = 0
         self._camera_missing_since: Optional[float] = None
         self._camera_missing_warned: bool = False
         self._camera_missing_timeout_s: float = float(
             tols.get("camera_missing_error_timeout_s", 3.0)
         )
+        self._camera_missing_total_s: float = 0.0
+        self._camera_missing_events: int = 0
+
+        # Buffer circular de frames OK en disco (best-effort, prioridad baja)
+        self._ok_buf_enabled  = bool(tols.get("ok_buffer_enabled", True))
+        self._ok_buf_max      = max(10, int(tols.get("ok_buffer_count", 200)))
+        self._ok_buf_every    = max(1,  int(tols.get("ok_buffer_every", 3)))
+        self._ok_buf_quality  = int(tols.get("ok_buffer_jpeg_quality", 75))
+        self._ok_buf_dir      = Path("data/output/ok_buffer") / scanner_id
+        self._ok_seen: int    = 0   # frames OK vistos (para throttle)
+        self._ok_write: int   = 0   # posición de escritura en el pool
 
         self._lock          = threading.Lock()
         self._force_inspect = threading.Event()
@@ -160,13 +173,17 @@ class ScannerController:
             self._session_start           = datetime.now()
             self._max_nok_streak          = 0
             self._fault_count             = 0
+            self._machine_stop_count      = 0
             self._total_missing           = 0
             self._nok_with_missing        = 0
             self._last_position_diff      = 0.0
             self._total_detection_ratio   = 0.0
             self._align_fail_count        = 0
+            self._low_quality_count       = 0
             self._camera_missing_since    = None
             self._camera_missing_warned   = False
+            self._camera_missing_total_s  = 0.0
+            self._camera_missing_events   = 0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -252,13 +269,17 @@ class ScannerController:
             self._session_start           = datetime.now()
             self._max_nok_streak          = 0
             self._fault_count             = 0
+            self._machine_stop_count      = 0
             self._total_missing           = 0
             self._nok_with_missing        = 0
             self._last_position_diff      = 0.0
             self._total_detection_ratio   = 0.0
             self._align_fail_count        = 0
+            self._low_quality_count       = 0
             self._camera_missing_since    = None
             self._camera_missing_warned   = False
+            self._camera_missing_total_s  = 0.0
+            self._camera_missing_events   = 0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -447,6 +468,21 @@ class ScannerController:
                 self._total_detection_ratio / self._total_inspections
                 if self._total_inspections > 0 else 0.0
             )
+            low_quality_pct = (
+                self._low_quality_count / self._total_inspections * 100.0
+                if self._total_inspections > 0 else 0.0
+            )
+            inspection_uptime_pct = 0.0
+            camera_missing_sec = 0.0
+            if self._session_start is not None:
+                session_s = max(0.0, (datetime.now() - self._session_start).total_seconds())
+                camera_missing_sec = self._camera_missing_total_s
+                if self._camera_missing_since is not None:
+                    camera_missing_sec += max(0.0, time.monotonic() - self._camera_missing_since)
+                inspection_uptime_pct = (
+                    max(0.0, session_s - camera_missing_sec) / session_s * 100.0
+                    if session_s > 0 else 0.0
+                )
             return {
                 "state":                self._state,
                 "mode":                 self._mode,
@@ -458,16 +494,18 @@ class ScannerController:
                 "session_start":        self._session_start,
                 "max_nok_streak":       self._max_nok_streak,
                 "fault_count":          self._fault_count,
+                "machine_stop_count":   self._machine_stop_count,
                 "avg_missing_holes":    avg_missing,
                 "last_position_diff":   self._last_position_diff,
                 "avg_detection_ratio":  avg_detection_ratio,
                 "align_fail_count":     self._align_fail_count,
+                "low_quality_count":    self._low_quality_count,
+                "low_quality_pct":      low_quality_pct,
                 "camera_missing":       self._camera_missing_since is not None,
-                "camera_missing_sec":   (
-                    max(0.0, time.monotonic() - self._camera_missing_since)
-                    if self._camera_missing_since is not None else 0.0
-                ),
+                "camera_missing_sec":   camera_missing_sec,
                 "camera_missing_timeout_s": self._camera_missing_timeout_s,
+                "camera_missing_events": self._camera_missing_events,
+                "inspection_uptime_pct": inspection_uptime_pct,
             }
 
     # ------------------------------------------------------------------
@@ -580,6 +618,7 @@ class ScannerController:
                 with self._lock:
                     if self._camera_missing_since is None:
                         self._camera_missing_since = now
+                        self._camera_missing_events += 1
                     missing_sec = now - self._camera_missing_since
                     if not self._camera_missing_warned:
                         self._camera_missing_warned = True
@@ -604,6 +643,9 @@ class ScannerController:
             else:
                 with self._lock:
                     if self._camera_missing_since is not None:
+                        self._camera_missing_total_s += max(
+                            0.0, time.monotonic() - self._camera_missing_since
+                        )
                         logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
                     self._camera_missing_since = None
                     self._camera_missing_warned = False
@@ -671,6 +713,7 @@ class ScannerController:
 
             frame_quality = getattr(result, "frame_quality", "GOOD")
             if frame_quality == "LOW_QUALITY":
+                self._low_quality_count += 1
                 # Hold: frame borroso/degradado no incrementa ni resetea la racha NOK.
                 self._lq_streak += 1
                 if self._low_quality_max_streak > 0 and self._lq_streak >= self._low_quality_max_streak:
@@ -696,6 +739,7 @@ class ScannerController:
                 # Virtual stop only — no FSM transition, no hardware writes.
                 # Safety rule: solenoids stay blocked; only UI/overlay/log are affected.
                 machine_stop_triggered = True
+                self._machine_stop_count += 1
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
                 self._state     = ScannerState.FAULT
                 fault_triggered = True
@@ -730,6 +774,27 @@ class ScannerController:
                 self.on_result(result, streak)
             except Exception as exc:
                 logger.error(f"[{self._id}] on_result callback error: {exc}")
+
+        # Buffer circular de frames OK — guardado asíncrono, prioridad baja
+        if self._ok_buf_enabled and result.status == "OK" and result.overlay is not None:
+            self._ok_seen += 1
+            if self._ok_seen % self._ok_buf_every == 0:
+                slot  = self._ok_write % self._ok_buf_max
+                self._ok_write += 1
+                overlay   = result.overlay
+                out_path  = self._ok_buf_dir / f"ok_{slot:04d}.jpg"
+                quality   = self._ok_buf_quality
+                buf_dir   = self._ok_buf_dir
+
+                def _write(img=overlay, p=out_path, q=quality, d=buf_dir) -> None:
+                    try:
+                        d.mkdir(parents=True, exist_ok=True)
+                        cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, q])
+                    except Exception:
+                        pass  # buffer circular, pérdida de un frame es aceptable
+
+                threading.Thread(target=_write, daemon=True,
+                                 name=f"{self._id}-ok-buf").start()
 
     # ------------------------------------------------------------------
     # Internos
