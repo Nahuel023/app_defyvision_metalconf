@@ -209,14 +209,17 @@ class ScannerPanel(QWidget):
         main_btn_row.addWidget(self.stop_btn)
         root.addLayout(main_btn_row)
 
-        # ── Reset (solo visible cuando hay falla) ─────────────────────
-        reset_row = QHBoxLayout()
+        # ── Reset + Simular (fila inferior secundaria) ────────────────
+        bottom_row = QHBoxLayout()
+        bottom_row.setSpacing(8)
         self.reset_btn = self._secondary_btn("↺  RESET FALLA", "#3b82f6")
         self.reset_btn.clicked.connect(self._on_reset)
-        reset_row.addStretch()
-        reset_row.addWidget(self.reset_btn)
-        reset_row.addStretch()
-        root.addLayout(reset_row)
+        sim_btn = self._secondary_btn("⚡  Simular parada", "#d29922")
+        sim_btn.clicked.connect(self._on_simulate_stop)
+        bottom_row.addWidget(self.reset_btn)
+        bottom_row.addStretch()
+        bottom_row.addWidget(sim_btn)
+        root.addLayout(bottom_row)
 
         self._refresh_buttons(ScannerState.IDLE)
 
@@ -442,6 +445,9 @@ class ScannerPanel(QWidget):
             self._feedback(self.reset_btn, "↺  RESET FALLA", "#1e3a5f", "● Reseteando...")
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
+
+    def _on_simulate_stop(self) -> None:
+        self._scanner.inject_machine_stop("SIMULACION MANUAL")
 
     def _feedback(self, btn: QPushButton, label: str, flash_bg: str, badge_txt: str) -> None:
         """Confirma visualmente que el botón fue recibido por el sistema."""
