@@ -13,6 +13,8 @@ Acepta un InspectionSystem existente (desde OperatorWindow) o crea uno propio.
 
 import json
 import logging
+import os
+import shutil
 import sys
 import time
 from dataclasses import dataclass
@@ -2970,6 +2972,633 @@ class RecordingTab(QWidget):
 
 
 # ==================================================================
+# Evidencias / Eventos
+# ==================================================================
+
+@dataclass
+class _EventEntry:
+    folder: Path
+    name: str
+    event_type: str
+    scanner_id: str
+    reason: str
+    frame_count: int
+    total_bytes: int
+    event_dt: datetime | None
+    has_manifest: bool
+
+
+class EventBrowserTab(QWidget):
+    """Explorador de evidencias guardadas en data/events/ con carga bajo demanda."""
+
+    def __init__(self, system: InspectionSystem, parent=None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._events_dir = _ROOT / "data" / "events"
+        self._max_budget_bytes = 10 * 1_000_000_000
+        self._entries: list[_EventEntry] = []
+        self._filtered_entries: list[_EventEntry] = []
+        self._frame_paths: list[Path] = []
+        self._current_entry: _EventEntry | None = None
+        self._current_idx = 0
+        self._px_cache: dict[int, QPixmap] = {}
+        self._px_cache_max = 18
+        self._build_ui()
+        self._refresh_events()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
+    def _build_ui(self) -> None:
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+        root.addWidget(self._build_toolbar())
+
+        body = QHBoxLayout()
+        body.setSpacing(10)
+        body.addWidget(self._build_list_section(), stretch=4)
+        body.addWidget(self._build_viewer_section(), stretch=7)
+        root.addLayout(body, stretch=1)
+
+    def _build_toolbar(self) -> QGroupBox:
+        grp = QGroupBox("BIBLIOTECA DE EVIDENCIAS")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(10)
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(8)
+
+        self._btn_refresh_events = self._mk_btn("Actualizar", "#1d4ed8", h=36, fs=11)
+        self._btn_latest_event = self._mk_btn("Ir al último", "#0f766e", h=36, fs=11)
+        self._btn_open_folder = self._mk_btn("Abrir carpeta", "#374151", h=36, fs=11)
+        self._btn_delete_event = self._mk_btn("Borrar evento", "#991b1b", h=36, fs=11)
+        self._btn_open_folder.setEnabled(False)
+        self._btn_delete_event.setEnabled(False)
+        row1.addWidget(self._btn_refresh_events)
+        row1.addWidget(self._btn_latest_event)
+        row1.addWidget(self._btn_open_folder)
+        row1.addWidget(self._btn_delete_event)
+        row1.addSpacing(12)
+
+        self._storage_lbl = self._metric_badge("Uso: 0 B / 10.0 GB", _TEXT, _DARK, _BORDER)
+        self._events_count_lbl = self._metric_badge("Eventos: 0", _ACCENT, _DARK, _BORDER)
+        self._frames_count_lbl = self._metric_badge("Frames: 0", _OK, _DARK, _BORDER)
+        row1.addWidget(self._storage_lbl)
+        row1.addWidget(self._events_count_lbl)
+        row1.addWidget(self._frames_count_lbl)
+        row1.addStretch()
+
+        self._events_status_lbl = QLabel("Listo")
+        self._events_status_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+        )
+        row1.addWidget(self._events_status_lbl)
+        lay.addLayout(row1)
+
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+
+        self._scanner_filter = self._make_combo(["Todos"] + self._system.scanner_ids(), min_w=120)
+        self._type_filter = self._make_combo(
+            ["Todos", "machine_stop", "fault", "sin manifest"], min_w=135
+        )
+        self._search_edit = QLineEdit()
+        self._search_edit.setPlaceholderText("Buscar por nombre, motivo o scanner...")
+        self._search_edit.setStyleSheet(
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:7px 10px;font-size:12px;"
+        )
+        row2.addWidget(self._filter_chip("SCANNER"))
+        row2.addWidget(self._scanner_filter)
+        row2.addWidget(self._filter_chip("TIPO"))
+        row2.addWidget(self._type_filter)
+        row2.addWidget(self._filter_chip("BUSCAR"))
+        row2.addWidget(self._search_edit, stretch=1)
+        lay.addLayout(row2)
+
+        self._btn_refresh_events.clicked.connect(self._refresh_events)
+        self._btn_latest_event.clicked.connect(self._go_to_latest)
+        self._btn_open_folder.clicked.connect(self._open_current_folder)
+        self._btn_delete_event.clicked.connect(self._delete_current_event)
+        self._scanner_filter.currentTextChanged.connect(self._apply_filters)
+        self._type_filter.currentTextChanged.connect(self._apply_filters)
+        self._search_edit.textChanged.connect(self._apply_filters)
+        return grp
+
+    def _build_list_section(self) -> QGroupBox:
+        grp = QGroupBox("EVENTOS DISPONIBLES")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(8)
+
+        self._events_table = QTableWidget(0, 6)
+        self._events_table.setHorizontalHeaderLabels(
+            ["Evento", "Tipo", "Scanner", "Hora", "Frames", "Tamaño"]
+        )
+        self._events_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self._events_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self._events_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self._events_table.verticalHeader().setVisible(False)
+        self._events_table.horizontalHeader().setStretchLastSection(False)
+        self._events_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for col in (1, 2, 3, 4, 5):
+            self._events_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.ResizeToContents
+            )
+        self._events_table.setStyleSheet(
+            f"QTableWidget {{ background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:8px;gridline-color:#162234;font-size:11px; }}"
+            f"QHeaderView::section {{ background:{_PANEL};color:{_MUTED};border:none;"
+            "padding:6px;font-size:10px;font-weight:700; }}"
+            f"QTableWidget::item:selected {{ background:#0c4a6e;color:{_TEXT}; }}"
+        )
+        self._events_table.currentCellChanged.connect(self._on_event_row_changed)
+        lay.addWidget(self._events_table)
+        return grp
+
+    def _build_viewer_section(self) -> QGroupBox:
+        grp = QGroupBox("VISOR DE EVIDENCIAS")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(10)
+
+        self._event_title_lbl = QLabel("Seleccione una evidencia")
+        self._event_title_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:15px;font-weight:700;letter-spacing:1px;"
+        )
+        lay.addWidget(self._event_title_lbl)
+
+        self._event_meta_lbl = QLabel("Sin datos")
+        self._event_meta_lbl.setWordWrap(True)
+        self._event_meta_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:8px;padding:8px 10px;"
+        )
+        lay.addWidget(self._event_meta_lbl)
+
+        lay.addLayout(self._build_nav_bar())
+
+        self._frame_slider = QSlider(Qt.Orientation.Horizontal)
+        self._frame_slider.setEnabled(False)
+        self._frame_slider.setStyleSheet(
+            f"QSlider::groove:horizontal {{ background:{_DARK};height:6px;border-radius:3px; }}"
+            f"QSlider::sub-page:horizontal {{ background:{_ACCENT};border-radius:3px; }}"
+            f"QSlider::handle:horizontal {{ background:{_TEXT};width:14px;margin:-5px 0;"
+            "border-radius:7px; }}"
+        )
+        self._frame_slider.valueChanged.connect(self._on_slider_changed)
+        lay.addWidget(self._frame_slider)
+
+        self._frame_file_lbl = QLabel("-")
+        self._frame_file_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+        )
+        lay.addWidget(self._frame_file_lbl)
+
+        self._event_img_view = ZoomableImageView("Seleccione un evento para ver sus imágenes")
+        lay.addWidget(self._event_img_view, stretch=1)
+        return grp
+
+    def _build_nav_bar(self) -> QHBoxLayout:
+        nav = QHBoxLayout()
+        nav.setSpacing(4)
+
+        _nav_base = (
+            "QPushButton {{ background:{bg};color:{fg};border-radius:7px;"
+            "font-size:{fs}px;font-weight:700;border:1px solid {bd};padding:0 {pad}px; }}"
+            "QPushButton:hover {{ background:{hv};border-color:#64748b; }}"
+            "QPushButton:pressed {{ background:#0f172a; }}"
+            "QPushButton:disabled {{ background:#131e2e;color:#374151;border-color:#1e293b; }}"
+        )
+
+        def _nav_btn(label: str, bg="#1e293b", fg=_TEXT, bd=_BORDER,
+                     hv="#2d3f55", fs=12, w=None, pad=8):
+            btn = QPushButton(label)
+            btn.setFixedHeight(38)
+            if w is not None:
+                btn.setFixedWidth(w)
+            btn.setStyleSheet(_nav_base.format(
+                bg=bg, fg=fg, bd=bd, hv=hv, fs=fs, pad=pad
+            ))
+            return btn
+
+        self._btn_event_first = _nav_btn("|<", w=40, pad=0)
+        self._btn_event_prev10 = _nav_btn("<<  -10", w=74, fs=11)
+        self._btn_event_prev = _nav_btn("<  Ant.", w=76, bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8")
+        self._event_nav_lbl = QLabel("-")
+        self._event_nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._event_nav_lbl.setMinimumWidth(120)
+        self._event_nav_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:15px;font-weight:700;background:{_DARK};"
+            f"border:1px solid {_BORDER};border-radius:7px;padding:4px 16px;letter-spacing:2px;"
+        )
+        self._btn_event_next = _nav_btn("Sig.  >", w=76, bg="#1e3a5f", bd="#2563eb", hv="#1d4ed8")
+        self._btn_event_next10 = _nav_btn("+10  >>", w=74, fs=11)
+        self._btn_event_last = _nav_btn(">|", w=40, pad=0)
+        self._btn_event_fit = _nav_btn("Ajustar", w=86, bg="#0f766e", bd="#0f766e", hv="#0d9488", fs=11)
+
+        for btn in (
+            self._btn_event_first, self._btn_event_prev10, self._btn_event_prev,
+            self._btn_event_next, self._btn_event_next10, self._btn_event_last,
+        ):
+            btn.setEnabled(False)
+
+        self._btn_event_first.clicked.connect(lambda: self._show_event_frame(0))
+        self._btn_event_prev10.clicked.connect(lambda: self._show_event_frame(self._current_idx - 10))
+        self._btn_event_prev.clicked.connect(lambda: self._show_event_frame(self._current_idx - 1))
+        self._btn_event_next.clicked.connect(lambda: self._show_event_frame(self._current_idx + 1))
+        self._btn_event_next10.clicked.connect(lambda: self._show_event_frame(self._current_idx + 10))
+        self._btn_event_last.clicked.connect(lambda: self._show_event_frame(len(self._frame_paths) - 1))
+        self._btn_event_fit.clicked.connect(lambda: self._event_img_view.fit())
+
+        nav.addWidget(self._btn_event_first)
+        nav.addWidget(self._btn_event_prev10)
+        nav.addWidget(self._btn_event_prev)
+        nav.addSpacing(6)
+        nav.addWidget(self._event_nav_lbl)
+        nav.addSpacing(6)
+        nav.addWidget(self._btn_event_next)
+        nav.addWidget(self._btn_event_next10)
+        nav.addWidget(self._btn_event_last)
+        nav.addSpacing(10)
+        nav.addWidget(self._btn_event_fit)
+        nav.addStretch()
+        return nav
+
+    def _refresh_events(self) -> None:
+        current_name = self._current_entry.name if self._current_entry else None
+        self._entries = self._scan_event_entries()
+        self._apply_filters()
+        self._update_storage_badges()
+
+        restored = False
+        if current_name:
+            for idx, entry in enumerate(self._filtered_entries):
+                if entry.name == current_name:
+                    self._events_table.selectRow(idx)
+                    self._load_event(entry)
+                    restored = True
+                    break
+
+        if self._filtered_entries and not restored:
+            self._events_table.selectRow(0)
+            self._load_event(self._filtered_entries[0])
+        elif not self._filtered_entries:
+            self._clear_event_selection("No hay evidencias guardadas")
+
+        self._events_status_lbl.setText(
+            f"Actualizado {datetime.now().strftime('%H:%M:%S')}"
+        )
+
+    def _scan_event_entries(self) -> list[_EventEntry]:
+        if not self._events_dir.exists():
+            return []
+
+        entries: list[_EventEntry] = []
+        for folder in self._events_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            manifest_path = folder / "manifest.json"
+            manifest: dict = {}
+            has_manifest = manifest_path.exists()
+            if has_manifest:
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    logger.warning(f"[Evidencias] manifest inválido en {folder.name}: {exc}")
+
+            frames = self._discover_event_frames(folder)
+            total_bytes = self._dir_size(folder)
+            event_dt = None
+            raw_ts = manifest.get("timestamp")
+            if isinstance(raw_ts, str):
+                try:
+                    event_dt = datetime.fromisoformat(raw_ts)
+                except Exception:
+                    event_dt = None
+            if event_dt is None:
+                try:
+                    event_dt = datetime.fromtimestamp(folder.stat().st_mtime)
+                except Exception:
+                    event_dt = None
+
+            manifest_frames = int(
+                manifest.get("frames_count")
+                or (
+                    int(manifest.get("pre_frames_count", 0))
+                    + int(manifest.get("post_frames_count", 0))
+                )
+                or len(frames)
+            )
+
+            entries.append(_EventEntry(
+                folder=folder,
+                name=folder.name,
+                event_type=str(manifest.get("event_type") or ("sin manifest" if not has_manifest else "-")),
+                scanner_id=str(manifest.get("scanner_id") or "-"),
+                reason=str(manifest.get("reason") or ""),
+                frame_count=manifest_frames,
+                total_bytes=total_bytes,
+                event_dt=event_dt,
+                has_manifest=has_manifest,
+            ))
+
+        return sorted(
+            entries,
+            key=lambda entry: entry.event_dt or datetime.min,
+            reverse=True,
+        )
+
+    def _discover_event_frames(self, folder: Path) -> list[Path]:
+        patterns = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
+        frames: list[Path] = []
+        for pattern in patterns:
+            frames.extend(folder.rglob(pattern))
+        return sorted(path for path in frames if path.is_file())
+
+    def _apply_filters(self) -> None:
+        scanner = self._scanner_filter.currentText()
+        ev_type = self._type_filter.currentText()
+        term = self._search_edit.text().strip().lower()
+
+        def _match(entry: _EventEntry) -> bool:
+            if scanner != "Todos" and entry.scanner_id != scanner:
+                return False
+            if ev_type != "Todos" and entry.event_type != ev_type:
+                return False
+            if term:
+                hay = " ".join([entry.name, entry.scanner_id, entry.event_type, entry.reason]).lower()
+                if term not in hay:
+                    return False
+            return True
+
+        self._filtered_entries = [entry for entry in self._entries if _match(entry)]
+        self._populate_events_table()
+
+    def _populate_events_table(self) -> None:
+        self._events_table.blockSignals(True)
+        self._events_table.setRowCount(len(self._filtered_entries))
+        for row, entry in enumerate(self._filtered_entries):
+            hour_txt = entry.event_dt.strftime("%H:%M:%S") if entry.event_dt else "-"
+            values = [
+                entry.name,
+                entry.event_type,
+                entry.scanner_id,
+                hour_txt,
+                str(entry.frame_count),
+                self._human_bytes(entry.total_bytes),
+            ]
+            for col, text in enumerate(values):
+                item = QTableWidgetItem(text)
+                if col in (3, 4, 5):
+                    item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._events_table.setItem(row, col, item)
+        self._events_table.blockSignals(False)
+
+    def _on_event_row_changed(self, current_row: int, _current_col: int,
+                              _prev_row: int, _prev_col: int) -> None:
+        if 0 <= current_row < len(self._filtered_entries):
+            self._load_event(self._filtered_entries[current_row])
+
+    def _load_event(self, entry: _EventEntry) -> None:
+        self._current_entry = entry
+        self._frame_paths = self._discover_event_frames(entry.folder)
+        self._current_idx = 0
+        self._px_cache.clear()
+
+        self._event_title_lbl.setText(entry.name)
+        dt_txt = entry.event_dt.strftime("%d-%m-%Y %H:%M:%S") if entry.event_dt else "-"
+        self._event_meta_lbl.setText(
+            "\n".join([
+                f"Fecha:      {dt_txt}",
+                f"Scanner:    {entry.scanner_id}",
+                f"Tipo:       {entry.event_type}",
+                f"Frames:     {len(self._frame_paths)}",
+                f"Tamaño:     {self._human_bytes(entry.total_bytes)}",
+                f"Manifest:   {'Sí' if entry.has_manifest else 'No'}",
+                f"Motivo:     {entry.reason or '-'}",
+            ])
+        )
+        self._btn_open_folder.setEnabled(True)
+        self._btn_delete_event.setEnabled(True)
+
+        if self._frame_paths:
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setEnabled(True)
+            self._frame_slider.setRange(0, len(self._frame_paths) - 1)
+            self._frame_slider.setValue(0)
+            self._frame_slider.blockSignals(False)
+            self._show_event_frame(0)
+        else:
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setEnabled(False)
+            self._frame_slider.setRange(0, 0)
+            self._frame_slider.setValue(0)
+            self._frame_slider.blockSignals(False)
+            self._event_img_view.clear("La carpeta no contiene imágenes")
+            self._event_nav_lbl.setText("0 / 0")
+            self._frame_file_lbl.setText("Sin frames")
+            self._update_event_nav_state()
+
+    def _show_event_frame(self, idx: int) -> None:
+        if not self._frame_paths:
+            return
+        idx = max(0, min(idx, len(self._frame_paths) - 1))
+        self._current_idx = idx
+
+        pxm = self._px_cache.get(idx)
+        if pxm is None:
+            bgr = cv2.imread(str(self._frame_paths[idx]))
+            if bgr is not None:
+                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                pxm = QPixmap.fromImage(qi)
+                self._px_cache[idx] = pxm
+                if len(self._px_cache) > self._px_cache_max:
+                    keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
+                    for key in keys[self._px_cache_max // 2:]:
+                        del self._px_cache[key]
+
+        if pxm is not None:
+            prev = self._event_img_view.current_pixmap()
+            needs_fit = prev is None or prev.size() != pxm.size()
+            self._event_img_view.set_pixmap(pxm, auto_fit=needs_fit)
+
+        self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
+        self._frame_file_lbl.setText(self._frame_paths[idx].name)
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setValue(idx)
+        self._frame_slider.blockSignals(False)
+        self._update_event_nav_state()
+
+    def _on_slider_changed(self, value: int) -> None:
+        self._show_event_frame(value)
+
+    def _update_event_nav_state(self) -> None:
+        n = len(self._frame_paths)
+        enabled = n > 0
+        self._btn_event_first.setEnabled(enabled and self._current_idx > 0)
+        self._btn_event_prev10.setEnabled(enabled and self._current_idx > 0)
+        self._btn_event_prev.setEnabled(enabled and self._current_idx > 0)
+        self._btn_event_next.setEnabled(enabled and self._current_idx < n - 1)
+        self._btn_event_next10.setEnabled(enabled and self._current_idx < n - 1)
+        self._btn_event_last.setEnabled(enabled and self._current_idx < n - 1)
+        self._btn_event_fit.setEnabled(enabled)
+
+    def _go_to_latest(self) -> None:
+        if not self._filtered_entries:
+            return
+        self._events_table.selectRow(0)
+        self._load_event(self._filtered_entries[0])
+
+    def _open_current_folder(self) -> None:
+        if self._current_entry is None:
+            return
+        try:
+            os.startfile(str(self._current_entry.folder))
+        except Exception as exc:
+            QMessageBox.warning(self, "Abrir carpeta", f"No se pudo abrir la carpeta:\n{exc}")
+
+    def _delete_current_event(self) -> None:
+        if self._current_entry is None:
+            return
+        name = self._current_entry.name
+        answer = QMessageBox.question(
+            self,
+            "Borrar evidencia",
+            f"¿Desea borrar la evidencia '{name}'?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            shutil.rmtree(self._current_entry.folder)
+            logger.info(f"[Evidencias] eliminada {name}")
+            self._refresh_events()
+        except Exception as exc:
+            QMessageBox.warning(self, "Borrar evidencia", f"No se pudo borrar:\n{exc}")
+
+    def _clear_event_selection(self, placeholder: str) -> None:
+        self._current_entry = None
+        self._frame_paths = []
+        self._current_idx = 0
+        self._px_cache.clear()
+        self._btn_open_folder.setEnabled(False)
+        self._btn_delete_event.setEnabled(False)
+        self._event_title_lbl.setText("Seleccione una evidencia")
+        self._event_meta_lbl.setText("Sin datos")
+        self._event_nav_lbl.setText("0 / 0")
+        self._frame_file_lbl.setText("-")
+        self._frame_slider.blockSignals(True)
+        self._frame_slider.setEnabled(False)
+        self._frame_slider.setRange(0, 0)
+        self._frame_slider.setValue(0)
+        self._frame_slider.blockSignals(False)
+        self._event_img_view.clear(placeholder)
+        self._update_event_nav_state()
+
+    def _update_storage_badges(self) -> None:
+        used = self._dir_size(self._events_dir) if self._events_dir.exists() else 0
+        total_frames = sum(entry.frame_count for entry in self._entries)
+        pct = (used / self._max_budget_bytes) if self._max_budget_bytes > 0 else 0.0
+        color = _OK if pct < 0.7 else (_WARN if pct < 0.9 else _NOK)
+        self._storage_lbl.setText(
+            f"Uso: {self._human_bytes(used)} / {self._human_bytes(self._max_budget_bytes)}"
+        )
+        self._storage_lbl.setStyleSheet(
+            f"color:{color};background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:7px;padding:6px 12px;font-size:11px;font-weight:700;"
+        )
+        self._events_count_lbl.setText(f"Eventos: {len(self._entries)}")
+        self._frames_count_lbl.setText(f"Frames: {total_frames}")
+
+    def refresh(self) -> None:
+        self._update_storage_badges()
+
+    def keyPressEvent(self, event) -> None:
+        if not self._frame_paths:
+            super().keyPressEvent(event)
+            return
+        if event.key() == Qt.Key.Key_Right:
+            self._show_event_frame(self._current_idx + 1)
+        elif event.key() == Qt.Key.Key_Left:
+            self._show_event_frame(self._current_idx - 1)
+        else:
+            super().keyPressEvent(event)
+
+    @staticmethod
+    def _dir_size(path: Path) -> int:
+        if not path.exists():
+            return 0
+        return sum(file.stat().st_size for file in path.rglob("*") if file.is_file())
+
+    @staticmethod
+    def _human_bytes(num: int) -> str:
+        value = float(num)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if value < 1024.0 or unit == "TB":
+                return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
+            value /= 1024.0
+        return f"{num} B"
+
+    @staticmethod
+    def _filter_chip(label: str) -> QLabel:
+        chip = QLabel(label)
+        chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
+        )
+        return chip
+
+    @staticmethod
+    def _metric_badge(text: str, fg: str, bg: str, bd: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(
+            f"color:{fg};background:{bg};border:1px solid {bd};border-radius:7px;"
+            "padding:6px 12px;font-size:11px;font-weight:700;"
+        )
+        return lbl
+
+    def _mk_btn(self, text: str, bg: str, h: int = 30,
+                fs: int = 11, w: int | None = None) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setFixedHeight(h)
+        if w is not None:
+            btn.setFixedWidth(w)
+        btn.setStyleSheet(
+            f"QPushButton {{ background:{bg};color:white;border-radius:6px;"
+            f"font-size:{fs}px;font-weight:700;border:none;padding:0 12px; }}"
+            "QPushButton:hover { background-color: rgba(255,255,255,0.12);"
+            "border:1px solid rgba(255,255,255,0.18); }"
+            "QPushButton:pressed { background-color: rgba(0,0,0,0.25); }"
+            "QPushButton:disabled { background:#1e293b;color:#475569;border:none; }"
+        )
+        return btn
+
+    def _make_combo(self, items: list[str], min_w: int = 110) -> QComboBox:
+        combo = QComboBox()
+        combo.addItems(items)
+        combo.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            f"border-radius:5px;padding:4px 8px;font-size:12px;min-width:{min_w}px;"
+        )
+        return combo
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:10px;margin-top:14px;padding-top:12px;"
+            f"font-size:11px;font-weight:700;color:{_ACCENT};letter-spacing:2px; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:14px;padding:0 6px; }}"
+        )
+
+
+# ==================================================================
 # Calibración de cámara
 # ==================================================================
 
@@ -4518,6 +5147,7 @@ class ServiceWindow(QMainWindow):
         self._log_tab    = LogsTab(self._log_handler)
         self._cfg_tab    = ConfigTab()
         self._rec_tab    = RecordingTab(self._system)
+        self._events_tab = EventBrowserTab(self._system)
         self._cam_tab    = CameraCalibTab(self._system)
 
         self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
@@ -4525,6 +5155,7 @@ class ServiceWindow(QMainWindow):
         self._tabs.addTab(self._sys_tab,    "  Sistema  ")
         self._tabs.addTab(self._log_tab,    "  Logs  ")
         self._tabs.addTab(self._cfg_tab,    "  Config  ")
+        self._tabs.addTab(self._events_tab, "  Evidencias  ")
         self._tabs.addTab(self._rec_tab,    "  Grabación  ")
         self._tabs.addTab(self._cam_tab,    "  Cámara  ")
 
@@ -4533,6 +5164,7 @@ class ServiceWindow(QMainWindow):
         self._health_bar = _HealthBar(self._system, self._cam_ref, central)
         root.addWidget(self._health_bar)
         root.addWidget(self._tabs, stretch=1)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
     def _build_header(self) -> QWidget:
         """
@@ -4635,6 +5267,10 @@ class ServiceWindow(QMainWindow):
         ok = self._system.connect_plc()
         logger.info(f"[Servicio] Reconectar PLC -> {'OK' if ok else 'FALLO'}")
 
+    def _on_tab_changed(self, _idx: int) -> None:
+        if self._tabs.currentWidget() is self._events_tab:
+            self._events_tab._refresh_events()
+
     def _refresh(self) -> None:
         connected = self._system.plc.connected
         if connected != self._last_plc_connected:
@@ -4656,6 +5292,8 @@ class ServiceWindow(QMainWindow):
             self._diag_tab.refresh()
         elif idx == 2:
             self._sys_tab.refresh()
+        elif self._tabs.currentWidget() is self._events_tab:
+            self._events_tab.refresh()
         # LogsTab se actualiza por señal; ConfigTab es estático
 
     def closeEvent(self, event) -> None:
