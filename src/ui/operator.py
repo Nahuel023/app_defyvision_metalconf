@@ -498,7 +498,22 @@ class ScannerPanel(QWidget):
     def _refresh_buttons(self, state: ScannerState) -> None:
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
-        self.reset_btn.setEnabled(state == ScannerState.STOPPED)
+
+        can_reset = (state == ScannerState.STOPPED)
+        self.reset_btn.setEnabled(can_reset)
+        if can_reset:
+            # Prominente: fondo naranja llamativo para guiar al operario
+            self.reset_btn.setStyleSheet(
+                "background:#b45309;color:#ffffff;font-weight:700;"
+                "border-radius:5px;font-size:12px;border:none;padding:0 14px;"
+                "QPushButton:hover{background:#d97706;}"
+            )
+        else:
+            self.reset_btn.setStyleSheet(
+                f"background:transparent;color:#6b7280;font-weight:600;"
+                "border-radius:5px;font-size:11px;"
+                "border:1px solid #374151;padding:0 12px;"
+            )
 
     def _populate_models(self) -> None:
         from src.utils.model_names import DISPLAY_NAMES, to_display
