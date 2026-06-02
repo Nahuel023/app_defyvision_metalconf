@@ -1,0 +1,680 @@
+"""
+Visor de frames para el operario.
+
+Permite navegar dos tipos de evidencia sin acceso a modo servicio:
+  • Paradas: carpetas DD-MM-YYYY_STOP_N con pre/post frames y manifest.json
+  • OK recientes: buffer circular de las últimas inspecciones correctas
+
+Diseño: industrial, oscuro, lectura fácil. Sin controles de desarrollo.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from pathlib import Path
+from typing import Optional
+
+import cv2
+import numpy as np
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
+from PyQt6.QtGui import QIcon, QImage, QPixmap
+from PyQt6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QSplitter,
+    QVBoxLayout,
+    QWidget,
+)
+
+_ROOT = Path(__file__).resolve().parent.parent.parent
+
+# ── Paleta ────────────────────────────────────────────────────────────────────
+_BG      = "#0d1117"
+_PANEL   = "#161b22"
+_CARD    = "#21262d"
+_BORDER  = "#30363d"
+_TEXT    = "#f0f6fc"
+_MUTED   = "#8b949e"
+_ACCENT  = "#3b82f6"
+_OK_CLR  = "#3fb950"
+_NOK_CLR = "#f85149"
+_WARN    = "#d29922"
+
+_EVENTS_DIR   = _ROOT / "data" / "events"
+_OK_BUF_BASE  = _ROOT / "data" / "output" / "ok_buffer"
+
+_THUMB_W = 90
+_THUMB_H = 60
+
+
+# ── Helper ────────────────────────────────────────────────────────────────────
+
+def _bgr_to_pixmap(img: np.ndarray, max_w: int, max_h: int) -> QPixmap:
+    h, w = img.shape[:2]
+    scale = min(max_w / w, max_h / h, 1.0)
+    if scale < 0.999:
+        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+    h, w = img.shape[:2]
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+    return QPixmap.fromImage(qimg)
+
+
+def _load_thumb(path: Path) -> QPixmap:
+    img = cv2.imread(str(path))
+    if img is None:
+        return QPixmap()
+    return _bgr_to_pixmap(img, _THUMB_W, _THUMB_H)
+
+
+def _event_summary(event_dir: Path) -> dict:
+    """Lee manifest.json y devuelve un dict con los campos clave."""
+    manifest_path = event_dir / "manifest.json"
+    m: dict = {}
+    if manifest_path.exists():
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    pre  = sorted(event_dir.glob("frame_*.jpg"))
+    post = sorted(event_dir.glob("post_*.jpg"))
+    return {
+        "dir": event_dir,
+        "name": event_dir.name,
+        "timestamp": m.get("timestamp", ""),
+        "scanner_id": m.get("scanner_id", ""),
+        "event_type": m.get("event_type", ""),
+        "reason": m.get("reason", ""),
+        "pre_frames": pre,
+        "post_frames": post,
+        "all_frames": pre + post,
+        "pre_count": len(pre),
+        "post_count": len(post),
+        "total_bytes": m.get("total_bytes", 0),
+    }
+
+
+def _format_ts(ts_iso: str) -> str:
+    if not ts_iso:
+        return "—"
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(ts_iso)
+        return dt.strftime("%d/%m/%Y  %H:%M:%S")
+    except Exception:
+        return ts_iso[:16]
+
+
+def _scanner_display(scanner_id: str) -> str:
+    try:
+        from src.utils.model_names import to_display
+        # scanner_id is like 'scanner_1'; we need the model
+        # We can't always get the model here without the system, so just show the ID nicely
+    except Exception:
+        pass
+    num = scanner_id.split("_")[-1] if "_" in scanner_id else scanner_id
+    return f"Scanner {num}"
+
+
+# ── Worker de carga de miniaturas ─────────────────────────────────────────────
+
+class _ThumbLoader(QThread):
+    """Carga miniaturas en segundo plano para no congelar la UI."""
+    thumb_ready = pyqtSignal(int, QPixmap)  # (index, pixmap)
+
+    def __init__(self, paths: list[Path], parent=None):
+        super().__init__(parent)
+        self._paths = paths
+
+    def run(self):
+        for i, p in enumerate(self._paths):
+            pix = _load_thumb(p)
+            self.thumb_ready.emit(i, pix)
+
+
+# ── Widget: visor de un único frame a pantalla ────────────────────────────────
+
+class _FrameView(QLabel):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._img: Optional[np.ndarray] = None
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setStyleSheet(f"background:#000000;border-radius:6px;border:2px solid {_BORDER};")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumSize(400, 260)
+
+    def set_image(self, img: np.ndarray) -> None:
+        self._img = img
+        self._update()
+
+    def clear_image(self) -> None:
+        self._img = None
+        self.clear()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update()
+
+    def _update(self):
+        if self._img is None:
+            return
+        rect = self.contentsRect()
+        w = max(100, rect.width() - 4)
+        h = max(80, rect.height() - 4)
+        self.setPixmap(_bgr_to_pixmap(self._img, w, h))
+
+
+# ── Panel de navegación de un evento ─────────────────────────────────────────
+
+class _EventNavPanel(QWidget):
+    """Visor de frames de un evento: imagen grande + tira de miniaturas + navegación."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._frames: list[Path] = []
+        self._current: int = 0
+        self._loader: Optional[_ThumbLoader] = None
+        self._thumb_widgets: list[QLabel] = []
+        self._build_ui()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(8, 8, 8, 8)
+        root.setSpacing(6)
+
+        # ── Info del evento ───────────────────────────────────────────
+        self._info_lbl = QLabel("Selecciona un evento de la lista")
+        self._info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._info_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;background:{_CARD};"
+            f"border-radius:5px;padding:5px;border:1px solid {_BORDER};"
+        )
+        root.addWidget(self._info_lbl)
+
+        # ── Frame grande ──────────────────────────────────────────────
+        self._view = _FrameView()
+        root.addWidget(self._view, stretch=1)
+
+        # ── Controles de navegación ───────────────────────────────────
+        nav = QHBoxLayout()
+        nav.setSpacing(10)
+
+        self._prev_btn = QPushButton("◀  Anterior")
+        self._prev_btn.setMinimumHeight(36)
+        self._prev_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_TEXT}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:12px; font-weight:600; padding:0 16px; }}"
+            f"QPushButton:hover {{ background:{_ACCENT}33; border-color:{_ACCENT}; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._prev_btn.clicked.connect(self._go_prev)
+        nav.addWidget(self._prev_btn)
+
+        self._pos_lbl = QLabel("—")
+        self._pos_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._pos_lbl.setMinimumWidth(140)
+        self._pos_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:13px;font-weight:700;background:transparent;"
+        )
+        nav.addWidget(self._pos_lbl, stretch=1)
+
+        self._next_btn = QPushButton("Siguiente  ▶")
+        self._next_btn.setMinimumHeight(36)
+        self._next_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_TEXT}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:12px; font-weight:600; padding:0 16px; }}"
+            f"QPushButton:hover {{ background:{_ACCENT}33; border-color:{_ACCENT}; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._next_btn.clicked.connect(self._go_next)
+        nav.addWidget(self._next_btn)
+
+        root.addLayout(nav)
+
+        # ── Tira de miniaturas ────────────────────────────────────────
+        thumb_scroll = QScrollArea()
+        thumb_scroll.setFixedHeight(_THUMB_H + 20)
+        thumb_scroll.setWidgetResizable(True)
+        thumb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
+        thumb_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        thumb_scroll.setStyleSheet(
+            f"QScrollArea {{ background:{_PANEL}; border:1px solid {_BORDER}; border-radius:5px; }}"
+            "QScrollBar:horizontal { height:8px; background:#0d1117; }"
+            "QScrollBar::handle:horizontal { background:#30363d; border-radius:4px; }"
+        )
+        self._thumb_container = QWidget()
+        self._thumb_container.setStyleSheet(f"background:{_PANEL};")
+        self._thumb_lay = QHBoxLayout(self._thumb_container)
+        self._thumb_lay.setContentsMargins(4, 4, 4, 4)
+        self._thumb_lay.setSpacing(4)
+        self._thumb_lay.addStretch()
+        thumb_scroll.setWidget(self._thumb_container)
+        root.addWidget(thumb_scroll)
+
+    # ── API pública ───────────────────────────────────────────────────
+
+    def load_event(self, summary: dict) -> None:
+        self._frames = summary["all_frames"]
+        self._current = 0
+
+        # Separar pre/post para colorear la tira
+        n_pre = summary["pre_count"]
+
+        # Info del evento
+        ts = _format_ts(summary["timestamp"])
+        scanner = _scanner_display(summary["scanner_id"])
+        reason  = summary["reason"] or summary["event_type"]
+        total   = len(self._frames)
+        pre_c   = summary["pre_count"]
+        post_c  = summary["post_count"]
+        self._info_lbl.setText(
+            f"{ts}   ·   {scanner}   ·   {reason}   ·   "
+            f"{pre_c} frames previos  +  {post_c} frames posteriores  =  {total} total"
+        )
+
+        # Limpiar miniaturas anteriores
+        self._clear_thumbs()
+        for i in range(total):
+            lbl = QLabel()
+            lbl.setFixedSize(_THUMB_W, _THUMB_H)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            # Colorear borde: azul = pre-evento, naranja = post-evento
+            border_color = _ACCENT if i < n_pre else _WARN
+            lbl.setStyleSheet(
+                f"background:#000;border:2px solid {border_color};border-radius:3px;"
+            )
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.mousePressEvent = lambda e, idx=i: self._go_to(idx)
+            self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
+            self._thumb_widgets.append(lbl)
+
+        # Cargar miniaturas en segundo plano
+        if self._loader is not None:
+            self._loader.quit()
+            self._loader.wait(200)
+        self._loader = _ThumbLoader(self._frames)
+        self._loader.thumb_ready.connect(self._on_thumb_ready)
+        self._loader.start()
+
+        self._show_frame(0)
+
+    def load_ok_buffer(self, frames: list[Path], scanner_label: str) -> None:
+        self._frames = frames
+        self._current = 0
+        self._info_lbl.setText(
+            f"{scanner_label}   ·   Buffer OK — últimas {len(frames)} inspecciones correctas"
+        )
+        self._clear_thumbs()
+        for i in range(len(frames)):
+            lbl = QLabel()
+            lbl.setFixedSize(_THUMB_W, _THUMB_H)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                f"background:#000;border:2px solid {_OK_CLR};border-radius:3px;"
+            )
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.mousePressEvent = lambda e, idx=i: self._go_to(idx)
+            self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
+            self._thumb_widgets.append(lbl)
+        if self._loader is not None:
+            self._loader.quit()
+            self._loader.wait(200)
+        self._loader = _ThumbLoader(frames)
+        self._loader.thumb_ready.connect(self._on_thumb_ready)
+        self._loader.start()
+        self._show_frame(0)
+
+    # ── Internos ──────────────────────────────────────────────────────
+
+    def _clear_thumbs(self) -> None:
+        for w in self._thumb_widgets:
+            self._thumb_lay.removeWidget(w)
+            w.deleteLater()
+        self._thumb_widgets.clear()
+
+    def _on_thumb_ready(self, idx: int, pix: QPixmap) -> None:
+        if idx < len(self._thumb_widgets) and not pix.isNull():
+            self._thumb_widgets[idx].setPixmap(
+                pix.scaled(_THUMB_W - 4, _THUMB_H - 4,
+                           Qt.AspectRatioMode.KeepAspectRatio,
+                           Qt.TransformationMode.SmoothTransformation)
+            )
+
+    def _show_frame(self, idx: int) -> None:
+        if not self._frames:
+            self._view.clear_image()
+            self._pos_lbl.setText("Sin frames")
+            self._prev_btn.setEnabled(False)
+            self._next_btn.setEnabled(False)
+            return
+        idx = max(0, min(idx, len(self._frames) - 1))
+        self._current = idx
+        img = cv2.imread(str(self._frames[idx]))
+        if img is not None:
+            self._view.set_image(img)
+        n = len(self._frames)
+        self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}")
+        self._prev_btn.setEnabled(idx > 0)
+        self._next_btn.setEnabled(idx < n - 1)
+
+        # Resaltar miniatura activa
+        for i, w in enumerate(self._thumb_widgets):
+            ss = w.styleSheet()
+            if i == idx:
+                if f"border:3px solid #ffffff" not in ss:
+                    w.setStyleSheet(ss.replace("border:2px", "border:3px") + "opacity:1.0;")
+            else:
+                if "border:3px" in ss:
+                    w.setStyleSheet(ss.replace("border:3px", "border:2px"))
+
+    def _go_prev(self) -> None:
+        self._show_frame(self._current - 1)
+
+    def _go_next(self) -> None:
+        self._show_frame(self._current + 1)
+
+    def _go_to(self, idx: int) -> None:
+        self._show_frame(idx)
+
+
+# ── Visor principal ──────────────────────────────────────────────────────────
+
+class OperatorFrameViewer(QMainWindow):
+    """
+    Visor de frames para el operario.
+
+    Pestañas:
+      • Paradas — eventos de parada de línea con evidencia pre/post
+      • OK recientes — buffer circular de las últimas inspecciones OK
+    """
+
+    def __init__(self, system, parent=None):
+        super().__init__(parent)
+        self._system = system
+        self._mode = "events"   # "events" | "ok"
+        self._summaries: list[dict] = []
+
+        self.setWindowTitle("Visor de Frames — DEFYVISION")
+        icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+        if not icon_pix.isNull():
+            self.setWindowIcon(QIcon(icon_pix))
+        self.setStyleSheet(f"background:{_BG};")
+        self.resize(1280, 780)
+        self._build_ui()
+
+    # ── Construcción de UI ─────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        central = QWidget()
+        central.setStyleSheet(f"background:{_BG};")
+        self.setCentralWidget(central)
+        root = QVBoxLayout(central)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(8)
+
+        # ── Header ────────────────────────────────────────────────────
+        root.addWidget(self._build_header())
+
+        # ── Cuerpo principal: lista + visor ───────────────────────────
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStyleSheet(
+            f"QSplitter::handle {{ background:{_BORDER}; width:2px; }}"
+        )
+
+        # Lista izquierda
+        self._list_widget = QListWidget()
+        self._list_widget.setStyleSheet(
+            f"QListWidget {{ background:{_PANEL}; border:none; outline:none; }}"
+            f"QListWidget::item {{ border-bottom:1px solid {_BORDER}; padding:2px; }}"
+            f"QListWidget::item:selected {{ background:#1e3a5f; border-left:3px solid {_ACCENT}; }}"
+            "QScrollBar:vertical { width:6px; background:#0d1117; }"
+            "QScrollBar::handle:vertical { background:#30363d; border-radius:3px; }"
+        )
+        self._list_widget.setMinimumWidth(230)
+        self._list_widget.setMaximumWidth(320)
+        self._list_widget.currentRowChanged.connect(self._on_list_select)
+        splitter.addWidget(self._list_widget)
+
+        # Panel de visor derecho
+        self._nav_panel = _EventNavPanel()
+        splitter.addWidget(self._nav_panel)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+
+        root.addWidget(splitter, stretch=1)
+
+    def _build_header(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(52)
+        bar.setStyleSheet(
+            f"background:{_PANEL}; border-radius:8px; border:1px solid {_BORDER};"
+        )
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 0, 14, 0)
+        lay.setSpacing(10)
+
+        title = QLabel("VISOR DE FRAMES")
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:15px;font-weight:700;letter-spacing:3px;"
+            "background:transparent;border:none;"
+        )
+        lay.addWidget(title)
+        lay.addStretch()
+
+        def _tab_btn(label, mode, color):
+            b = QPushButton(label)
+            b.setFixedHeight(30)
+            b.setMinimumWidth(130)
+            b.setCheckable(True)
+            b.setStyleSheet(
+                f"QPushButton {{ background:transparent; color:{_MUTED}; "
+                f"border:1px solid {_BORDER}; border-radius:6px; font-size:11px; "
+                f"font-weight:600; padding:0 12px; }}"
+                f"QPushButton:checked {{ background:{color}; color:#ffffff; border-color:{color}; }}"
+                f"QPushButton:hover:!checked {{ background:{color}22; border-color:{color}; }}"
+            )
+            b.clicked.connect(lambda: self._switch_mode(mode))
+            return b
+
+        self._events_btn = _tab_btn("⚠  Paradas de línea", "events", _NOK_CLR)
+        self._ok_btn     = _tab_btn("✓  Frames OK recientes", "ok", _OK_CLR)
+
+        lay.addWidget(self._events_btn)
+        lay.addWidget(self._ok_btn)
+
+        reload_btn = QPushButton("↺  Recargar")
+        reload_btn.setFixedHeight(30)
+        reload_btn.setStyleSheet(
+            f"QPushButton {{ background:transparent; color:{_MUTED}; "
+            f"border:1px solid {_BORDER}; border-radius:6px; font-size:11px; padding:0 10px; }}"
+            f"QPushButton:hover {{ color:{_TEXT}; border-color:{_TEXT}; }}"
+        )
+        reload_btn.clicked.connect(self.reload)
+        lay.addWidget(reload_btn)
+
+        return bar
+
+    # ── Modos ─────────────────────────────────────────────────────────
+
+    def _switch_mode(self, mode: str) -> None:
+        self._mode = mode
+        self._events_btn.setChecked(mode == "events")
+        self._ok_btn.setChecked(mode == "ok")
+        self._populate_list()
+
+    def reload(self) -> None:
+        self._populate_list()
+
+    def _populate_list(self) -> None:
+        self._list_widget.clear()
+
+        if self._mode == "events":
+            self._populate_events()
+        else:
+            self._populate_ok()
+
+    def _populate_events(self) -> None:
+        """Lee data/events/ y llena la lista con los eventos encontrados."""
+        if not _EVENTS_DIR.exists():
+            item = QListWidgetItem("Sin eventos grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        dirs = sorted(
+            (d for d in _EVENTS_DIR.iterdir() if d.is_dir()),
+            key=lambda d: d.stat().st_mtime,
+            reverse=True,
+        )
+        if not dirs:
+            item = QListWidgetItem("Sin eventos grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        self._summaries = [_event_summary(d) for d in dirs]
+
+        for s in self._summaries:
+            widget = self._make_event_card(s)
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+    def _make_event_card(self, s: dict) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet(f"background:transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 6, 8, 6)
+        lay.setSpacing(2)
+
+        ts = _format_ts(s["timestamp"])
+        date_lbl = QLabel(ts)
+        date_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-weight:700;background:transparent;"
+        )
+        lay.addWidget(date_lbl)
+
+        scanner = _scanner_display(s["scanner_id"])
+        ev_type = s["event_type"].replace("_", " ").upper() if s["event_type"] else "PARADA"
+        ev_color = _NOK_CLR if "stop" in s["event_type"] else _WARN
+        meta_lbl = QLabel(f"{scanner}  ·  {ev_type}")
+        meta_lbl.setStyleSheet(
+            f"color:{ev_color};font-size:10px;font-weight:600;background:transparent;"
+        )
+        lay.addWidget(meta_lbl)
+
+        reason = s["reason"]
+        if reason:
+            r_lbl = QLabel(reason)
+            r_lbl.setWordWrap(True)
+            r_lbl.setStyleSheet(
+                f"color:{_MUTED};font-size:9px;background:transparent;"
+            )
+            lay.addWidget(r_lbl)
+
+        total = len(s["all_frames"])
+        size_kb = s["total_bytes"] // 1024 if s["total_bytes"] else 0
+        count_lbl = QLabel(
+            f"{s['pre_count']} pre  +  {s['post_count']} post  ·  {size_kb} KB"
+        )
+        count_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:9px;background:transparent;"
+        )
+        lay.addWidget(count_lbl)
+
+        return w
+
+    def _populate_ok(self) -> None:
+        """Lee data/output/ok_buffer/ y llena la lista con los scanners disponibles."""
+        self._summaries = []
+        if not _OK_BUF_BASE.exists():
+            item = QListWidgetItem("Sin frames OK grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        scanner_dirs = sorted(d for d in _OK_BUF_BASE.iterdir() if d.is_dir())
+        if not scanner_dirs:
+            item = QListWidgetItem("Sin frames OK grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        for sdir in scanner_dirs:
+            frames = sorted(sdir.glob("ok_*.jpg"))
+            if not frames:
+                continue
+            summary = {
+                "type": "ok",
+                "scanner_id": sdir.name,
+                "frames": frames,
+                "dir": sdir,
+            }
+            self._summaries.append(summary)
+
+            widget = self._make_ok_card(summary)
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+    def _make_ok_card(self, s: dict) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(3)
+
+        scanner = _scanner_display(s["scanner_id"])
+        title = QLabel(scanner)
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:12px;font-weight:700;background:transparent;"
+        )
+        lay.addWidget(title)
+
+        n = len(s["frames"])
+        count_lbl = QLabel(f"{n} frames OK guardados")
+        count_lbl.setStyleSheet(
+            f"color:{_OK_CLR};font-size:10px;font-weight:600;background:transparent;"
+        )
+        lay.addWidget(count_lbl)
+
+        return w
+
+    # ── Selección ─────────────────────────────────────────────────────
+
+    def _on_list_select(self, row: int) -> None:
+        if row < 0 or row >= len(self._summaries):
+            return
+        s = self._summaries[row]
+        if self._mode == "events":
+            self._nav_panel.load_event(s)
+        else:
+            scanner_label = _scanner_display(s["scanner_id"])
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+
+    # ── showEvent: activar modo eventos por defecto ───────────────────
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._mode == "events":
+            self._events_btn.setChecked(True)
+            self._ok_btn.setChecked(False)
+        else:
+            self._events_btn.setChecked(False)
+            self._ok_btn.setChecked(True)
+        self._populate_list()
