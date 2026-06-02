@@ -119,6 +119,21 @@ fuera de la aplicaci?n.
 
 **Archivos modificados:** `src/ui/service.py`, `CHANGELOG.md`
 
+
+**Refuerzo posterior de robustez industrial:**
+- `src/pipeline/event_recorder.py`:
+  - si ocurre otro evento durante la ventana post-evento, ya no se pierde silenciosamente;
+    ahora se extiende la ventana de grabaci?n post para seguir capturando evidencia.
+- `src/ui/service.py`:
+  - parsing defensivo de campos num?ricos del `manifest.json` para no romper la tab si el
+    archivo viene incompleto o con valores inesperados;
+  - si una imagen est? corrupta o ilegible, el visor limpia la imagen anterior y muestra
+    un mensaje expl?cito en vez de dejar una captura vieja en pantalla;
+  - `ServiceWindow` ahora usa `reload()` p?blico de la tab en vez de llamar a un m?todo
+    privado interno.
+- `tests/test_event_recorder.py`: agregado test para el caso de evento disparado durante
+  la ventana post-evento.
+
 #### Cambio 91 — Ventana de tolerancias por scanner + grabación de evidencia siempre activa
 
 **Grabación siempre activa:**
