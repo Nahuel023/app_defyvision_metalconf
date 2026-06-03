@@ -43,6 +43,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-03 — Tadeo + Claude
+
+#### Cambio 94 — Desalineamiento vertical: frame_0029 capturado + reducción de falsos positivos por zigzag
+
+**Problema:** Al analizar `Patron_Esterilla_METALCONF_editado`, los frames 27 y 28 ya
+paraban (ratio > 0.2 AND dAng >= 2.5), pero `frame_0029` pasaba como `OK` porque:
+- Primera condición: ratio=0.23 > 0.2 ✅ pero dAng=0.72 < 2.5 ❌
+- Segunda condición (zigzag): patZZ=8.7 < 9.0 ❌ (falla por 0.3px)
+
+Además, ~21 frames normales disparaban falsos `machine_stop` via la condición de zigzag
+porque el baseline normal de esterilla tiene patZZ=9–11px (el umbral 9.0 era demasiado bajo).
+
+**Diagnóstico con 196 frames:**
+- Frames con patZZ≈10–11 y missing=0 → zigzag condition (9.0) se activaba en falso.
+- Frames OK normales con alto patZZ siempre tienen ctrStd < 2.0 (no importa el patZZ).
+- Los únicos frames con ratio > 0.2 son 27–30; umbral de 0.2 es un gate seguro.
+- Raising patZZ threshold a 11.5 elimina todos los falsos del grupo zigzag (max normal = 10.7).
+
+**Cambios en `config/tolerancias.yaml` modelo_A:**
+
+| Parámetro | Antes | Ahora | Razón |
+|---|---|---|---|
+| `pattern_desalign_min_angle_deg` | 2.5 | **0.3** | frame_0029 tiene dAng=0.72 que ya supera 0.3; threshold bajo es seguro porque la gate de ratio=0.2 aísla los frames desalineados |
+| `pattern_desalign_zigzag_std_px` | 9.0 | **11.5** | Baseline normal de esterilla es patZZ≈9–11; subir a 11.5 elimina falsos (max false positive: 10.7; target frame_0030: 12.1) |
+
+**Resultado validado (196 frames):**
+- frame_0027: STOP (ratio=1.00, dAng=3.08) ✅
+- frame_0028: STOP (ratio=0.23, dAng=3.48) ✅
+- frame_0029: **STOP** (ratio=0.23, dAng=0.72 >= 0.3) ✅ ← nuevo
+- frame_0030: STOP (patZZ=12.1 >= 11.5, via zigzag) ✅
+- Total machine_stop: 37 → **16** (21 falsos positivos eliminados)
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 ### Sesión 2026-06-02 — Tadeo + Claude
 
 #### Cambio 92 — Grabación 1 min pre + 30 s post parada; ventana tolerancias limpia

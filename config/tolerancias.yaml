@@ -77,8 +77,8 @@ models:
     machine_stop_on_tilt: false
     pattern_desalign_enabled: true
     pattern_desalign_missing_ratio: 0.2
-    pattern_desalign_min_angle_deg: 2.5
-    pattern_desalign_zigzag_std_px: 9.0
+    pattern_desalign_min_angle_deg: 0.3
+    pattern_desalign_zigzag_std_px: 11.5
     pattern_desalign_center_std_px: 5.5
     pattern_desalign_center_abs_px: 20.0
   modelo_B:
