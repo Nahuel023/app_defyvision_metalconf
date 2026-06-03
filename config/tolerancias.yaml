@@ -65,11 +65,11 @@ models:
     grid_affine_refinement: true
     extra_min_dist_factor: 1.5
     frame_missing_nok_threshold: 35
-    consecutive_nok_frames: 9999
+    consecutive_nok_frames: 5
     continuous_position_threshold: 0.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 5
-    machine_stop_min_missing: 1
+    machine_stop_min_missing: 2
     machine_stop_same_zone_px: 40.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true

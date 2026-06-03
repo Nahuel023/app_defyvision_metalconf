@@ -45,6 +45,27 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-03 — Tadeo + Claude
 
+#### Cambio 95 — Robustez industrial: habilita FAULT por racha + sube min_missing a 2
+
+**Análisis completo de 196 frames (Patron_Esterilla_METALCONF_editado):**
+
+- `consecutive_nok_frames: 9999 → 5`: el sistema estaba en modo calibración y NUNCA
+  disparaba FAULT por racha NOK (response_time=1999s vs target=1.6s, meets_target=False).
+  Con 5 frames a 5fps = 1.0s de respuesta, dentro del target de 1.6s.
+
+- `machine_stop_min_missing: 1 → 2`: el MachineStopDetector disparaba falsos positivos
+  en grupos de frames normales (0004-0006, 0013-0015, 0196-0197) porque 1 solo agujero
+  marginal del patron quedaba persistentemente fuera del alcance de deteccion en ciertas
+  posiciones del material. Con minimo 2, se requieren al menos 2 agujeros faltantes en la
+  misma zona para activar la parada persistente — filtra el ruido marginal sin perder
+  detecciones reales de punzon roto (que suelen ser 2+ agujeros en la misma columna).
+
+**Verificacion:** 17/17 tests OK.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 94 — Desalineamiento vertical: frame_0029 capturado + reducción de falsos positivos por zigzag
 
 **Problema:** Al analizar `Patron_Esterilla_METALCONF_editado`, los frames 27 y 28 ya
