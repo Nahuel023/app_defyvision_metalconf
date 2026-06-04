@@ -220,8 +220,8 @@ class ScannerController:
             new_state = ScannerState.IDLE
 
         self._transition(new_state)
-        self._io.write(f"{self._id}.solenoid",  False)
-        self._io.write(f"{self._id}.backlight", False)
+        self._io.write(f"{self._id}.solenoid", False)
+        # backlight permanece encendido siempre
 
         if new_state == ScannerState.IDLE:
             self._set_lights(blue=True)
@@ -300,8 +300,8 @@ class ScannerController:
             self._fault_count += 1
 
         logger.warning(f"[{self._id}] FAULT forzado (simulación)")
-        self._io.write(f"{self._id}.solenoid",  False)
-        self._io.write(f"{self._id}.backlight", False)
+        self._io.write(f"{self._id}.solenoid", False)
+        # backlight permanece encendido siempre
         self._set_lights(red=True)   # poll_loop toma el blink
         self._fire_state_changed()
         return True
@@ -602,7 +602,7 @@ class ScannerController:
             model_init = self._io.scanner_config(self._id)["model"]
         if not self._run_startup_selftest(model_init):
             self._io.write(f"{self._id}.solenoid", False)
-            self._io.write(f"{self._id}.backlight", False)
+            # backlight permanece encendido siempre
             self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
@@ -637,7 +637,7 @@ class ScannerController:
                         f"sin frames durante {missing_sec:.1f}s"
                     )
                     self._io.write(f"{self._id}.solenoid", False)
-                    self._io.write(f"{self._id}.backlight", False)
+                    # backlight permanece encendido siempre
                     self._set_lights(red=True)
                     self._transition(ScannerState.ERROR)
                     return
@@ -760,8 +760,8 @@ class ScannerController:
                     self._state   = ScannerState.STOPPED
                     _was_running  = True
             if _was_running:
-                self._io.write(f"{self._id}.solenoid",  False)
-                self._io.write(f"{self._id}.backlight", False)
+                self._io.write(f"{self._id}.solenoid", False)
+                # backlight permanece encendido siempre
                 self._set_lights(red=True)   # rojo fijo = intervención requerida
                 self._stop_event.set()
                 self._fire_state_changed()
@@ -782,8 +782,8 @@ class ScannerController:
                     self._recorder.flush_event("fault", f"racha NOK {streak}")
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
-            self._io.write(f"{self._id}.solenoid",  False)
-            self._io.write(f"{self._id}.backlight", False)
+            self._io.write(f"{self._id}.solenoid", False)
+            # backlight permanece encendido siempre
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
             self._fire_state_changed()
         elif streak >= warn_at:

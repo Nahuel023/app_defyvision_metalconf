@@ -108,6 +108,7 @@ class ScannerPanel(QWidget):
         self._overlay_until_ms: int = 0
         self._nok_threshold: int = 5
         self._manual_mode_display: bool = False
+        self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
 
         self._build_ui()
         self._populate_models()
@@ -318,63 +319,37 @@ class ScannerPanel(QWidget):
         camera_missing = bool(status.get("camera_missing", False))
         camera_missing_sec = float(status.get("camera_missing_sec", 0.0))
         camera_missing_timeout_s = float(status.get("camera_missing_timeout_s", 0.0))
-        state = self._scanner.state
-        mode  = self._scanner.mode
-        is_manual_running = (state == ScannerState.RUNNING
-                             and mode == OperationMode.MANUAL)
 
         self._update_cam_info(
             connected=self._camera.is_connected,
             missing=camera_missing,
         )
 
-        if is_manual_running:
-            if not self._manual_mode_display:
-                self._manual_mode_display = True
-                self.camera_label.setPixmap(QPixmap())
-                self.camera_label.setText("MODO MANUAL\nInspección inactiva")
-                self.camera_label.setStyleSheet(
-                    f"background:#000000;color:{_MUTED};border-radius:6px;"
-                    f"border:2px solid {_BORDER};font-size:14px;font-weight:600;"
-                    "letter-spacing:1px;"
-                )
-            return
-
-        if self._manual_mode_display:
-            self._manual_mode_display = False
-            self.camera_label.clear()
-            self.camera_label.setStyleSheet(
-                f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
-            )
-
-        if camera_missing:
-            phase = "RECONECTANDO..." if camera_missing_sec < camera_missing_timeout_s else "ESCALANDO A ERROR..."
-            self.camera_label.setPixmap(QPixmap())
-            self.camera_label.setText(
-                f"CAMARA DESCONECTADA\n{phase}\n{camera_missing_sec:.1f}s / {camera_missing_timeout_s:.1f}s"
-            )
-            self.camera_label.setStyleSheet(
-                f"background:#1a1200;color:{_WARN};border-radius:6px;"
-                f"border:2px solid {_WARN};font-size:15px;font-weight:700;"
-                "letter-spacing:1px;"
-            )
-            return
-
+        # Determinar qué frame mostrar
         now_ms = int(time.monotonic() * 1000)
         if self._last_overlay is not None and now_ms < self._overlay_until_ms:
             frame = self._last_overlay
         else:
             frame = self._camera.get_frame()
-            if frame is None:
-                return
 
         rect = self.camera_label.contentsRect()
         w = max(440, rect.width() - 4)
         h = max(280, rect.height() - 4)
-        self.camera_label.setStyleSheet(
-            f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
-        )
-        self.camera_label.setPixmap(_bgr_to_pixmap(frame, w, h))
+
+        if frame is not None:
+            # Frame nuevo disponible — actualizar y cachear
+            px = _bgr_to_pixmap(frame, w, h)
+            self._last_shown_pixmap = px
+            self.camera_label.setPixmap(px)
+            self.camera_label.setText("")
+            self.camera_label.setStyleSheet(
+                f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
+            )
+        elif self._last_shown_pixmap is not None:
+            # Sin frame nuevo pero tenemos caché — mantener imagen, nunca negro
+            self.camera_label.setPixmap(self._last_shown_pixmap)
+            self.camera_label.setText("")
+        # else: sin ningún frame todavía (arranque) — dejar el fondo negro inicial
 
     def refresh_status(self) -> None:
         s           = self._scanner.get_status()
