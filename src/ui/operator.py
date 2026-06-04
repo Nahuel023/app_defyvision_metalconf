@@ -345,11 +345,25 @@ class ScannerPanel(QWidget):
             self.camera_label.setStyleSheet(
                 f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
             )
-        elif self._last_shown_pixmap is not None:
-            # Sin frame nuevo pero tenemos caché — mantener imagen, nunca negro
+        elif self._last_shown_pixmap is not None and not camera_missing:
+            # Micro-corte transitorio: mantener último frame sin parpadear
             self.camera_label.setPixmap(self._last_shown_pixmap)
             self.camera_label.setText("")
-        # else: sin ningún frame todavía (arranque) — dejar el fondo negro inicial
+        else:
+            # Sin imagen: nunca conectó, o perdida por tiempo suficiente
+            host = self._cam_host_label(self._camera.index)
+            if camera_missing:
+                secs = f"{camera_missing_sec:.0f}s"
+                line2 = f"Reconectando...  ({secs})"
+            else:
+                line2 = "Conectando..."
+            self.camera_label.setPixmap(QPixmap())
+            self.camera_label.setText(f"CAMARA DESCONECTADA\n{host}\n{line2}")
+            self.camera_label.setStyleSheet(
+                f"background:#0d1117;color:{_WARN};border-radius:6px;"
+                f"border:2px solid {_WARN};font-size:14px;font-weight:700;"
+                "letter-spacing:1px;"
+            )
 
     def refresh_status(self) -> None:
         s           = self._scanner.get_status()
