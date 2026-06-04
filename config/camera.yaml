@@ -2,6 +2,7 @@ scanner_1:
   username: root
   password: defy2026
   open_timeout_s: 10
+  fps: 15
   focus: 26
   exposure: -10
   white_balance: 4500
@@ -19,6 +20,7 @@ scanner_2:
   username: root
   password: defy2026
   open_timeout_s: 10
+  fps: 15
   focus: 38
   exposure: -9
   white_balance: 4500

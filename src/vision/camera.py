@@ -404,7 +404,7 @@ class Camera:
         import http.client
         from urllib.parse import urlparse
 
-        fps_target    = max(0.5, float(self._settings.get("fps", 5)))
+        fps_target    = max(0.5, float(self._settings.get("fps", 15)))
         interval      = 1.0 / fps_target
         timeout       = float(self._settings.get("open_timeout_s", 10.0))
         # Keep showing last good frame for this many seconds before going blank
