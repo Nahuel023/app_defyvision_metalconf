@@ -1525,31 +1525,51 @@ class RecordingTab(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
-        outer.addWidget(scroll)
+        _spl_style = (
+            f"QSplitter::handle {{ background:{_BORDER}; }}"
+        )
 
-        container = QWidget()
-        scroll.setWidget(container)
+        # Splitter vertical: zona superior | browser
+        vsplit = QSplitter(Qt.Orientation.Vertical)
+        vsplit.setHandleWidth(3)
+        vsplit.setStyleSheet(_spl_style)
+        vsplit.setChildrenCollapsible(False)
+        outer.addWidget(vsplit)
 
-        root = QHBoxLayout(container)
-        root.setContentsMargins(14, 14, 14, 14)
-        root.setSpacing(10)
+        # ── Zona superior: controles izq + cámara der ────────────────
+        hsplit = QSplitter(Qt.Orientation.Horizontal)
+        hsplit.setHandleWidth(3)
+        hsplit.setStyleSheet(_spl_style)
+        hsplit.setChildrenCollapsible(False)
 
-        # Columna izquierda: controles de grabación + análisis + browser
         left_w = QWidget()
-        left_w.setFixedWidth(430)
-        left = QVBoxLayout(left_w)
-        left.setContentsMargins(0, 0, 0, 0)
-        left.setSpacing(10)
-        left.addWidget(self._build_recording_section())
-        left.addWidget(self._build_analysis_section())
-        left.addWidget(self._build_browser_section(), stretch=1)
-        root.addWidget(left_w)
+        left_lay = QVBoxLayout(left_w)
+        left_lay.setContentsMargins(14, 14, 8, 8)
+        left_lay.setSpacing(10)
+        left_lay.addWidget(self._build_recording_section())
+        left_lay.addWidget(self._build_analysis_section())
+        left_lay.addStretch()
+        hsplit.addWidget(left_w)
 
-        # Columna derecha: preview de cámara IP
-        root.addWidget(self._build_ip_camera_section(), stretch=1)
+        right_w = QWidget()
+        right_lay = QVBoxLayout(right_w)
+        right_lay.setContentsMargins(8, 14, 14, 8)
+        right_lay.addWidget(self._build_ip_camera_section())
+        hsplit.addWidget(right_w)
+
+        hsplit.setStretchFactor(0, 1)
+        hsplit.setStretchFactor(1, 1)
+        vsplit.addWidget(hsplit)
+
+        # ── Browser: ocupa el resto inferior ─────────────────────────
+        browser_w = QWidget()
+        browser_lay = QVBoxLayout(browser_w)
+        browser_lay.setContentsMargins(14, 4, 14, 14)
+        browser_lay.addWidget(self._build_browser_section())
+        vsplit.addWidget(browser_w)
+
+        vsplit.setStretchFactor(0, 2)
+        vsplit.setStretchFactor(1, 3)
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1582,11 +1602,7 @@ class RecordingTab(QWidget):
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
         lay.setContentsMargins(14, 20, 14, 14)
-        lay.setSpacing(12)
-
-        # ── Config row ────────────────────────────────────────────────
-        cfg = QHBoxLayout()
-        cfg.setSpacing(0)
+        lay.setSpacing(10)
 
         def _chip(label: str) -> QLabel:
             l = QLabel(label)
@@ -1597,29 +1613,28 @@ class RecordingTab(QWidget):
             )
             return l
 
-        cfg.addWidget(_chip("SCANNER"))
-        self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=90)
+        # ── Fila 1: Scanner + modelo ──────────────────────────────────
+        row1 = QHBoxLayout()
+        row1.setSpacing(6)
+        row1.addWidget(_chip("SCANNER"))
+        self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=100)
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
-        cfg.addWidget(self._scanner_combo)
+        row1.addWidget(self._scanner_combo)
+        row1.addSpacing(12)
 
-        cfg.addSpacing(16)
-
-        # ── Model selector: two large toggle buttons (exclusive) ──────
+        # Model toggle buttons
         self._btn_model_esterilla = QPushButton("ESTERILLA")
         self._btn_model_esterilla.setCheckable(True)
-        self._btn_model_esterilla.setFixedHeight(38)
-        self._btn_model_esterilla.setMinimumWidth(148)
+        self._btn_model_esterilla.setFixedHeight(34)
         self._btn_model_microperf = QPushButton("MICROPERFORADO")
         self._btn_model_microperf.setCheckable(True)
-        self._btn_model_microperf.setFixedHeight(38)
-        self._btn_model_microperf.setMinimumWidth(178)
+        self._btn_model_microperf.setFixedHeight(34)
 
         self._model_btn_group = QButtonGroup(self)
         self._model_btn_group.setExclusive(True)
         self._model_btn_group.addButton(self._btn_model_esterilla, 0)
         self._model_btn_group.addButton(self._btn_model_microperf, 1)
 
-        # Hidden combo keeps all downstream logic intact
         self._model_combo = QComboBox()
         self._model_combo.addItems(DISPLAY_NAMES)
         self._model_combo.setVisible(False)
@@ -1638,16 +1653,19 @@ class RecordingTab(QWidget):
         self._btn_model_microperf.toggled.connect(
             lambda checked: self._on_model_btn_toggled("Microperforado", checked)
         )
-
         self._sync_model_buttons()
 
-        cfg.addWidget(self._btn_model_esterilla)
-        cfg.addSpacing(4)
-        cfg.addWidget(self._btn_model_microperf)
-        cfg.addWidget(self._model_combo)  # hidden; kept in layout for enable/disable cycle
+        row1.addWidget(self._btn_model_esterilla)
+        row1.addSpacing(4)
+        row1.addWidget(self._btn_model_microperf)
+        row1.addWidget(self._model_combo)
+        row1.addStretch()
+        lay.addLayout(row1)
 
-        cfg.addSpacing(12)
-        cfg.addWidget(_chip("FPS"))
+        # ── Fila 2: FPS + análisis en vivo + info cámara ─────────────
+        row2 = QHBoxLayout()
+        row2.setSpacing(8)
+        row2.addWidget(_chip("FPS"))
         self._fps_spin = QSpinBox()
         self._fps_spin.setRange(1, 60)
         self._fps_spin.setValue(10)
@@ -1663,33 +1681,27 @@ class RecordingTab(QWidget):
             f"QSpinBox::up-arrow {{ width:8px;height:8px; }}"
             f"QSpinBox::down-arrow {{ width:8px;height:8px; }}"
         )
-        cfg.addWidget(self._fps_spin)
-
-        cfg.addSpacing(16)
+        row2.addWidget(self._fps_spin)
+        row2.addSpacing(8)
         self._live_chk = QCheckBox("Análisis en vivo")
         self._live_chk.setChecked(False)
         self._live_chk.setStyleSheet(f"color:{_TEXT};font-size:12px;")
-        cfg.addWidget(self._live_chk)
-
-        cfg.addStretch()
-
-        # Camera info inline
+        row2.addWidget(self._live_chk)
+        row2.addStretch()
         self._btn_read_cam = QPushButton("Actualizar cámara")
-        self._btn_read_cam.setFixedHeight(30)
+        self._btn_read_cam.setFixedHeight(28)
         self._btn_read_cam.setStyleSheet(
             f"QPushButton {{ background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
-            "border-radius:6px;font-size:10px;font-weight:600;padding:0 12px; }}"
+            "border-radius:5px;font-size:10px;font-weight:600;padding:0 10px; }}"
             f"QPushButton:hover {{ color:{_TEXT};border-color:#64748b; }}"
         )
-        cfg.addWidget(self._btn_read_cam)
-        cfg.addSpacing(8)
+        row2.addWidget(self._btn_read_cam)
         self._cam_info_lbl = QLabel("-")
         self._cam_info_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
         )
-        cfg.addWidget(self._cam_info_lbl)
-
-        lay.addLayout(cfg)
+        row2.addWidget(self._cam_info_lbl)
+        lay.addLayout(row2)
 
         # ── Action row: buttons + state badge ────────────────────────
         act = QHBoxLayout()
