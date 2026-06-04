@@ -11,7 +11,7 @@ plc:
 scanner_1:
   camera_source: "http://192.168.1.3/oneshotimage.jpg"
   model: "modelo_B"
-  allowed_models: ["modelo_B"]   # solo Microperforado
+  allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   inspection: {}
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
