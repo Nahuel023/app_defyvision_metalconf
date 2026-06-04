@@ -56,7 +56,10 @@ def preprocess_for_holes(
         )
         channel = clahe.apply(channel)
 
-    ksize = blur_ksize if blur_ksize % 2 == 1 else blur_ksize + 1
+    if channel.shape[0] == 0 or channel.shape[1] == 0:
+        raise ValueError("preprocess_for_holes: imagen vacía (0 dimensiones)")
+    ksize = max(1, blur_ksize)
+    ksize = ksize if ksize % 2 == 1 else ksize + 1
     blur = cv2.GaussianBlur(channel, (ksize, ksize), 0)
     thresh_mode = cv2.THRESH_BINARY if polarity == "bright" else cv2.THRESH_BINARY_INV
     if use_adaptive:

@@ -41,6 +41,8 @@ def estimate_angle_from_right_edge(
     x0 = max(0, min(x0, w - 1))
 
     roi = img_bgr[:, x0:w]
+    if roi.shape[0] < 5 or roi.shape[1] < 5:
+        return EdgeAlignResult(angle_deg=0.0, used_lines=0)
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
 

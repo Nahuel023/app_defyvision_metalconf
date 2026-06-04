@@ -140,6 +140,9 @@ def _inspect_bgr(
     _preloaded: optional dict with pre-cached keys 'tolerances', 'pattern', 'roi',
     'ema_state'. Provided by Inspector to avoid per-frame disk I/O.
     """
+    if img_full is None or img_full.ndim < 2 or img_full.shape[0] == 0 or img_full.shape[1] == 0:
+        raise ValueError(f"Imagen vacía o inválida: {image_path}")
+
     pre = _preloaded or {}
 
     # Machine stop detector: explicit param takes precedence over _preloaded
@@ -198,6 +201,16 @@ def _inspect_bgr(
     # puede DETENER LA MAQUINA (parada inmediata). Los faltantes, en cambio, solo paran
     # por persistencia. Default False; se activa por modelo.
     machine_stop_on_tilt   = bool(tolerances.get("machine_stop_on_tilt", False))
+    # Desalineacion del patron: si la fraccion de esperados sin matchear (tras el mejor
+    # ajuste) supera este ratio, es un corrimiento/cizalla del patron → DETENER MAQUINA.
+    pattern_desalign_enabled       = bool(tolerances.get("pattern_desalign_enabled", False))
+    pattern_desalign_missing_ratio = float(tolerances.get("pattern_desalign_missing_ratio", 0.5))
+    pattern_desalign_min_angle_deg = float(tolerances.get("pattern_desalign_min_angle_deg", 0.0))
+    pattern_desalign_zigzag_std_px = float(tolerances.get("pattern_desalign_zigzag_std_px", 0.0))
+    pattern_desalign_center_std_px = float(tolerances.get("pattern_desalign_center_std_px", 0.0))
+    pattern_desalign_center_abs_px = float(tolerances.get("pattern_desalign_center_abs_px", 0.0))
+    pattern_desalign_bottom_shift_px = float(tolerances.get("pattern_desalign_bottom_shift_px", 0.0))
+    grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
     extra_min_dist_factor = float(tolerances.get("extra_min_dist_factor", 0.0))
@@ -315,9 +328,28 @@ def _inspect_bgr(
             rotate_points(detected_arr, -sheet_tilt_deg, _cx, _cy)
             if _derotate else detected_arr
         )
+        grid_cells = list(pattern.cells)
+        if grid_extend_rows_after > 0 and grid_cells:
+            max_cj = max(cj for _ci, cj in grid_cells)
+            existing = set(grid_cells)
+            for row_offset in range(1, grid_extend_rows_after + 1):
+                new_cj = max_cj + row_offset
+                same_parity_rows = [
+                    cj for _ci, cj in grid_cells
+                    if cj < new_cj and cj % 2 == new_cj % 2
+                ]
+                if not same_parity_rows:
+                    continue
+                template_cj = max(same_parity_rows)
+                for ci in sorted(ci for ci, cj in grid_cells if cj == template_cj):
+                    cell = (ci, new_cj)
+                    if cell not in existing:
+                        existing.add(cell)
+                        grid_cells.append(cell)
+
         compare_points, compare_cells = grid_compare_points(
             det_for_grid,
-            pattern.cells,
+            grid_cells,
             pattern.dx,
             pattern.dy,
             pattern.phase_x,
@@ -390,8 +422,28 @@ def _inspect_bgr(
             (int(c[0]), int(c[1])): float(r)
             for c, r in zip(pattern.cells, pattern.radii)
         }
+        _r_by_ci_parity: dict[tuple[int, int], list[float]] = {}
+        _r_by_parity: dict[int, list[float]] = {}
+        for c, r in zip(pattern.cells, pattern.radii):
+            ci, cj = int(c[0]), int(c[1])
+            _r_by_ci_parity.setdefault((ci, cj % 2), []).append(float(r))
+            _r_by_parity.setdefault(cj % 2, []).append(float(r))
+
+        def _expected_radius(c: tuple[int, int]) -> float:
+            ci, cj = int(c[0]), int(c[1])
+            exact = _cell_to_r.get((ci, cj))
+            if exact is not None:
+                return exact
+            same_col = _r_by_ci_parity.get((ci, cj % 2))
+            if same_col:
+                return float(np.median(same_col))
+            same_parity = _r_by_parity.get(cj % 2)
+            if same_parity:
+                return float(np.median(same_parity))
+            return _split_r
+
         expected_types = [
-            "small" if _cell_to_r.get((int(c[0]), int(c[1])), 0.0) < _split_r else "large"
+            "small" if _expected_radius(c) < _split_r else "large"
             for c in compare_cells
         ]
 
@@ -579,6 +631,58 @@ def _inspect_bgr(
         _ms_reason   = f"PATRON DESALINEADO - VERTICALIDAD {sheet_tilt_deg:+.1f} grados"
     if tilt_warn:
         final_status = "NOK"   # inclinado siempre NOK (pare o no)
+
+    # DESALINEACION del patron (corrimiento de verticalidad / cizalla): cuando el patron
+    # NO se puede ajustar como grilla, queda una fraccion MASIVA de esperados sin matchear
+    # que ni la de-rotacion ni la fase ni el affine corrigen → es una falla geometrica real
+    # (desalineacion mecanica), NO faltantes individuales. Un solo frame alcanza para parar.
+    #   - chapa inclinada: la de-rotacion la ajusta → missing bajo → NO entra aca.
+    #   - metal corrido: la fase lo encuentra → missing bajo → NO entra aca.
+    #   - pocos faltantes (punzon/gap): fraccion baja → NO entra aca.
+    # Se excluye cuando hay tilt_warn (chapa inclinada NUNCA para).
+    if pattern_desalign_enabled and not tilt_warn and report.expected > 0:
+        _missing_ratio = report.missing / report.expected
+        _delta_ang = (
+            float(getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0))
+            if centering is not None else 0.0
+        )
+        if (_missing_ratio > pattern_desalign_missing_ratio
+                and _delta_ang >= pattern_desalign_min_angle_deg):
+            machine_stop = True
+            _ms_reason   = (
+                f"PATRON DESALINEADO ({report.missing}/{report.expected} sin ajustar, "
+                f"dAng={_delta_ang:.1f} deg)"
+            )
+            final_status = "NOK"
+        elif (
+            centering is not None
+            and pattern_desalign_zigzag_std_px > 0.0
+            and pattern_desalign_center_std_px > 0.0
+            and pattern_desalign_center_abs_px > 0.0
+            and pattern_zigzag_std_px >= pattern_desalign_zigzag_std_px
+            and pattern_center_zigzag_std_px >= pattern_desalign_center_std_px
+            and pattern_center_zigzag_max_px >= pattern_desalign_center_abs_px
+        ):
+            machine_stop = True
+            _ms_reason   = (
+                f"PATRON DESALINEADO (zigzag={pattern_zigzag_std_px:.1f}px, "
+                f"centro={pattern_center_zigzag_std_px:.1f}px)"
+            )
+            final_status = "NOK"
+        elif pattern_desalign_bottom_shift_px > 0.0 and len(holes) >= 20:
+            _hole_xy = np.array([(h.x, h.y) for h in holes], dtype=np.float32)
+            _mid = _hole_xy[
+                (_hole_xy[:, 1] >= img_h * 0.33)
+                & (_hole_xy[:, 1] < img_h * 0.66)
+            ]
+            _bot = _hole_xy[_hole_xy[:, 1] >= img_h * 0.66]
+            if len(_mid) >= 10 and len(_bot) >= 10:
+                _bottom_shift = abs(float(np.median(_bot[:, 0]) - np.median(_mid[:, 0])))
+                if _bottom_shift >= pattern_desalign_bottom_shift_px:
+                    machine_stop = True
+                    _ms_reason = f"PATRON DESALINEADO (corrimiento inferior={_bottom_shift:.1f}px)"
+                    final_status = "NOK"
+
     if machine_stop:
         final_status = "NOK"
 
