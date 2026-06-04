@@ -246,7 +246,31 @@ def _inspect_bgr(
 
     img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
 
-    img = apply_roi(img_aligned, roi) if roi is not None else img_aligned
+    if roi is not None:
+        try:
+            img = apply_roi(img_aligned, roi)
+        except ValueError as exc:
+            raise ValueError(
+                f"[{model}] ROI inválida para frame {img_aligned.shape[1]}x{img_aligned.shape[0]}: {exc}. "
+                f"Recalibrá ROI con: python -m src.main define-roi --model {model}"
+            ) from exc
+    else:
+        img = img_aligned
+
+    # Warn if pattern was built at a different resolution than the current frame.
+    # Critical for non-grid patterns (absolute coords); grid patterns are more tolerant
+    # (dx/dy/phase scale-invariant) but still wrong if scale changed significantly.
+    if pattern.image_size and pattern.image_size != (0, 0):
+        pat_w, pat_h = pattern.image_size
+        frame_w, frame_h = img.shape[1], img.shape[0]
+        if pat_w != frame_w or pat_h != frame_h:
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "[%s] Patrón calibrado a %dx%d pero frame actual (post-ROI) es %dx%d. "
+                "Resultados incorrectos — recalibrá con: "
+                "build-pattern --model %s --scanner <scanner_id> --img <ref.jpg>",
+                model, pat_w, pat_h, frame_w, frame_h, model,
+            )
 
     preprocess_kw = dict(
         threshold=threshold, use_channel=use_channel, polarity=polarity,

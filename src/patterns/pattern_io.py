@@ -1,7 +1,10 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple, Optional
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,11 @@ def find_pattern_path(model: str, scanner_id: str | None = None) -> Path:
         p = Path("data") / "patterns" / scanner_id / model / "holes.json"
         if p.exists():
             return p
+        _log.warning(
+            "No hay patrón específico para %s/%s — usando patrón global data/patterns/%s/holes.json. "
+            "Recalibrá con: build-pattern --model %s --scanner %s --img <ref.jpg>",
+            scanner_id, model, model, model, scanner_id,
+        )
     return Path("data") / "patterns" / model / "holes.json"
 
 

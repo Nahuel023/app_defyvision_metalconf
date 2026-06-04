@@ -43,6 +43,47 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-04 (continuación 2) — Tadeo + Claude
+
+#### Cambio 106 — Robustez: warnings explícitos para desajuste de resolución / calibración
+
+**Problema raíz (reportado por Codex):** `scanner_2/modelo_B` no tenía ni `roi.json` ni `holes.json`.
+El sistema caía al patrón global (`data/patterns/modelo_B/holes.json`) construido sobre imagen 650×1077.
+Los frames nuevos de la cámara llegan en 640×480, así que:
+- La ROI global `{x:710, y:3, w:650, h:1077}` aplicada a un frame 640×480 crashea con `ValueError`
+  (x1=710 ≥ x2=640 → ROI completamente fuera del frame).
+- Incluso si no crashea (frames 1280×720), el recorte queda mal dimensionado respecto al patrón → todos los agujeros "faltantes" → siempre NOK.
+
+**Cambios aplicados:**
+
+1. `src/patterns/pattern_io.py` — `find_pattern_path`:
+   - Agrega `WARNING` explícito cuando usa el patrón global como fallback (no hay scanner-specific).
+   - Mensaje incluye el comando exacto para recalibrar.
+
+2. `src/patterns/roi.py` — `apply_roi`:
+   - Agrega `WARNING` cuando la ROI se recorta (solicitada más grande que el frame).
+   - El recorte silencioso ocultaba el desajuste de resolución.
+
+3. `src/inspection.py` — `_inspect_bgr`:
+   - Envuelve `apply_roi` en try/except: si la ROI está completamente fuera del frame (crash)
+     re-lanza con mensaje descriptivo que indica modelo y comando de recalibración.
+   - Agrega `WARNING` si `pattern.image_size` no coincide con el frame post-ROI
+     (patrón calibrado a otra resolución).
+
+4. `data/patterns/scanner_2/modelo_B/roi.json` — creado con `{x:0, y:0, w:640, h:480}`:
+   - ROI full-frame para frames 640×480 (punto de partida seguro, no crashea).
+   - **Pendiente:** recalibrar con `define-roi` + `build-pattern` usando frame real de la cámara.
+
+**Pendiente crítico:** falta `data/patterns/scanner_2/modelo_B/holes.json`.
+Para crear el patrón específico capturar un frame OK desde la UI (GRABACIÓN) y ejecutar:
+```
+.\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_B --scanner scanner_2 --img "ruta/al/frame_ok.png"
+```
+
+**Archivos modificados:** `src/patterns/pattern_io.py`, `src/patterns/roi.py`, `src/inspection.py`, `data/patterns/scanner_2/modelo_B/roi.json`
+
+---
+
 ### Sesión 2026-06-04 (continuación) — Tadeo + Claude
 
 #### Cambio 105 — Análisis: processEvents antes de cada frame (progreso siempre visible)
@@ -168,6 +209,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 ---
 
 ### Sesión 2026-06-04 — Tadeo + Claude
+
+#### Cambio 98 — Falla rápida cuando la ROI queda fuera de imagen
+
+**Problema:** Al analizar carpetas capturadas con una cámara nueva de resolución/encuadre
+distinto, el sistema podía quedar "colgado" mucho tiempo si la ROI cargada para ese
+modelo/scanner quedaba totalmente fuera del frame real. En ese caso `apply_roi()`
+devolvía un recorte vacío (`width=0`) y OpenCV terminaba entrando a `CLAHE` sobre una
+imagen inválida en vez de cortar con un error claro.
+
+**Cambio aplicado:**
+- `src/patterns/roi.py`: `apply_roi()` ahora valida el bounding box contra el tamaño
+  real del frame, recorta a límites válidos y lanza `ValueError` explícito si la ROI
+  queda vacía o fuera de imagen.
+- `src/pipeline/preprocess.py`: validación temprana de imagen vacía antes de cualquier
+  operación de OpenCV, para no volver a entrar al pipeline con dimensiones `0xN` o `Nx0`.
+
+**Resultado:** `run-image` / `run-folder` ya no aparentan "quedarse pensando" cuando la
+calibración no corresponde al frame; ahora fallan en segundos con un mensaje del tipo:
+`ROI fuera de imagen o vacia (... image=640x480)`, haciendo evidente que falta
+recalibrar ROI/patrón para esa cámara.
+
+**Archivos modificados:** `src/patterns/roi.py`, `src/pipeline/preprocess.py`
+
+---
 
 #### Cambio 97 — Cámaras IP fijas por scanner (sin USB)
 
