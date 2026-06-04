@@ -1550,6 +1550,7 @@ class RecordingTab(QWidget):
         self._model_combo.currentTextChanged.connect(self._update_model_chip)
 
         self._update_nav_state()
+        self._sync_model_buttons()   # sincroniza grab + ana después de construir ambas páginas
         self._update_model_chip(self._model_combo.currentText())
         self._set_rec_badge("standby", 0, None)
 
@@ -1573,16 +1574,21 @@ class RecordingTab(QWidget):
         lay.addWidget(self._cam_panel, stretch=1)
         return w
 
-    def _build_ana_page(self) -> QWidget:
-        """Página ANÁLISIS: sección análisis + browser."""
-        w = QWidget()
-        w.setStyleSheet(f"background:{_DARK};")
-        lay = QVBoxLayout(w)
+    def _build_ana_page(self) -> QScrollArea:
+        """Página ANÁLISIS: sección análisis + browser (con scroll)."""
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        lay = QVBoxLayout(content)
         lay.setContentsMargins(14, 14, 14, 14)
         lay.setSpacing(10)
         lay.addWidget(self._build_analysis_section())
         lay.addWidget(self._build_browser_section(), stretch=1)
-        return w
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+        scroll.setWidget(content)
+        return scroll
 
     def _build_recording_section(self) -> QGroupBox:
         grp = QGroupBox("GRABACIÓN")
@@ -1918,6 +1924,43 @@ class RecordingTab(QWidget):
         lay.setContentsMargins(16, 20, 16, 16)
         lay.setSpacing(12)
 
+        # ── Fila 0: selector de modelo (replica de GRABACIÓN) ──────────
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+
+        model_chip = QLabel("TIPO DE PLACA")
+        model_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;margin-right:4px;"
+        )
+        model_row.addWidget(model_chip)
+
+        self._btn_model_esterilla_ana = QPushButton("ESTERILLA")
+        self._btn_model_esterilla_ana.setCheckable(True)
+        self._btn_model_esterilla_ana.setFixedHeight(34)
+        self._btn_model_microperf_ana = QPushButton("MICROPERFORADO")
+        self._btn_model_microperf_ana.setCheckable(True)
+        self._btn_model_microperf_ana.setFixedHeight(34)
+
+        self._model_btn_group_ana = QButtonGroup(self)
+        self._model_btn_group_ana.setExclusive(True)
+        self._model_btn_group_ana.addButton(self._btn_model_esterilla_ana, 0)
+        self._model_btn_group_ana.addButton(self._btn_model_microperf_ana, 1)
+
+        self._btn_model_esterilla_ana.toggled.connect(
+            lambda checked: self._on_model_btn_toggled("Esterilla", checked)
+        )
+        self._btn_model_microperf_ana.toggled.connect(
+            lambda checked: self._on_model_btn_toggled("Microperforado", checked)
+        )
+
+        model_row.addWidget(self._btn_model_esterilla_ana)
+        model_row.addSpacing(4)
+        model_row.addWidget(self._btn_model_microperf_ana)
+        model_row.addStretch()
+        lay.addLayout(model_row)
+
         # ── Fila 1: botones de acción ─────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
@@ -2223,7 +2266,7 @@ class RecordingTab(QWidget):
 
         # ── Image viewer ──────────────────────────────────────────────
         self._img_view = ZoomableImageView("Sin frames")
-        self._img_view.setMinimumHeight(600)
+        self._img_view.setMinimumHeight(400)
         lay.addWidget(self._img_view, stretch=1)
 
         return grp
@@ -2393,17 +2436,15 @@ class RecordingTab(QWidget):
     # ------------------------------------------------------------------
 
     def _set_analysis_running(self, running: bool) -> None:
-        """Bloquea/activa los controles que NO deben cambiar durante el análisis.
-
-        Mientras se analiza, el tipo de placa (Esterilla/Microperforado) y el scanner
-        quedan bloqueados para garantizar que todos los frames se evalúen contra el mismo
-        modelo. El botón Detener queda activo solo mientras corre el análisis.
-        """
+        """Bloquea/activa los controles que NO deben cambiar durante el análisis."""
         self._btn_analyze.setEnabled(not running and bool(self._frame_paths))
         self._btn_stop_analyze.setEnabled(running)
         self._btn_load.setEnabled(not running)
         self._btn_model_esterilla.setEnabled(not running)
         self._btn_model_microperf.setEnabled(not running)
+        if hasattr(self, "_btn_model_esterilla_ana"):
+            self._btn_model_esterilla_ana.setEnabled(not running)
+            self._btn_model_microperf_ana.setEnabled(not running)
         if hasattr(self, "_scanner_combo"):
             self._scanner_combo.setEnabled(not running)
 
@@ -2449,8 +2490,19 @@ class RecordingTab(QWidget):
 
     def _on_ana_progress(self, done: int, total: int) -> None:
         self._ana_progress.setText(f"Analizando  {done} / {total}...")
+        # Mostrar el frame más reciente desde disco (sin overlay aún)
+        if done > 0 and done <= len(self._frame_paths):
+            self._show_frame(done - 1)
 
     def _on_ana_done(self, results: list) -> None:
+        try:
+            self._on_ana_done_inner(results)
+        except Exception as exc:
+            logger.error(f"[Análisis] error al procesar resultados: {exc}", exc_info=True)
+            self._ana_progress.setText(f"Error al procesar resultados: {exc}")
+            self._set_analysis_running(False)
+
+    def _on_ana_done_inner(self, results: list) -> None:
         self._results = results
         ok  = sum(1 for r in results if r.status == "OK")
         nok = len(results) - ok
@@ -2800,8 +2852,16 @@ class RecordingTab(QWidget):
 
     def _sync_model_buttons(self) -> None:
         current = self._model_combo.currentText()
-        for name, btn in (("Esterilla", self._btn_model_esterilla),
-                          ("Microperforado", self._btn_model_microperf)):
+        pairs = [
+            ("Esterilla",      self._btn_model_esterilla),
+            ("Microperforado", self._btn_model_microperf),
+        ]
+        if hasattr(self, "_btn_model_esterilla_ana"):
+            pairs += [
+                ("Esterilla",      self._btn_model_esterilla_ana),
+                ("Microperforado", self._btn_model_microperf_ana),
+            ]
+        for name, btn in pairs:
             selected = (name == current)
             btn.blockSignals(True)
             btn.setChecked(selected)
@@ -5293,7 +5353,7 @@ class ServiceWindow(QMainWindow):
         cam_tabs.setStyleSheet(_sub_style)
         cam_tabs.addTab(self._rec_tab._grab_page, "  GRABACIÓN  ")
         cam_tabs.addTab(self._rec_tab._ana_page,  "  ANÁLISIS  ")
-        cam_tabs.addTab(self._cam_tab,             "  CALIBRACIÓN  ")
+        cam_tabs.addTab(self._cam_tab,             "  CONEXIÓN  ")
 
         self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
         self._tabs.addTab(self._diag_tab,   "  Diagnóstico  ")
