@@ -1526,49 +1526,48 @@ class RecordingTab(QWidget):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        _spl_style = f"QSplitter::handle {{ background:{_BORDER}; }}"
+        tabs = QTabWidget()
+        tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border:none; background:{_DARK}; }}"
+            f"QTabBar::tab {{ background:{_PANEL};color:{_MUTED};"
+            "padding:8px 20px;font-size:12px;font-weight:600; }"
+            f"QTabBar::tab:selected {{ background:{_DARK};color:{_TEXT};"
+            f"border-bottom:2px solid {_ACCENT}; }}"
+        )
+        outer.addWidget(tabs)
 
-        # Splitter vertical: zona superior | browser
-        vsplit = QSplitter(Qt.Orientation.Vertical)
-        vsplit.setHandleWidth(3)
-        vsplit.setStyleSheet(_spl_style)
-        vsplit.setChildrenCollapsible(False)
-        outer.addWidget(vsplit)
+        # ── Tab 1: GRABACIÓN ─────────────────────────────────────────
+        grab_w = QWidget()
+        grab_w.setStyleSheet(f"background:{_DARK};")
+        grab_lay = QHBoxLayout(grab_w)
+        grab_lay.setContentsMargins(14, 14, 14, 14)
+        grab_lay.setSpacing(14)
 
-        # ── Zona superior: controles + cámara colapsable ─────────────
-        top_w = QWidget()
-        top_w.setStyleSheet(f"background:{_DARK};")
-        top_lay = QHBoxLayout(top_w)
-        top_lay.setContentsMargins(14, 14, 14, 8)
-        top_lay.setSpacing(10)
+        # Columna izquierda: controles de grabación
+        ctrl_w = QWidget()
+        ctrl_lay = QVBoxLayout(ctrl_w)
+        ctrl_lay.setContentsMargins(0, 0, 0, 0)
+        ctrl_lay.setSpacing(10)
+        ctrl_lay.addWidget(self._build_recording_section())
+        ctrl_lay.addStretch()
+        grab_lay.addWidget(ctrl_w)
 
-        # Columna izquierda: siempre visible
-        left_w = QWidget()
-        left_lay = QVBoxLayout(left_w)
-        left_lay.setContentsMargins(0, 0, 0, 0)
-        left_lay.setSpacing(10)
-        left_lay.addWidget(self._build_recording_section())
-        left_lay.addWidget(self._build_analysis_section())
-        left_lay.addStretch()
-        top_lay.addWidget(left_w, stretch=1)
-
-        # Panel cámara: oculto por defecto, toggle desde botón
+        # Columna derecha: cámara siempre visible
         self._cam_panel = self._build_ip_camera_section()
-        self._cam_panel.setVisible(False)
-        self._cam_panel.setMinimumWidth(320)
-        top_lay.addWidget(self._cam_panel, stretch=1)
+        grab_lay.addWidget(self._cam_panel, stretch=1)
 
-        vsplit.addWidget(top_w)
+        tabs.addTab(grab_w, "GRABACIÓN")
 
-        # ── Browser ───────────────────────────────────────────────────
-        browser_w = QWidget()
-        browser_lay = QVBoxLayout(browser_w)
-        browser_lay.setContentsMargins(14, 4, 14, 14)
-        browser_lay.addWidget(self._build_browser_section())
-        vsplit.addWidget(browser_w)
+        # ── Tab 2: ANÁLISIS ──────────────────────────────────────────
+        ana_w = QWidget()
+        ana_w.setStyleSheet(f"background:{_DARK};")
+        ana_lay = QVBoxLayout(ana_w)
+        ana_lay.setContentsMargins(14, 14, 14, 14)
+        ana_lay.setSpacing(10)
+        ana_lay.addWidget(self._build_analysis_section())
+        ana_lay.addWidget(self._build_browser_section(), stretch=1)
 
-        vsplit.setStretchFactor(0, 2)
-        vsplit.setStretchFactor(1, 3)
+        tabs.addTab(ana_w, "ANÁLISIS")
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1591,7 +1590,6 @@ class RecordingTab(QWidget):
         self._spin_to.valueChanged.connect(self._update_export_label)
         self._overlay_toggle.toggled.connect(self._on_overlay_toggled)
         self._model_combo.currentTextChanged.connect(self._update_model_chip)
-        self._btn_cam_toggle.toggled.connect(self._on_cam_toggle)
 
         self._update_nav_state()
         self._update_model_chip(self._model_combo.currentText())
@@ -1702,18 +1700,6 @@ class RecordingTab(QWidget):
         )
         row2.addWidget(self._cam_info_lbl)
 
-        # Botón toggle de la cámara (se conecta después de crear _cam_panel)
-        self._btn_cam_toggle = QPushButton("▶  Ver cámara")
-        self._btn_cam_toggle.setCheckable(True)
-        self._btn_cam_toggle.setFixedHeight(28)
-        self._btn_cam_toggle.setStyleSheet(
-            f"QPushButton {{ background:{_PANEL};color:{_MUTED};border:1px solid {_BORDER};"
-            "border-radius:5px;font-size:10px;font-weight:600;padding:0 10px; }}"
-            f"QPushButton:checked {{ background:#1e3a5f;color:#60a5fa;"
-            f"border-color:#3b82f6; }}"
-            f"QPushButton:hover {{ color:{_TEXT}; }}"
-        )
-        row2.addWidget(self._btn_cam_toggle)
         lay.addLayout(row2)
 
         # ── Action row: buttons + state badge ────────────────────────
@@ -2846,10 +2832,6 @@ class RecordingTab(QWidget):
         self._model_combo.blockSignals(False)
         self._sync_model_buttons()
         self._update_model_chip(name)
-
-    def _on_cam_toggle(self, checked: bool) -> None:
-        self._cam_panel.setVisible(checked)
-        self._btn_cam_toggle.setText("▼  Ocultar cámara" if checked else "▶  Ver cámara")
 
     def _on_scanner_changed(self, sid: str) -> None:
         # El modelo NO cambia automáticamente al cambiar de scanner.
