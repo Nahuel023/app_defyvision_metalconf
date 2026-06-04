@@ -1647,10 +1647,10 @@ class RecordingTab(QWidget):
             "border-radius:5px;padding:4px 22px 4px 6px;font-size:12px;max-width:72px; }"
             f"QSpinBox::up-button {{ subcontrol-origin:border;subcontrol-position:top right;"
             f"width:18px;border-left:1px solid {_BORDER};border-bottom:1px solid {_BORDER};"
-            f"border-top-right-radius:5px;background:{_CARD}; }}"
+            f"border-top-right-radius:5px;background:{_DARK}; }}"
             f"QSpinBox::down-button {{ subcontrol-origin:border;subcontrol-position:bottom right;"
             f"width:18px;border-left:1px solid {_BORDER};border-top:1px solid {_BORDER};"
-            f"border-bottom-right-radius:5px;background:{_CARD}; }}"
+            f"border-bottom-right-radius:5px;background:{_DARK}; }}"
             f"QSpinBox::up-arrow {{ width:8px;height:8px; }}"
             f"QSpinBox::down-arrow {{ width:8px;height:8px; }}"
         )
