@@ -43,6 +43,130 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-04 (continuación) — Tadeo + Claude
+
+#### Cambio 105 — Análisis: processEvents antes de cada frame (progreso siempre visible)
+
+**Problema raíz confirmado:** `inspect_image` tarda 300–1500 ms por frame (dependiendo de la alineación). Durante ese tiempo el hilo principal está bloqueado y Qt no puede repintar la barra de progreso. El usuario veía "0%" toda la sesión aunque el análisis sí corría.
+
+**Solución:** en `_analyze_one_frame`, mostrar `"Analizando frame N/M (X%)..."` con `QApplication.processEvents()` **antes** de llamar `inspect_image`. Esto fuerza el repintado mientras el hilo todavía está libre. Después del frame, actualizar texto y barra con el resultado real. También 10 ms de pausa entre frames (antes 1 ms) para que Qt procese eventos de repintado.
+
+- `src/ui/service.py` → `_analyze_one_frame`: actualiza barra + processEvents ANTES de inspect_image; luego actualiza con resultado; `logger.info` por frame (visible en Logs tab con nivel INFO).
+
+**Archivos modificados:** `src/ui/service.py`  
+**Commit:** `19bc380`
+
+---
+
+#### Cambio 104 — Análisis: QTimer.singleShot por frame (elimina dependencia de signals cross-thread)
+
+**Problema diagnosticado:** el `_AnalysisWorker` (QThread) emitía signals de progreso desde el hilo del worker hacia el hilo principal. La cámara IP saturaba el event loop del hilo principal con ~15 frames/segundo, lo que interfería con la entrega de esos signals. Resultado: el análisis completaba en background pero los signals de progreso nunca se despachaban visiblemente.
+
+**Solución:** eliminar completamente `_AnalysisWorker` del flujo de análisis. Reemplazar por `QTimer.singleShot` que corre en el hilo principal:
+
+- `_on_analyze` carga patrón/tolerancias una vez y dispara `QTimer.singleShot(5, _analyze_one_frame)`
+- `_analyze_one_frame` procesa UN frame por llamada, actualiza barra directamente, y dispara el siguiente
+- `_on_stop_analyze` setea flag `_ana_running = False` para detener en el próximo frame
+- Estado de análisis en nuevos atributos: `_ana_running`, `_ana_frame_idx`, `_ana_model`, `_ana_scanner_id`, `_ana_pre`
+
+**Decisión de diseño:** mantener `_AnalysisWorker` en el archivo para compatibilidad con código antiguo (modo en vivo), pero el flujo principal de análisis ya no lo usa.
+
+**Archivos modificados:** `src/ui/service.py`  
+**Commit:** `65452ad`
+
+---
+
+#### Cambio 103 — Análisis: QProgressBar + controles siempre visibles fuera del scroll
+
+**Problema:** los controles de análisis (botones, barra de progreso, label de estado) quedaban dentro del `QScrollArea` y podían estar fuera de vista si el usuario había scrolleado hacia el visor de imágenes.
+
+**Cambios en `src/ui/service.py`:**
+- `_build_ana_page()`: rediseñada con dos zonas separadas. Parte superior fija (no scrolleable): `_build_analysis_section()`. Parte inferior scrolleable: `_build_browser_section()` dentro de su propio `QScrollArea`.
+- `_build_analysis_section()`: agrega `_ana_progress_bar` (QProgressBar) que aparece al iniciar el análisis, muestra porcentaje real, y cambia color: azul=analizando, verde=OK, rojo=error.
+- Los labels de progreso (`_ana_progress`) muestran estado coloreado en cada etapa.
+- `QProgressBar` importado en la lista de imports de PyQt6.
+
+**Archivos modificados:** `src/ui/service.py`  
+**Commit:** `16c9521`
+
+---
+
+#### Cambio 102 — Análisis worker: secuencial, progreso por frame, sin race condition
+
+**Problema:** el worker paralelo (`ThreadPoolExecutor`) compartía el dict `_pre` entre hilos. El campo `ema_state` dentro de `_pre` era modificado por `align_image_by_right_edge` en cada frame — race condition que causaba comportamiento impredecible y cuelgues aleatorios.
+
+**Cambios en `_AnalysisWorker.run()`:**
+- Eliminado `ThreadPoolExecutor` y procesamiento paralelo.
+- Siempre secuencial (un frame a la vez, en orden).
+- `_pre` incluye ahora `"ema_state": {}` para el suavizado de ángulo EMA.
+- `progress.emit` en **cada frame** (antes cada `n//50`), para que la UI muestre avance en tiempo real.
+- `machine_stop_enabled` sigue soportado, solo añade el detector al dict `_pre`.
+
+**Archivos modificados:** `src/ui/service.py`  
+**Commit:** `0c7cc43`
+
+---
+
+#### Cambio 101 — Service UI: scroll ANÁLISIS, selector modelo en ambas pestañas, sub-tab CONEXIÓN
+
+**Cambios en `src/ui/service.py`:**
+- `_build_ana_page()`: devuelve `QScrollArea` (vertical, sin scrollbar horizontal).
+- `_build_analysis_section()`: agrega selector ESTERILLA / MICROPERFORADO (duplicado del de GRABACIÓN), sincronizado con `_model_combo` via `_sync_model_buttons()`.
+- `_sync_model_buttons()`: sincroniza todos los sets de botones (grab + ana).
+- `_set_analysis_running()`: también bloquea/desbloquea los botones de modelo en ANÁLISIS.
+- `_on_ana_progress()`: muestra porcentaje y refresca imagen cada 3 frames desde disco.
+- `_on_ana_done()`: envuelto en `try/except` con log claro (corrige "nunca termina" silencioso).
+- Sub-tab "CALIBRACIÓN" renombrado a "CONEXIÓN".
+- `_img_view.setMinimumHeight`: 600 → 400.
+
+**Archivos modificados:** `src/ui/service.py`  
+**Commit:** `ac6c078`
+
+---
+
+#### Cambio 100 — Cámara IP: robustez keep-alive, grabación compatible con IP, auto-conexión
+
+**Contexto:** las cámaras IP usan `oneshotimage.jpg` (snapshot HTTP, no MJPEG). El código anterior usaba `cv2.VideoCapture` que no podía conectar estas cámaras.
+
+**Cambios:**
+- `src/vision/camera.py`: `_is_snapshot_source()` detecta URLs `.jpg`/`.jpeg`. `_snapshot_loop()` usa `http.client.HTTPConnection` con keep-alive TCP, retencion de último frame válido (3s), backoff 0.1→1.6s. `is_connected` usa flag `_snapshot_ok`. FPS por defecto: 5 → 15.
+- `src/ui/service.py` — `RecordingTab`:
+  - `_auto_connect_scanner_camera(sid)`: lee `camera_source` del io_map y conecta automáticamente al abrir la pestaña.
+  - `_HTTPSnapshotReader`: polling de snapshot HTTP con keep-alive (reemplaza `_MJPEGReader` para URLs snapshot).
+  - `_update_fps_cap()`: cap del spinbox de FPS al FPS real medido de la cámara.
+  - `_fps_cap_timer`: QTimer cada 2s para actualizar el cap.
+  - FPS default snapshot: 150ms → 67ms (15 fps).
+- `config/camera.yaml`: añadido `fps: 15` para scanner_1 y scanner_2.
+
+**Archivos modificados:** `src/vision/camera.py`, `src/ui/service.py`, `config/camera.yaml`
+
+---
+
+#### Cambio 99 — Backlight siempre encendido (Y12/Y13 nunca se apagan)
+
+**Problema:** al detener el scanner o activar FAULT, el `ScannerController` apagaba el backlight (`light_backlight = False`). El operario necesita que el backlight esté encendido permanentemente para inspección continua.
+
+**Cambio:** eliminados todos los 6 `self._io.write(f"{self._id}.backlight", False)` del `ScannerController` (en `stop()`, `force_fault()`, fallo de selftest, timeout de cámara, machine stop y FAULT por racha).
+
+**Archivos modificados:** `src/controller/scanner_controller.py`
+
+---
+
+#### Cambio 98 — Service UI: tab "Cámara" con sub-tabs GRABACIÓN / ANÁLISIS / CONEXIÓN
+
+**Motivación:** la pestaña de Grabación era un widget monolítico, demasiado ancha y sin scroll. El análisis compartía espacio con la cámara.
+
+**Cambios en `src/ui/service.py`:**
+- `RecordingTab._build_ui()`: ya no crea su propio layout visible. Expone `_grab_page` y `_ana_page` como widgets independientes que `ServiceWindow` monta.
+- `_build_grab_page()`: HBox con controles (izquierda) + preview cámara IP (derecha).
+- `ServiceWindow._build_ui()`: elimina el tab independiente "Grabación". Crea `cam_tabs = QTabWidget()` con 3 sub-tabs: GRABACIÓN, ANÁLISIS, CONEXIÓN. Los monta bajo el tab principal "Cámara".
+- Sub-tab style: fuente más grande, indicador de selección con borde inferior azul.
+- `QSplitter` agregado a imports de PyQt6.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
 ### Sesión 2026-06-04 — Tadeo + Claude
 
 #### Cambio 97 — Cámaras IP fijas por scanner (sin USB)
