@@ -402,12 +402,12 @@ class Camera:
 
     def _snapshot_loop(self) -> None:
         import http.client
+        import queue
         from urllib.parse import urlparse
 
-        fps_target    = max(0.5, float(self._settings.get("fps", 15)))
+        fps_target    = max(0.5, float(self._settings.get("fps", 25)))
         interval      = 1.0 / fps_target
         timeout       = float(self._settings.get("open_timeout_s", 10.0))
-        # Keep showing last good frame for this many seconds before going blank
         stale_timeout = float(self._settings.get("stale_frame_timeout_s", 3.0))
         auth_headers  = self._build_auth_headers()
 
@@ -417,97 +417,127 @@ class Camera:
         if parsed.query:
             req_path += "?" + parsed.query
 
+        # Decode worker: recibe bytes crudos y decodifica en paralelo al siguiente GET.
+        # maxsize=2 descarta frames viejos si el worker no da abasto (prefiere frescura).
+        _raw_q: queue.Queue = queue.Queue(maxsize=2)
+
+        def _decode_worker() -> None:
+            while True:
+                item = _raw_q.get()
+                if item is None:
+                    break
+                data, t_req = item
+                arr   = np.frombuffer(data, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is None:
+                    continue
+                if self._frame_validator is not None and not self._frame_validator(frame):
+                    logger.warning("Camera %s: frame duplicado detectado",
+                                   self._source_label())
+                    continue
+                with self._lock:
+                    self._frame       = frame
+                    self._snapshot_ok = True
+                self._frame_times.append(time.monotonic())
+
+        dec_thread = threading.Thread(
+            target=_decode_worker,
+            daemon=True,
+            name=f"cam-dec-{self._source_label()}",
+        )
+        dec_thread.start()
+
         conn:      http.client.HTTPConnection | None = None
         fail_count = 0
         last_ok_t  = 0.0
 
         logger.info(
-            "Camera %s: modo snapshot keep-alive @ %.1f fps",
+            "Camera %s: modo snapshot keep-alive @ %.1f fps (decode async)",
             self._source_label(), fps_target,
         )
 
-        while self._running:
-            t0 = time.monotonic()
-            try:
-                # Reusar conexión TCP; abrir solo si no existe o fue cerrada
-                if conn is None:
-                    conn = http.client.HTTPConnection(host, timeout=timeout)
+        try:
+            while self._running:
+                t0 = time.monotonic()
+                try:
+                    if conn is None:
+                        conn = http.client.HTTPConnection(host, timeout=timeout)
 
-                conn.request("GET", req_path, headers=auth_headers)
-                resp = conn.getresponse()
+                    conn.request("GET", req_path, headers=auth_headers)
+                    resp = conn.getresponse()
 
-                if resp.status == 401:
-                    logger.error(
-                        "Camera %s: HTTP 401 — verificar username/password en camera.yaml",
-                        self._source_label(),
+                    if resp.status == 401:
+                        logger.error(
+                            "Camera %s: HTTP 401 — verificar username/password en camera.yaml",
+                            self._source_label(),
+                        )
+                        resp.read()
+                        conn.close()
+                        conn = None
+                        self._sleep_interruptible(5.0)
+                        continue
+
+                    if resp.status != 200:
+                        raise IOError(f"HTTP {resp.status}")
+
+                    data = resp.read()
+
+                    # Encolar para decode asíncrono; si la cola está llena descartar
+                    # el frame más viejo para mantener baja la latencia.
+                    try:
+                        _raw_q.put_nowait((data, t0))
+                    except queue.Full:
+                        try:
+                            _raw_q.get_nowait()
+                        except queue.Empty:
+                            pass
+                        try:
+                            _raw_q.put_nowait((data, t0))
+                        except queue.Full:
+                            pass
+
+                    last_ok_t  = t0
+                    fail_count = 0
+
+                except Exception as exc:
+                    fail_count += 1
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                        conn = None
+
+                    now   = time.monotonic()
+                    stale = now - last_ok_t > stale_timeout
+                    with self._lock:
+                        self._snapshot_ok = False
+                        if stale:
+                            self._frame = None
+
+                    logger.warning(
+                        "Camera %s: error #%d%s: %s",
+                        self._source_label(), fail_count,
+                        " (frame retenido)" if not stale else "",
+                        exc,
                     )
-                    resp.read()
-                    conn.close()
-                    conn = None
-                    self._sleep_interruptible(5.0)
+                    wait = min(self._retry_max, 0.1 * (2 ** min(fail_count - 1, 4)))
+                    self._sleep_interruptible(wait)
                     continue
 
-                if resp.status != 200:
-                    raise IOError(f"HTTP {resp.status}")
-
-                data  = resp.read()
-                arr   = np.frombuffer(data, dtype=np.uint8)
-                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-                if frame is None:
-                    raise ValueError("imdecode devolvió None")
-
-                if self._frame_validator is not None and not self._frame_validator(frame):
-                    logger.warning("Camera %s: frame duplicado detectado",
-                                   self._source_label())
-                    frame = None
-
-                with self._lock:
-                    self._frame       = frame
-                    self._snapshot_ok = frame is not None
-                if frame is not None:
-                    now = time.monotonic()
-                    self._frame_times.append(now)
-                    last_ok_t = now
-                fail_count = 0
-
-            except Exception as exc:
-                fail_count += 1
-                # Cerrar conexión rota para forzar reconexión en próximo intento
-                if conn is not None:
-                    try:
-                        conn.close()
-                    except Exception:
-                        pass
-                    conn = None
-
-                now = time.monotonic()
-                stale = now - last_ok_t > stale_timeout
-                with self._lock:
-                    self._snapshot_ok = False
-                    if stale:
-                        self._frame = None  # solo borrar tras superar timeout
-
-                logger.warning(
-                    "Camera %s: error #%d%s: %s",
-                    self._source_label(), fail_count,
-                    " (frame retenido)" if not stale else "",
-                    exc,
-                )
-                # Backoff rápido: 0.1 → 0.2 → 0.4 → 0.8 → 1.6s (máx retry_max)
-                wait = min(self._retry_max, 0.1 * (2 ** min(fail_count - 1, 4)))
-                self._sleep_interruptible(wait)
-                continue
-
-            elapsed   = time.monotonic() - t0
-            sleep_for = max(0.0, interval - elapsed)
-            if sleep_for > 0.005:
-                self._sleep_interruptible(sleep_for)
+                elapsed   = time.monotonic() - t0
+                sleep_for = max(0.0, interval - elapsed)
+                if sleep_for > 0.002:
+                    self._sleep_interruptible(sleep_for)
+        finally:
+            _raw_q.put(None)
+            dec_thread.join(timeout=1.0)
 
     def _sleep_interruptible(self, seconds: float) -> None:
-        """Sleep en chunks de 10ms para responder rápido a stop()."""
+        """Sleep en chunks de 5ms para responder rápido a stop() y mantener timing preciso."""
         deadline = time.monotonic() + seconds
         while self._running and time.monotonic() < deadline:
-            time.sleep(0.01)
+            time.sleep(0.005)
 
     def _source_label(self) -> str:
         if isinstance(self._index, str):
