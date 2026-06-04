@@ -2461,6 +2461,36 @@ class RecordingTab(QWidget):
         model      = self._active_model()
         scanner_id = self._scanner_combo.currentText() or None
         n          = len(self._frame_paths)
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self._ana_model      = model
+        self._ana_scanner_id = scanner_id
+        self._ana_frame_idx  = 0
+        self._ana_running    = True
+        _bar_style = (
+            f"QProgressBar {{ background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:8px;text-align:center;font-size:10px;font-weight:700;"
+            f"color:{_TEXT}; }}"
+            f"QProgressBar::chunk {{ background:{_ACCENT};border-radius:8px; }}"
+        )
+        self._ana_progress.setText(f"Analizando  0 / {n}  (0%)")
+        self._ana_progress.setStyleSheet(
+            f"color:{_ACCENT};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setRange(0, n if n > 0 else 1)
+        self._ana_progress_bar.setValue(0)
+        self._ana_progress_bar.setStyleSheet(_bar_style)
+        self._ana_progress_bar.setVisible(True)
+        self._set_rec_badge("analyzing", n, self._rec_dir)
+        self._set_analysis_running(True)
+        logger.info(f"[AnÃ¡lisis] iniciando: {n} frames  modelo={model}")
+        self._worker = _AnalysisWorker(model, list(self._frame_paths), scanner_id, self)
+        self._worker.progress.connect(self._on_ana_progress)
+        self._worker.finished.connect(self._on_ana_done)
+        self._worker.error.connect(self._on_ana_error)
+        self._worker.cancelled.connect(self._on_ana_cancelled)
+        self._worker.start()
+        return
 
         # Pre-cargar patrón y tolerancias (una sola lectura de disco para todos los frames)
         try:
@@ -2516,12 +2546,26 @@ class RecordingTab(QWidget):
         self._set_analysis_running(True)
         logger.info(f"[Análisis] iniciando: {n} frames  modelo={model}")
 
+        # Pausar timer de cámara durante el análisis para evitar que processEvents()
+        # quede bloqueado esperando respuesta HTTP de la cámara.
+        self._ip_timer.stop()
+
         # Procesar frames uno a uno via QTimer — corre en hilo principal, sin
         # dependencia de entrega de signals cross-thread.
         QTimer.singleShot(5, self._analyze_one_frame)
 
     def _analyze_one_frame(self) -> None:
         """Procesa un frame y programa el siguiente. Corre en el hilo principal."""
+        try:
+            self._analyze_one_frame_inner()
+        except Exception as exc:
+            import traceback
+            logger.error(f"[Análisis] excepción no capturada: {exc}\n{traceback.format_exc()}")
+            self._ana_running = False
+            self._ip_timer.start(200)
+            self._on_ana_error(f"Error inesperado: {exc}")
+
+    def _analyze_one_frame_inner(self) -> None:
         if not self._ana_running:
             return
 
@@ -2530,6 +2574,7 @@ class RecordingTab(QWidget):
 
         if i >= n:
             self._ana_running = False
+            self._ip_timer.start(200)
             try:
                 self._on_ana_done_inner(self._results)
             except Exception as exc:
@@ -2542,14 +2587,13 @@ class RecordingTab(QWidget):
                 self._set_analysis_running(False)
             return
 
-        # Mostrar "procesando frame N" ANTES de la llamada (que puede tardar 300-1500ms).
-        # processEvents() fuerza repintado inmediato para que el usuario vea el avance.
+        # Mostrar "procesando frame N" ANTES de la llamada (que puede tardar 300ms+).
         pct_before = int(i * 100 / n)
         self._ana_progress.setText(
             f"Analizando frame  {i + 1} / {n}  ({pct_before}%)..."
         )
         self._ana_progress_bar.setValue(i)
-        QApplication.processEvents()   # repinta la barra ANTES de bloquear en inspect_image
+        QApplication.processEvents()
 
         from src.inspection import inspect_image
         try:
@@ -2561,6 +2605,7 @@ class RecordingTab(QWidget):
             self._results.append(result)
         except Exception as exc:
             self._ana_running = False
+            self._ip_timer.start(200)
             logger.error(f"[Análisis] error en frame {i}: {exc}", exc_info=True)
             self._on_ana_error(str(exc))
             return
@@ -2572,16 +2617,20 @@ class RecordingTab(QWidget):
         self._ana_progress.setText(f"Analizando  {done} / {n}  ({pct_after}%)")
         logger.info(f"[Análisis] frame {done}/{n} ({pct_after}%)")
 
-        # Mostrar frame analizado en el visor (con overlay)
         if done % 3 == 0:
             self._show_frame(i)
 
-        # 10 ms de pausa para que Qt procese eventos (repintado) antes del próximo frame
         QTimer.singleShot(10, self._analyze_one_frame)
 
     def _on_stop_analyze(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.cancel()
+            self._btn_stop_analyze.setEnabled(False)
+            self._ana_progress.setText("Deteniendo...")
+            return
         if self._ana_running:
             self._ana_running = False
+            self._ip_timer.start(200)
             done = self._ana_frame_idx
             self._ana_progress.setText(f"Detenido  ({done} frames procesados)")
             self._ana_progress.setStyleSheet(
@@ -2592,13 +2641,10 @@ class RecordingTab(QWidget):
             self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
             logger.info(f"[Grabación] análisis detenido tras {done} frames")
             return
-        # Compatibilidad con worker antiguo
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.cancel()
-            self._btn_stop_analyze.setEnabled(False)
-            self._ana_progress.setText("Deteniendo...")
-
     def _on_ana_cancelled(self, done: int) -> None:
+        self._ana_running = False
+        self._ana_frame_idx = done
+        self._worker = None
         self._ana_progress.setText(f"Detenido  ({done} frames procesados)")
         self._ana_progress.setStyleSheet(
             f"color:{_WARN};font-size:13px;font-family:Consolas;font-weight:700;"
@@ -2610,11 +2656,14 @@ class RecordingTab(QWidget):
 
     def _on_ana_progress(self, done: int, total: int) -> None:
         pct = int(done * 100 / total) if total else 0
+        self._ana_frame_idx = done
         self._ana_progress.setText(f"Analizando  {done} / {total}  ({pct}%)")
-        self._ana_progress_bar.setValue(pct)
+        self._ana_progress_bar.setValue(done)
         logger.debug(f"[Análisis] progreso {done}/{total} ({pct}%)")
 
     def _on_ana_done(self, results: list) -> None:
+        self._ana_running = False
+        self._worker = None
         try:
             self._on_ana_done_inner(results)
         except Exception as exc:
@@ -2700,6 +2749,8 @@ class RecordingTab(QWidget):
         logger.info(f"[Grabación] análisis completo - OK={ok} NOK={nok}")
 
     def _on_ana_error(self, msg: str) -> None:
+        self._ana_running = False
+        self._worker = None
         self._ana_progress.setText(f"✗  Error: {msg}")
         self._ana_progress.setStyleSheet(
             f"color:{_NOK};font-size:13px;font-family:Consolas;font-weight:700;"

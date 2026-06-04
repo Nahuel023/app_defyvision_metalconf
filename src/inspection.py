@@ -10,7 +10,7 @@ from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
 from src.patterns.roi import apply_roi, load_roi, ROI
-from src.pipeline.align_edge import align_image_by_right_edge
+from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator
 from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
@@ -244,7 +244,12 @@ def _inspect_bgr(
     pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
     pattern_center_zigzag_abs_max   = float(tolerances.get("pattern_center_zigzag_abs_max_px", 18.0))
 
-    img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
+    edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
+    if edge_align_enabled:
+        img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
+    else:
+        img_aligned = img_full
+        align_res = EdgeAlignResult(angle_deg=0.0, used_lines=0)
 
     if roi is not None:
         try:

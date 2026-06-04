@@ -358,6 +358,29 @@ apretar `frame_missing_nok_threshold`, `grid_max_missing` y/o reactivar lógica 
 
 ---
 
+#### Cambio 101 — Servicio: análisis de carpeta vuelve a correr fuera del hilo UI
+
+**Problema reportado:** al iniciar el análisis desde la pestaña de grabación/análisis,
+la barra quedaba clavada en `0%` y la ventana parecía tildarse en el frame 1.
+
+**Causa:** el flujo nuevo de análisis había pasado a ejecutarse con
+`QTimer.singleShot(..., _analyze_one_frame)` en el hilo principal. Aunque el texto de
+progreso se actualizaba antes de `inspect_image()`, el trabajo pesado seguía corriendo
+en el thread de UI y bloqueaba repintado/interacción hasta terminar cada frame.
+
+**Fix aplicado en `src/ui/service.py`:**
+- `RecordingTab._on_analyze()` vuelve a lanzar `_AnalysisWorker(QThread)` para procesar
+  frames fuera del hilo gráfico.
+- `stop/cancel/progress/done/error` actualizan de nuevo el estado de UI en base al worker.
+- La barra ahora avanza por cantidad real de frames procesados en vez de intentar
+  repintarse durante trabajo bloqueante en el hilo principal.
+
+**Validación:** `python -m py_compile src/ui/service.py` OK.
+
+**Archivos modificados:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 98 — Falla rápida cuando la ROI queda fuera de imagen
 
 **Problema:** Al analizar carpetas capturadas con una cámara nueva de resolución/encuadre

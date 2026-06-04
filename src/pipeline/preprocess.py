@@ -34,6 +34,13 @@ def preprocess_for_holes(
         raise ValueError(f"use_channel debe ser uno de {_VALID_CHANNELS}.")
     if polarity not in {"dark", "bright"}:
         raise ValueError("polarity debe ser 'dark' o 'bright'.")
+    if (
+        img_bgr_or_gray is None
+        or img_bgr_or_gray.ndim < 2
+        or img_bgr_or_gray.shape[0] == 0
+        or img_bgr_or_gray.shape[1] == 0
+    ):
+        raise ValueError("preprocess_for_holes: imagen vacia (0 dimensiones)")
 
     if img_bgr_or_gray.ndim == 2:
         channel = img_bgr_or_gray
