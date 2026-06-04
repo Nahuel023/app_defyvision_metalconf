@@ -691,7 +691,7 @@ class OperatorWindow(QMainWindow):
         )
         self._panels: dict[str, ScannerPanel] = {}
 
-        for sid in reversed(self._system.scanner_ids()):
+        for sid in self._system.scanner_ids():
             panel = ScannerPanel(sid, self._system)
             panel._sig_stop_alert.connect(self._show_stop_alert)
             frame = QFrame()

@@ -43,6 +43,39 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-04 — Tadeo + Claude
+
+#### Cambio 97 — Cámaras IP fijas por scanner (sin USB)
+
+Scanner 1 (izquierda) → `192.168.1.3`, Scanner 2 (derecha) → `192.168.1.2`.
+
+- `config/io_map.yaml`: reemplaza `camera_index` por `camera_source` con URL HTTP
+  en ambos scanners. La clase `Camera` detecta `http://` y usa el modo MJPEG/snapshot.
+- `config/camera.yaml`: actualiza `ip_camera_1` y `ip_camera_2` con las nuevas IPs
+  (credenciales `root`/`defy2026` como el resto de las cámaras).
+- `src/ui/service.py`: placeholders y `default_host` del selector de slot actualizados
+  a `192.168.1.3` (slot 0) y `192.168.1.2` (slot 1).
+
+No se usan más cámaras USB.
+
+**Archivos modificados:** `config/io_map.yaml`, `config/camera.yaml`, `src/ui/service.py`
+
+---
+
+#### Cambio 96 — Operador UI: scanner_1 vuelve al panel izquierdo
+
+**Problema:** El commit anterior (`f5363c1`) había invertido el orden visual de los paneles
+con `reversed()` para colocar scanner_2 a la izquierda. El criterio correcto es que
+scanner_1 (físicamente a la izquierda del operario) siempre aparezca en el panel izquierdo.
+
+**Cambio:** Eliminado el `reversed()` en el loop de construcción de paneles en `operator.py`.
+`scanner_ids()` devuelve los IDs en el orden del YAML (`scanner_1` primero), que coincide
+con el orden físico izquierda → derecha.
+
+**Archivos modificados:** `src/ui/operator.py` (línea 694)
+
+---
+
 ### Sesión 2026-06-03 — Tadeo + Claude
 
 #### Cambio 95 — Robustez industrial: habilita FAULT por racha + sube min_missing a 2

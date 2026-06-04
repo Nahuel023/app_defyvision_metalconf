@@ -33,12 +33,12 @@ scanner_2:
   auto_exposure: false
   auto_white_balance: true
 ip_camera_1:
-  ip_address: 192.168.1.26
-  url: http://192.168.1.26/oneshotimage.jpg
-  username: admin
-  password: admin
+  ip_address: 192.168.1.3
+  url: http://192.168.1.3/oneshotimage.jpg
+  username: root
+  password: defy2026
 ip_camera_2:
-  ip_address: 192.168.1.13
-  url: http://192.168.1.13/oneshotimage.jpg
-  username: admin
-  password: admin
+  ip_address: 192.168.1.2
+  url: http://192.168.1.2/oneshotimage.jpg
+  username: root
+  password: defy2026
