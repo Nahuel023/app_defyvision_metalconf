@@ -1507,6 +1507,10 @@ class RecordingTab(QWidget):
         self._rec_timer.timeout.connect(self._grab_frame)
         self._build_ui()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        # Auto-conectar cámara del scanner seleccionado al abrir la pestaña
+        QTimer.singleShot(0, lambda: self._auto_connect_scanner_camera(
+            self._scanner_combo.currentText()
+        ))
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1530,6 +1534,7 @@ class RecordingTab(QWidget):
         root.setSpacing(10)
 
         root.addWidget(self._build_recording_section())
+        root.addWidget(self._build_ip_camera_section())
         root.addWidget(self._build_analysis_section())
         root.addWidget(self._build_browser_section(), stretch=1)
 
@@ -2800,7 +2805,41 @@ class RecordingTab(QWidget):
         # El modelo NO cambia automáticamente al cambiar de scanner.
         # El operador puede elegir cualquier combinación de scanner + modelo,
         # por ejemplo analizar Esterilla grabada desde scanner_1.
-        pass
+        self._auto_connect_scanner_camera(sid)
+
+    def _auto_connect_scanner_camera(self, sid: str) -> None:
+        """Conecta la preview IP usando la camera_source del scanner seleccionado."""
+        try:
+            cfg = self._system.io.scanner_config(sid)
+            url = str(cfg.get("camera_source", "")).strip()
+        except Exception:
+            url = ""
+        if not url:
+            return
+        # Leer credenciales de camera.yaml para este scanner
+        try:
+            settings = camera_config.load_camera_settings(sid)
+            user = settings.get("username") or None
+            pwd  = settings.get("password") or None
+        except Exception:
+            user, pwd = None, None
+        # Poblar campo URL y conectar
+        if hasattr(self, "_ip_url_edit"):
+            self._ip_url_edit.setText(url)
+        self._on_ip_disconnect()
+        self._ip_status_lbl.setText("Conectando...")
+        if url.lower().startswith(("http://", "https://")):
+            url_l = url.lower()
+            if any(tok in url_l for tok in (".jpg", ".jpeg", "oneshot", "snapshot")):
+                worker = _HTTPSnapshotReader(url, self, username=user, password=pwd)
+            else:
+                worker = _MJPEGReader(url, self, username=user, password=pwd)
+            worker.frame_ready_meta.connect(lambda f, _m: self._on_ip_frame_ready(f))
+            worker.error_occurred.connect(self._on_ip_error)
+            self._ip_worker = worker
+            worker.start()
+        self._btn_ip_connect.setEnabled(False)
+        self._btn_ip_disconnect.setEnabled(True)
 
     def _on_load_recording(self) -> None:
         """Load an existing recording folder for analysis."""
@@ -3694,6 +3733,8 @@ class CameraCalibTab(QWidget):
 
         self._build_ui()
         self._populate_scanner_selector()
+        # Auto-conectar ambas cámaras IP al abrir la pestaña
+        QTimer.singleShot(0, self._auto_connect_all_slots)
 
     # ------------------------------------------------------------------
     # UI
@@ -4718,6 +4759,43 @@ class CameraCalibTab(QWidget):
         self._ip_save_status.setStyleSheet(f"color:{_OK};font-size:11px;")
         self._ip_save_status.setText("Guardado — se conectará al iniciar")
         QTimer.singleShot(3000, lambda: self._ip_save_status.setText(""))
+
+    def _auto_connect_all_slots(self) -> None:
+        """Conecta ambas cámaras IP al abrir la pestaña usando los ajustes guardados."""
+        import yaml as _yaml
+        try:
+            p = Path("config/camera.yaml")
+            data = _yaml.safe_load(p.read_text(encoding="utf-8")) if p.exists() else {}
+        except Exception:
+            data = {}
+
+        for slot in range(2):
+            if self._ip_manual_disc[slot]:
+                continue
+            if self._ip_workers[slot] is not None or self._ip_caps[slot] is not None:
+                continue  # ya conectado
+            cfg  = data.get(f"ip_camera_{slot + 1}", {})
+            url  = str(cfg.get("url", "")).strip()
+            if not url:
+                ip = str(cfg.get("ip_address", "")).strip()
+                if ip:
+                    url = self._build_ip_camera_url(ip)
+            if not url:
+                continue
+            user = str(cfg.get("username", "")).strip() or None
+            pwd  = str(cfg.get("password", "")).strip() or None
+            self._start_ip_connection(slot, url, user, pwd)
+
+        # Actualizar UI para el slot visible
+        slot = self._ip_slot
+        if self._ip_workers[slot] is not None or self._ip_caps[slot] is not None:
+            self._set_ip_status("Conectando...", "warn")
+            self._btn_ip_connect.setEnabled(False)
+            self._btn_ip_disconnect.setEnabled(True)
+            self._ip_url_edit.setEnabled(False)
+            self._ip_user_edit.setEnabled(False)
+            self._ip_pass_edit.setEnabled(False)
+            self._ip_preview.setText("")
 
     # ------------------------------------------------------------------
     # Slots
