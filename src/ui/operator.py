@@ -155,6 +155,16 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.camera_label, stretch=1)
 
+        # ── Info de cámara: IP · FPS · estado de conexión ────────────
+        self._cam_info_lbl = QLabel("● —")
+        self._cam_info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._cam_info_lbl.setStyleSheet(
+            f"font-size:10px;font-family:Consolas,monospace;color:{_MUTED};"
+            f"background:{_CARD};border-radius:4px;padding:3px 8px;"
+            f"border:1px solid {_BORDER};"
+        )
+        root.addWidget(self._cam_info_lbl)
+
         # ── Badge de estado — muy prominente ──────────────────────────
         self.state_badge = QLabel("● EN ESPERA")
         self.state_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -273,6 +283,36 @@ class ScannerPanel(QWidget):
     # Refresco (hilo principal)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cam_host_label(index: int | str) -> str:
+        if isinstance(index, int):
+            return f"USB:{index}"
+        try:
+            from urllib.parse import urlparse
+            h = urlparse(str(index)).hostname or str(index)
+            return h
+        except Exception:
+            return str(index)
+
+    def _update_cam_info(self, connected: bool, missing: bool) -> None:
+        host = self._cam_host_label(self._camera.index)
+        fps  = self._camera.fps
+        if missing:
+            dot, color = "●", _WARN
+            text = f"{dot}  {host}  —  DESCONECTADA"
+        elif connected:
+            dot, color = "●", _OK_CLR
+            text = f"{dot}  {host}  —  {fps:.1f} fps"
+        else:
+            dot, color = "●", _MUTED
+            text = f"{dot}  {host}  —  INICIANDO..."
+        self._cam_info_lbl.setText(text)
+        self._cam_info_lbl.setStyleSheet(
+            f"font-size:10px;font-family:Consolas,monospace;color:{color};"
+            f"background:{_CARD};border-radius:4px;padding:3px 8px;"
+            f"border:1px solid {_BORDER};"
+        )
+
     def refresh_camera(self) -> None:
         status = self._scanner.get_status()
         camera_missing = bool(status.get("camera_missing", False))
@@ -282,6 +322,11 @@ class ScannerPanel(QWidget):
         mode  = self._scanner.mode
         is_manual_running = (state == ScannerState.RUNNING
                              and mode == OperationMode.MANUAL)
+
+        self._update_cam_info(
+            connected=self._camera.is_connected,
+            missing=camera_missing,
+        )
 
         if is_manual_running:
             if not self._manual_mode_display:
