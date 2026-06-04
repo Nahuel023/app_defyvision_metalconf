@@ -1522,52 +1522,10 @@ class RecordingTab(QWidget):
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(0)
-
-        tabs = QTabWidget()
-        tabs.setStyleSheet(
-            f"QTabWidget::pane {{ border:none; background:{_DARK}; }}"
-            f"QTabBar::tab {{ background:{_PANEL};color:{_MUTED};"
-            "padding:8px 20px;font-size:12px;font-weight:600; }"
-            f"QTabBar::tab:selected {{ background:{_DARK};color:{_TEXT};"
-            f"border-bottom:2px solid {_ACCENT}; }}"
-        )
-        outer.addWidget(tabs)
-
-        # ── Tab 1: GRABACIÓN ─────────────────────────────────────────
-        grab_w = QWidget()
-        grab_w.setStyleSheet(f"background:{_DARK};")
-        grab_lay = QHBoxLayout(grab_w)
-        grab_lay.setContentsMargins(14, 14, 14, 14)
-        grab_lay.setSpacing(14)
-
-        # Columna izquierda: controles de grabación
-        ctrl_w = QWidget()
-        ctrl_lay = QVBoxLayout(ctrl_w)
-        ctrl_lay.setContentsMargins(0, 0, 0, 0)
-        ctrl_lay.setSpacing(10)
-        ctrl_lay.addWidget(self._build_recording_section())
-        ctrl_lay.addStretch()
-        grab_lay.addWidget(ctrl_w)
-
-        # Columna derecha: cámara siempre visible
-        self._cam_panel = self._build_ip_camera_section()
-        grab_lay.addWidget(self._cam_panel, stretch=1)
-
-        tabs.addTab(grab_w, "GRABACIÓN")
-
-        # ── Tab 2: ANÁLISIS ──────────────────────────────────────────
-        ana_w = QWidget()
-        ana_w.setStyleSheet(f"background:{_DARK};")
-        ana_lay = QVBoxLayout(ana_w)
-        ana_lay.setContentsMargins(14, 14, 14, 14)
-        ana_lay.setSpacing(10)
-        ana_lay.addWidget(self._build_analysis_section())
-        ana_lay.addWidget(self._build_browser_section(), stretch=1)
-
-        tabs.addTab(ana_w, "ANÁLISIS")
+        # RecordingTab no crea su propio layout visible — expone dos páginas
+        # que ServiceWindow monta dentro del tab "Cámara".
+        self._grab_page = self._build_grab_page()
+        self._ana_page  = self._build_ana_page()
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1594,6 +1552,37 @@ class RecordingTab(QWidget):
         self._update_nav_state()
         self._update_model_chip(self._model_combo.currentText())
         self._set_rec_badge("standby", 0, None)
+
+    def _build_grab_page(self) -> QWidget:
+        """Página GRABACIÓN: controles izq + cámara der."""
+        w = QWidget()
+        w.setStyleSheet(f"background:{_DARK};")
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(14)
+
+        ctrl = QWidget()
+        ctrl_lay = QVBoxLayout(ctrl)
+        ctrl_lay.setContentsMargins(0, 0, 0, 0)
+        ctrl_lay.setSpacing(10)
+        ctrl_lay.addWidget(self._build_recording_section())
+        ctrl_lay.addStretch()
+        lay.addWidget(ctrl)
+
+        self._cam_panel = self._build_ip_camera_section()
+        lay.addWidget(self._cam_panel, stretch=1)
+        return w
+
+    def _build_ana_page(self) -> QWidget:
+        """Página ANÁLISIS: sección análisis + browser."""
+        w = QWidget()
+        w.setStyleSheet(f"background:{_DARK};")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(10)
+        lay.addWidget(self._build_analysis_section())
+        lay.addWidget(self._build_browser_section(), stretch=1)
+        return w
 
     def _build_recording_section(self) -> QGroupBox:
         grp = QGroupBox("GRABACIÓN")
@@ -1926,71 +1915,68 @@ class RecordingTab(QWidget):
         grp = QGroupBox("ANÁLISIS")
         grp.setStyleSheet(self._grp_style())
         lay = QVBoxLayout(grp)
-        lay.setContentsMargins(14, 20, 14, 14)
-        lay.setSpacing(10)
+        lay.setContentsMargins(16, 20, 16, 16)
+        lay.setSpacing(12)
 
-        # Row 1: action buttons + progress
-        row1 = QHBoxLayout()
-        row1.setSpacing(8)
+        # ── Fila 1: botones de acción ─────────────────────────────────
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
 
-        self._btn_load    = self._mk_btn("Abrir grabación", "#374151", h=36, fs=11)
-        self._btn_analyze = self._mk_btn("Analizar",         "#1d4ed8", h=36, fs=12)
+        self._btn_load    = self._mk_btn("📂  Abrir grabación", "#374151", h=44, fs=13)
+        self._btn_analyze = self._mk_btn("▶  Analizar",         "#1d4ed8", h=44, fs=14)
         self._btn_analyze.setEnabled(False)
-        self._btn_stop_analyze = self._mk_btn("Detener",     "#b91c1c", h=36, fs=12)
+        self._btn_stop_analyze = self._mk_btn("⏹  Detener",     "#b91c1c", h=44, fs=13)
         self._btn_stop_analyze.setEnabled(False)
         self._btn_stop_analyze.clicked.connect(self._on_stop_analyze)
-        row1.addWidget(self._btn_load)
-        row1.addWidget(self._btn_analyze)
-        row1.addWidget(self._btn_stop_analyze)
-        row1.addSpacing(10)
 
-        # Chip de TIPO DE PLACA en análisis — al lado de Analizar, para no confundir
-        # el modelo que se está analizando (Esterilla vs Microperforado).
-        _tipo_prefix = QLabel("Tipo:")
-        _tipo_prefix.setStyleSheet(
-            f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;"
-        )
-        row1.addWidget(_tipo_prefix)
+        btn_row.addWidget(self._btn_load)
+        btn_row.addWidget(self._btn_analyze)
+        btn_row.addWidget(self._btn_stop_analyze)
+        btn_row.addStretch()
+
+        # Chip de tipo de placa
         self._analyze_model_chip = QLabel("-")
         self._analyze_model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._analyze_model_chip.setFixedHeight(36)
-        self._analyze_model_chip.setMinimumWidth(170)
-        row1.addWidget(self._analyze_model_chip)
-        row1.addSpacing(12)
+        self._analyze_model_chip.setFixedHeight(44)
+        self._analyze_model_chip.setMinimumWidth(180)
+        btn_row.addWidget(self._analyze_model_chip)
+
+        lay.addLayout(btn_row)
+
+        # ── Fila 2: progreso + estado ─────────────────────────────────
+        info_row = QHBoxLayout()
+        info_row.setSpacing(12)
 
         self._ana_progress = QLabel("")
         self._ana_progress.setStyleSheet(
-            f"color:{_ACCENT};font-size:11px;font-family:Consolas;font-weight:600;"
+            f"color:{_ACCENT};font-size:12px;font-family:Consolas;font-weight:600;"
         )
-        row1.addWidget(self._ana_progress)
-        row1.addStretch()
+        info_row.addWidget(self._ana_progress)
+        info_row.addStretch()
 
         self._status_lbl = QLabel("Listo")
         self._status_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+            f"color:{_MUTED};font-size:11px;font-family:Consolas;"
         )
-        row1.addWidget(self._status_lbl)
+        info_row.addWidget(self._status_lbl)
+        lay.addLayout(info_row)
 
-        lay.addLayout(row1)
-
-
-        # Row 2: results summary as stat chips
+        # ── Fila 3: resumen de resultados ─────────────────────────────
         self._summary_row = QHBoxLayout()
         self._summary_row.setSpacing(8)
 
         self._summary_lbl = QLabel("")
         self._summary_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:11px;font-weight:700;letter-spacing:0.5px;"
+            f"color:{_TEXT};font-size:12px;font-weight:700;letter-spacing:0.5px;"
         )
         self._summary_row.addWidget(self._summary_lbl)
         self._summary_row.addStretch()
 
         self._stats_lbl = QLabel("")
         self._stats_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:10px;font-family:Consolas;"
+            f"color:{_MUTED};font-size:11px;font-family:Consolas;"
         )
         self._summary_row.addWidget(self._stats_lbl)
-
         lay.addLayout(self._summary_row)
         return grp
 
@@ -5294,14 +5280,28 @@ class ServiceWindow(QMainWindow):
         self._events_tab = EventBrowserTab(self._system)
         self._cam_tab    = CameraCalibTab(self._system)
 
+        # ── Tab "Cámara": sub-tabs GRABACIÓN / ANÁLISIS / CALIBRACIÓN ─
+        _sub_style = (
+            f"QTabWidget::pane {{ border:none; background:{_DARK}; }}"
+            f"QTabBar::tab {{ background:{_PANEL};color:{_MUTED};"
+            "padding:10px 24px;font-size:13px;font-weight:700;letter-spacing:1px; }"
+            f"QTabBar::tab:selected {{ background:{_DARK};color:{_TEXT};"
+            f"border-bottom:3px solid {_ACCENT}; }}"
+            f"QTabBar::tab:hover {{ color:{_TEXT}; }}"
+        )
+        cam_tabs = QTabWidget()
+        cam_tabs.setStyleSheet(_sub_style)
+        cam_tabs.addTab(self._rec_tab._grab_page, "  GRABACIÓN  ")
+        cam_tabs.addTab(self._rec_tab._ana_page,  "  ANÁLISIS  ")
+        cam_tabs.addTab(self._cam_tab,             "  CALIBRACIÓN  ")
+
         self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
         self._tabs.addTab(self._diag_tab,   "  Diagnóstico  ")
         self._tabs.addTab(self._sys_tab,    "  Sistema  ")
         self._tabs.addTab(self._log_tab,    "  Logs  ")
         self._tabs.addTab(self._cfg_tab,    "  Config  ")
         self._tabs.addTab(self._events_tab, "  Evidencias  ")
-        self._tabs.addTab(self._rec_tab,    "  Grabación  ")
-        self._tabs.addTab(self._cam_tab,    "  Cámara  ")
+        self._tabs.addTab(cam_tabs,         "  Cámara  ")
 
         # Health bar — referencia al cam_tab se pasa por lista mutable
         self._cam_ref: list = [self._cam_tab]
