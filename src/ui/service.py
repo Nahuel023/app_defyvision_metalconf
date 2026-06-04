@@ -1444,7 +1444,14 @@ class RecordingTab(QWidget):
         self._results: list           = []
         self._current_idx: int        = 0
         self._worker: Optional[_AnalysisWorker] = None
-        self._live_ms_detector = None   # persistent detector for live inspection mode
+        self._live_ms_detector = None
+
+        # Timer-based analysis state (runs in main thread, no cross-thread signal issues)
+        self._ana_running:    bool          = False
+        self._ana_frame_idx:  int           = 0
+        self._ana_model:      str           = ""
+        self._ana_scanner_id: Optional[str] = None
+        self._ana_pre:        dict          = {}
 
         # PNG writes go to a background thread so the main thread stays responsive.
         self._write_executor = None   # concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -2441,7 +2448,6 @@ class RecordingTab(QWidget):
     def _on_analyze(self) -> None:
         if not self._frame_paths:
             return
-        # Flush any background PNG writes before reading the files for analysis.
         if self._write_executor is not None:
             self._write_executor.shutdown(wait=True)
             self._write_executor = None
@@ -2451,36 +2457,134 @@ class RecordingTab(QWidget):
         self._overlay_jpegs.clear()
         self._stats_lbl.setText("")
         self._export_status_lbl.setText("")
-        n = len(self._frame_paths)
-        self._ana_progress.setText(f"Iniciando análisis  ({n} frames)...")
-        self._ana_progress.setStyleSheet(
-            f"color:{_ACCENT};font-size:13px;font-family:Consolas;font-weight:700;"
-        )
-        self._ana_progress_bar.setRange(0, 100)
-        self._ana_progress_bar.setValue(0)
-        self._ana_progress_bar.setVisible(True)
-        self._ana_progress_bar.setStyleSheet(
+
+        model      = self._active_model()
+        scanner_id = self._scanner_combo.currentText() or None
+        n          = len(self._frame_paths)
+
+        # Pre-cargar patrón y tolerancias (una sola lectura de disco para todos los frames)
+        try:
+            from src.patterns.pattern_io import load_pattern, find_pattern_path
+            from src.patterns.roi import load_roi
+            from src.utils.config import load_tolerances
+            from src.pipeline.machine_stop import MachineStopDetector
+            tols = load_tolerances(model)
+            self._ana_pre = {
+                "tolerances": tols,
+                "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
+                "roi":        load_roi(model, scanner_id),
+                "ema_state":  {},
+            }
+            if bool(tols.get("machine_stop_enabled", False)):
+                self._ana_pre["machine_stop_detector"] = MachineStopDetector(
+                    enabled=True,
+                    missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                    min_missing=int(tols.get("machine_stop_min_missing", 1)),
+                    same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
+                    ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
+                    track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
+                    same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
+                )
+        except Exception as exc:
+            self._ana_progress.setText(f"✗  Error al cargar patrón: {exc}")
+            self._ana_progress.setStyleSheet(
+                f"color:{_NOK};font-size:13px;font-family:Consolas;font-weight:700;"
+            )
+            logger.error(f"[Análisis] error cargando patrón: {exc}", exc_info=True)
+            return
+
+        self._ana_model      = model
+        self._ana_scanner_id = scanner_id
+        self._ana_frame_idx  = 0
+        self._ana_running    = True
+
+        _bar_style = (
             f"QProgressBar {{ background:{_DARK};border:1px solid {_BORDER};"
             "border-radius:8px;text-align:center;font-size:10px;font-weight:700;"
             f"color:{_TEXT}; }}"
             f"QProgressBar::chunk {{ background:{_ACCENT};border-radius:8px; }}"
         )
+        self._ana_progress.setText(f"Analizando  0 / {n}  (0%)")
+        self._ana_progress.setStyleSheet(
+            f"color:{_ACCENT};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setRange(0, n if n > 0 else 1)
+        self._ana_progress_bar.setValue(0)
+        self._ana_progress_bar.setStyleSheet(_bar_style)
+        self._ana_progress_bar.setVisible(True)
         self._set_rec_badge("analyzing", n, self._rec_dir)
         self._set_analysis_running(True)
-        logger.info(f"[Análisis] iniciando: {n} frames  modelo={self._active_model()}")
+        logger.info(f"[Análisis] iniciando: {n} frames  modelo={model}")
 
-        self._worker = _AnalysisWorker(
-            self._active_model(), list(self._frame_paths),
-            scanner_id=self._scanner_combo.currentText() or None,
-        )
-        self._worker.progress.connect(self._on_ana_progress)
-        self._worker.finished.connect(self._on_ana_done)
-        self._worker.error.connect(self._on_ana_error)
-        self._worker.cancelled.connect(self._on_ana_cancelled)
-        self._worker.start()
-        logger.info("[Análisis] worker iniciado")
+        # Procesar frames uno a uno via QTimer — corre en hilo principal, sin
+        # dependencia de entrega de signals cross-thread.
+        QTimer.singleShot(5, self._analyze_one_frame)
+
+    def _analyze_one_frame(self) -> None:
+        """Procesa un frame y programa el siguiente. Corre en el hilo principal."""
+        if not self._ana_running:
+            return
+
+        n = len(self._frame_paths)
+        i = self._ana_frame_idx
+
+        if i >= n:
+            # Todos los frames procesados
+            self._ana_running = False
+            try:
+                self._on_ana_done_inner(self._results)
+            except Exception as exc:
+                logger.error(f"[Análisis] error procesando resultados: {exc}", exc_info=True)
+                self._ana_progress.setText(f"✗  Error al procesar: {exc}")
+                self._ana_progress.setStyleSheet(
+                    f"color:{_NOK};font-size:13px;font-family:Consolas;font-weight:700;"
+                )
+                self._ana_progress_bar.setVisible(False)
+                self._set_analysis_running(False)
+            return
+
+        from src.inspection import inspect_image
+        try:
+            result = inspect_image(
+                self._ana_model, self._frame_paths[i],
+                scanner_id=self._ana_scanner_id,
+                _preloaded=self._ana_pre,
+            )
+            self._results.append(result)
+        except Exception as exc:
+            self._ana_running = False
+            logger.error(f"[Análisis] error en frame {i}: {exc}", exc_info=True)
+            self._on_ana_error(str(exc))
+            return
+
+        self._ana_frame_idx += 1
+        done = self._ana_frame_idx
+        self._ana_progress_bar.setValue(done)
+        pct = int(done * 100 / n)
+        self._ana_progress.setText(f"Analizando  {done} / {n}  ({pct}%)")
+        logger.debug(f"[Análisis] frame {done}/{n}")
+
+        # Mostrar frame actual en el visor cada 5 frames
+        if done % 5 == 1:
+            self._show_frame(i)
+
+        # Programar siguiente frame (1 ms de pausa para que Qt repinte)
+        QTimer.singleShot(1, self._analyze_one_frame)
 
     def _on_stop_analyze(self) -> None:
+        if self._ana_running:
+            self._ana_running = False
+            done = self._ana_frame_idx
+            self._ana_progress.setText(f"Detenido  ({done} frames procesados)")
+            self._ana_progress.setStyleSheet(
+                f"color:{_WARN};font-size:13px;font-family:Consolas;font-weight:700;"
+            )
+            self._ana_progress_bar.setVisible(False)
+            self._set_analysis_running(False)
+            self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
+            logger.info(f"[Grabación] análisis detenido tras {done} frames")
+            return
+        # Compatibilidad con worker antiguo
         if self._worker is not None and self._worker.isRunning():
             self._worker.cancel()
             self._btn_stop_analyze.setEnabled(False)
