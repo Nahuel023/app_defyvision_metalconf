@@ -1511,6 +1511,10 @@ class RecordingTab(QWidget):
         QTimer.singleShot(0, lambda: self._auto_connect_scanner_camera(
             self._scanner_combo.currentText()
         ))
+        # Actualizar tope de FPS cada 2s conforme el snapshot loop estabiliza su medición
+        self._fps_cap_timer = QTimer(self)
+        self._fps_cap_timer.timeout.connect(self._update_fps_cap)
+        self._fps_cap_timer.start(2000)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -2814,6 +2818,22 @@ class RecordingTab(QWidget):
         # El operador puede elegir cualquier combinación de scanner + modelo,
         # por ejemplo analizar Esterilla grabada desde scanner_1.
         self._auto_connect_scanner_camera(sid)
+        self._update_fps_cap()
+
+    def _update_fps_cap(self) -> None:
+        """Limita el máximo del spinbox de FPS al FPS real medido de la cámara."""
+        try:
+            sid = self._scanner_combo.currentText()
+            real_fps = self._system.camera(sid).fps
+        except Exception:
+            return
+        if real_fps < 0.5:
+            return  # aún no hay medición estable — no tocar el rango
+        cap = max(1, int(real_fps))
+        self._fps_spin.setMaximum(cap)
+        if self._fps_spin.value() > cap:
+            self._fps_spin.setValue(cap)
+        self._fps_spin.setToolTip(f"FPS real de la cámara: {real_fps:.1f}")
 
     def _auto_connect_scanner_camera(self, sid: str) -> None:
         """Conecta la preview IP usando la camera_source del scanner seleccionado."""
