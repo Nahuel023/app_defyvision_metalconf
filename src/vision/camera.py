@@ -64,6 +64,7 @@ class Camera:
         self._thread: Optional[threading.Thread] = None
         self._frame_times: deque = deque(maxlen=60)
         self._frame_validator = None
+        self._snapshot_ok: bool = False
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -132,6 +133,8 @@ class Camera:
     def is_connected(self) -> bool:
         """True when the capture source is open and delivering frames."""
         with self._lock:
+            if self._is_snapshot_source():
+                return self._snapshot_ok and self._frame is not None
             opened = self._cap is not None or self._mjpeg_response is not None
             return opened and self._frame is not None
 
@@ -241,14 +244,7 @@ class Camera:
     def _open_mjpeg_capture(self) -> bool:
         t0 = time.monotonic()
         url = str(self._index)
-        headers = {}
-        username = self._settings.get("username")
-        password = self._settings.get("password")
-        if username and password:
-            token = base64.b64encode(
-                f"{username}:{password}".encode("utf-8")
-            ).decode("ascii")
-            headers["Authorization"] = f"Basic {token}"
+        headers = self._build_auth_headers()
 
         try:
             request = Request(url, headers=headers)
@@ -378,12 +374,87 @@ class Camera:
                 pass
             self._mjpeg_response = None
         self._mjpeg_buffer = b""
+        self._snapshot_ok = False
+
+    def _is_snapshot_source(self) -> bool:
+        if not isinstance(self._index, str):
+            return False
+        path = self._index.lower().split("?", 1)[0]
+        return path.endswith(".jpg") or path.endswith(".jpeg")
 
     def _is_mjpeg_http_source(self) -> bool:
         if not isinstance(self._index, str):
             return False
         src = self._index.lower()
-        return src.startswith("http://") or src.startswith("https://")
+        return (src.startswith("http://") or src.startswith("https://")) \
+               and not self._is_snapshot_source()
+
+    def _build_auth_headers(self) -> dict:
+        headers: dict = {}
+        username = self._settings.get("username")
+        password = self._settings.get("password")
+        if username and password:
+            token = base64.b64encode(
+                f"{username}:{password}".encode("utf-8")
+            ).decode("ascii")
+            headers["Authorization"] = f"Basic {token}"
+        return headers
+
+    def _snapshot_loop(self) -> None:
+        fps_target = max(0.5, float(self._settings.get("fps", 5)))
+        interval   = 1.0 / fps_target
+        timeout    = float(self._settings.get("open_timeout_s", 10.0))
+        headers    = self._build_auth_headers()
+        url        = str(self._index)
+        fail_count = 0
+
+        logger.info("Camera %s: modo snapshot @ %.1f fps", self._source_label(), fps_target)
+
+        while self._running:
+            t0 = time.monotonic()
+            try:
+                request  = Request(url, headers=headers)
+                response = urlopen(request, timeout=timeout)
+                data     = response.read()
+                response.close()
+                arr   = np.frombuffer(data, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if frame is None:
+                    raise ValueError("imdecode devolvió None")
+
+                if self._frame_validator is not None and not self._frame_validator(frame):
+                    logger.warning("Camera %s: frame duplicado detectado",
+                                   self._source_label())
+                    frame = None
+
+                with self._lock:
+                    self._frame      = frame
+                    self._snapshot_ok = frame is not None
+                if frame is not None:
+                    self._frame_times.append(time.monotonic())
+                fail_count = 0
+
+            except Exception as exc:
+                fail_count += 1
+                logger.warning(
+                    "Camera %s: snapshot error #%d: %s",
+                    self._source_label(), fail_count, exc,
+                )
+                with self._lock:
+                    self._snapshot_ok = False
+                    self._frame = None
+                wait = min(self._retry_max, 0.5 * (2 ** min(fail_count, 4)))
+                deadline = time.monotonic() + wait
+                while self._running and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                continue
+
+            elapsed   = time.monotonic() - t0
+            sleep_for = max(0.0, interval - elapsed)
+            if sleep_for > 0:
+                deadline = time.monotonic() + sleep_for
+                while self._running and time.monotonic() < deadline:
+                    time.sleep(0.01)
 
     def _source_label(self) -> str:
         if isinstance(self._index, str):
@@ -395,6 +466,10 @@ class Camera:
         return str(self._index)
 
     def _capture_loop(self) -> None:
+        if self._is_snapshot_source():
+            self._snapshot_loop()
+            return
+
         retry_wait = 0.0
         first_open = True
 
