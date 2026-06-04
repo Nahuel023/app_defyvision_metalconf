@@ -1639,8 +1639,16 @@ class RecordingTab(QWidget):
         self._fps_spin.setRange(1, 60)
         self._fps_spin.setValue(10)
         self._fps_spin.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:5px;padding:4px 6px;font-size:12px;max-width:66px;"
+            f"QSpinBox {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 22px 4px 6px;font-size:12px;max-width:72px; }"
+            f"QSpinBox::up-button {{ subcontrol-origin:border;subcontrol-position:top right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-bottom:1px solid {_BORDER};"
+            f"border-top-right-radius:5px;background:{_CARD}; }}"
+            f"QSpinBox::down-button {{ subcontrol-origin:border;subcontrol-position:bottom right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-top:1px solid {_BORDER};"
+            f"border-bottom-right-radius:5px;background:{_CARD}; }}"
+            f"QSpinBox::up-arrow {{ width:8px;height:8px; }}"
+            f"QSpinBox::down-arrow {{ width:8px;height:8px; }}"
         )
         cfg.addWidget(self._fps_spin)
 
@@ -1782,15 +1790,15 @@ class RecordingTab(QWidget):
         # ── Preview ──────────────────────────────────────────────────
         self._ip_preview = QLabel("Sin señal - ingrese la URL de la cámara y presione Conectar")
         self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._ip_preview.setMinimumHeight(220)
+        self._ip_preview.setMinimumHeight(400)
         self._ip_preview.setSizePolicy(
-            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._ip_preview.setStyleSheet(
             f"background:#0a0f1a;border-radius:8px;border:1px solid {_BORDER};"
             f"color:{_MUTED};font-size:12px;"
         )
-        lay.addWidget(self._ip_preview)
+        lay.addWidget(self._ip_preview, stretch=1)
 
         return grp
 
@@ -1878,8 +1886,8 @@ class RecordingTab(QWidget):
 
     def _show_ip_frame(self, frame) -> None:
         rect = self._ip_preview.contentsRect()
-        w = max(320, rect.width() - 4)
-        h = max(180, rect.height() - 4)
+        w = max(640, rect.width() - 4)
+        h = max(400, rect.height() - 4)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         fh, fw = rgb.shape[:2]
         qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
