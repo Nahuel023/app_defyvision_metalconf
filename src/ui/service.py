@@ -1371,7 +1371,7 @@ class _HTTPSnapshotReader(QThread):
         parent=None,
         username: str | None = None,
         password: str | None = None,
-        interval_ms: int = 150,         # 150 ms ≈ 6-7 fps (el preview solo muestra a 5 fps)
+        interval_ms: int = 67,          # 67 ms ≈ 15 fps
     ) -> None:
         super().__init__(parent)
         self._url = url
