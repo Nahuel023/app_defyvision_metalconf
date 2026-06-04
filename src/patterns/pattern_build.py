@@ -4,7 +4,7 @@ from src.io.load_images import load_bgr_image
 from src.patterns.pattern_io import Pattern, save_pattern, pattern_path, find_pattern_path
 from src.pipeline.grid_fitting import estimate_spacing, estimate_phase, assign_cells
 from src.patterns.roi import load_roi, apply_roi
-from src.pipeline.align_edge import align_image_by_right_edge
+from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.detect_holes import detect_holes_from_mask
 from src.pipeline.preprocess import preprocess_for_holes
 from src.utils.config import load_tolerances
@@ -28,7 +28,12 @@ def build_pattern_from_image(
 
     img_full = load_bgr_image(img_path)
 
-    img_aligned, align_res = align_image_by_right_edge(img_full)
+    edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
+    if edge_align_enabled:
+        img_aligned, align_res = align_image_by_right_edge(img_full)
+    else:
+        img_aligned = img_full
+        align_res = EdgeAlignResult(angle_deg=0.0, used_lines=0)
     print(f"[align-pattern] angle_deg={align_res.angle_deg:.2f} lines={align_res.used_lines}")
 
     roi = load_roi(model, scanner_id)
@@ -92,10 +97,16 @@ def build_pattern_from_image(
 
     # Stagger detection: if even-cj and odd-cj rows have different X-origins
     # (e.g. Esterilla large/small hole alternation), compute the signed offset.
+    # If grid_stagger_x_odd is set in config, use that value directly (more reliable
+    # than phase estimation which is sensitive to which holes are near the frame edge).
     even_xs = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 0])
     odd_xs  = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 1])
     stagger_x_odd: float | None = None
-    if len(even_xs) >= 4 and len(odd_xs) >= 4:
+    stagger_override = tolerances.get("grid_stagger_x_odd")
+    if stagger_override is not None:
+        stagger_x_odd = float(stagger_override)
+        print(f"[build-pattern] Stagger (config): stagger_x_odd={stagger_x_odd:.1f}px")
+    elif len(even_xs) >= 4 and len(odd_xs) >= 4:
         ph_even = estimate_phase(even_xs, dx)
         ph_odd  = estimate_phase(odd_xs, dx)
         stagger = float(((ph_odd - ph_even) + dx / 2.0) % dx - dx / 2.0)

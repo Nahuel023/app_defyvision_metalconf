@@ -36,38 +36,44 @@ pre_event_jpeg_quality: 80
 pre_event_max_ram_mb: 256.0
 models:
   modelo_A:
+    edge_align_enabled: false
     polarity: bright
-    threshold: 140
-    use_adaptive: true
+    threshold: 180
+    use_channel: gray
+    use_otsu: false
+    use_adaptive: false
+    open_ksize: 1
+    close_ksize: 3
     adaptive_block_size: 61
     adaptive_c: -5.0
     tilt_warn_deg: 2.5
-    min_area: 80.0
-    circularity_min: 0.35
-    aspect_ratio_max: 3.0
-    hole_type_split_area: 1000.0
-    min_area_small: 80.0
+    min_area: 20.0
+    circularity_min: 0.15
+    aspect_ratio_max: 4.5
+    hole_type_split_area: 0.0
+    min_area_small: 20.0
     max_area_small: 2000.0
-    min_area_large: 300.0
+    min_area_large: 20.0
     max_area_large: 8000.0
-    tol_xy_px: 14.0
+    tol_xy_px: 10.0
     align_match_tol_px: 250.0
     min_match_count: 3
-    edge_margin_px: 3.0
-    pattern_edge_margin_px: 22.0
-    grid_min_spacing: 30.0
-    grid_dx: 65.0
-    grid_dy: 36.0
+    edge_margin_px: 0.0
+    pattern_edge_margin_px: 4.0
+    grid_min_spacing: 10.0
+    grid_dx: 26.0
+    grid_dy: 14.0
+    grid_stagger_x_odd: 12.0
     grid_derotate: true
     grid_derotate_min_deg: 0.4
-    grid_max_missing: 50
+    grid_max_missing: 80
     bbox_filter_margin_px: 10.0
     grid_affine_refinement: true
     extra_min_dist_factor: 1.5
-    frame_missing_nok_threshold: 35
+    frame_missing_nok_threshold: 75
     consecutive_nok_frames: 5
     continuous_position_threshold: 0.0
-    machine_stop_enabled: true
+    machine_stop_enabled: false
     machine_stop_missing_frames: 5
     machine_stop_min_missing: 2
     machine_stop_same_zone_px: 40.0
@@ -75,34 +81,44 @@ models:
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
     machine_stop_on_tilt: false
-    pattern_desalign_enabled: true
+    pattern_desalign_enabled: false
     pattern_desalign_missing_ratio: 0.2
     pattern_desalign_min_angle_deg: 0.3
     pattern_desalign_zigzag_std_px: 11.5
     pattern_desalign_center_std_px: 5.5
     pattern_desalign_center_abs_px: 20.0
   modelo_B:
+    edge_align_enabled: false
     polarity: bright
-    min_area: 250.0
-    circularity_min: 0.75
-    aspect_ratio_max: 2.0
-    tol_xy_px: 10.0
+    threshold: 180
+    use_channel: b
+    use_otsu: false
+    use_adaptive: false
+    open_ksize: 1
+    close_ksize: 3
+    min_area: 15.0
+    circularity_min: 0.2
+    aspect_ratio_max: 3.5
+    tol_xy_px: 12.0
     align_match_tol_px: 120.0
     min_match_count: 5
-    edge_margin_px: 5.0
-    pattern_edge_margin_px: 25.0
-    grid_max_missing: 35
+    edge_margin_px: 0.0
+    pattern_edge_margin_px: 4.0
+    grid_max_missing: 90
     bbox_filter_margin_px: 20.0
     quality_ratio_min: 0.0
-    consecutive_nok_frames: 60
+    consecutive_nok_frames: 5
     grid_min_spacing: 15.0
+    grid_dx: 24.0
+    grid_dy: 7.5
+    grid_stagger_x_odd: -12.0
     grid_affine_refinement: true
     center_offset_tol_px: 0.0
     extra_min_dist_factor: 2.0
     continuous_position_threshold: 4.0
-    machine_stop_enabled: true
+    machine_stop_enabled: false
     machine_stop_missing_frames: 5
-    machine_stop_min_missing: 1
+    machine_stop_min_missing: 3
     machine_stop_same_zone_px: 35.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
@@ -125,5 +141,5 @@ models:
     pattern_edge_min_holes_per_band: 1
     pattern_edge_smooth_window: 1
     pattern_edge_boundary_tol_px: 24.0
-    frame_missing_nok_threshold: 1
+    frame_missing_nok_threshold: 90
     tilt_warn_deg: 0.0
