@@ -3007,6 +3007,13 @@ class EventBrowserTab(QWidget):
         self._refresh_events()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
+    @staticmethod
+    def _safe_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
@@ -3253,6 +3260,9 @@ class EventBrowserTab(QWidget):
             f"Actualizado {datetime.now().strftime('%H:%M:%S')}"
         )
 
+    def reload(self) -> None:
+        self._refresh_events()
+
     def _scan_event_entries(self) -> list[_EventEntry]:
         if not self._events_dir.exists():
             return []
@@ -3285,14 +3295,14 @@ class EventBrowserTab(QWidget):
                 except Exception:
                     event_dt = None
 
-            manifest_frames = int(
-                manifest.get("frames_count")
-                or (
-                    int(manifest.get("pre_frames_count", 0))
-                    + int(manifest.get("post_frames_count", 0))
+            manifest_frames = self._safe_int(manifest.get("frames_count"))
+            if manifest_frames <= 0:
+                manifest_frames = (
+                    self._safe_int(manifest.get("pre_frames_count"))
+                    + self._safe_int(manifest.get("post_frames_count"))
                 )
-                or len(frames)
-            )
+            if manifest_frames <= 0:
+                manifest_frames = len(frames)
 
             entries.append(_EventEntry(
                 folder=folder,
@@ -3422,11 +3432,19 @@ class EventBrowserTab(QWidget):
                     keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
                     for key in keys[self._px_cache_max // 2:]:
                         del self._px_cache[key]
+            else:
+                self._event_img_view.clear("No se pudo leer la imagen seleccionada")
+                self._events_status_lbl.setText(
+                    f"Frame ilegible: {self._frame_paths[idx].name}"
+                )
 
         if pxm is not None:
             prev = self._event_img_view.current_pixmap()
             needs_fit = prev is None or prev.size() != pxm.size()
             self._event_img_view.set_pixmap(pxm, auto_fit=needs_fit)
+            self._events_status_lbl.setText(
+                f"Mostrando {self._current_entry.name if self._current_entry else '-'}"
+            )
 
         self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
         self._frame_file_lbl.setText(self._frame_paths[idx].name)
@@ -3850,14 +3868,14 @@ class CameraCalibTab(QWidget):
         self._ip_host_edit = QLineEdit()
         self._ip_host_edit.setFixedHeight(34)
         self._ip_host_edit.setFixedWidth(190)
-        self._ip_host_edit.setPlaceholderText("192.168.1.26")
+        self._ip_host_edit.setPlaceholderText("192.168.1.3")
         self._ip_host_edit.setStyleSheet(
             f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
             "border-radius:5px;padding:5px 10px;font-size:12px;"
             f"font-family:Consolas,monospace;selection-background-color:{_ACCENT};"
         )
         self._ip_host_edit.returnPressed.connect(self._on_ip_connect)
-        self._ip_host_edit.setPlaceholderText("192.168.1.26")
+        self._ip_host_edit.setPlaceholderText("192.168.1.3")
         self._ip_host_edit.textChanged.connect(lambda _txt: self._sync_ip_generated_url())
         row1.addWidget(self._ip_host_edit)
 
@@ -4318,7 +4336,7 @@ class CameraCalibTab(QWidget):
                 settings = data.get(key, {})
         except Exception:
             pass
-        default_host = "192.168.1.17" if slot == 0 else ""
+        default_host = "192.168.1.3" if slot == 0 else "192.168.1.2"
         host = self._extract_ip_camera_host(settings, default_host)
         self._ip_host_edit.setText(host)
         url = str(settings.get("url", "")).strip()
@@ -5269,7 +5287,7 @@ class ServiceWindow(QMainWindow):
 
     def _on_tab_changed(self, _idx: int) -> None:
         if self._tabs.currentWidget() is self._events_tab:
-            self._events_tab._refresh_events()
+            self._events_tab.reload()
 
     def _refresh(self) -> None:
         connected = self._system.plc.connected

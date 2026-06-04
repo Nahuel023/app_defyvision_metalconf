@@ -9,7 +9,7 @@ plc:
   poll_interval_ms: 50
 
 scanner_1:
-  camera_index: 1
+  camera_source: "http://192.168.1.3/oneshotimage.jpg"
   model: "modelo_B"
   allowed_models: ["modelo_B"]   # solo Microperforado
   inspection: {}
@@ -24,7 +24,7 @@ scanner_1:
     backlight:   10   # Y12 octal → offset decimal 10 — pantalla roja 1
 
 scanner_2:
-  camera_index: 0
+  camera_source: "http://192.168.1.2/oneshotimage.jpg"
   model: "modelo_A"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   inspection: {}
