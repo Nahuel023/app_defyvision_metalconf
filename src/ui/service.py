@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -1547,29 +1548,44 @@ class RecordingTab(QWidget):
         return w
 
     def _build_ana_page(self) -> QWidget:
-        """Página ANÁLISIS: controles siempre visibles arriba + visor scrolleable abajo."""
+        """Página ANÁLISIS: scroll vertical único sobre toda la página."""
         page = QWidget()
         page.setStyleSheet(f"background:{_DARK};")
         outer = QVBoxLayout(page)
-        outer.setContentsMargins(10, 10, 10, 10)
-        outer.setSpacing(8)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # ── Parte superior FIJA: selección de modelo + botones + barra de progreso ──
-        outer.addWidget(self._build_analysis_section())
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        content.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(10, 10, 10, 18)
+        content_lay.setSpacing(8)
+        content_lay.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        content_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # ── Parte inferior SCROLLEABLE: navegador de capturas + visor ──
+        analysis_section = self._build_analysis_section()
+        analysis_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        content_lay.addWidget(analysis_section)
+
         _scroll_style = (
             f"QScrollArea {{ border:none; background:{_DARK}; }}"
             f"QScrollBar:vertical {{ background:{_PANEL};width:8px;border-radius:4px; }}"
             f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:4px;min-height:30px; }}"
             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
         )
-        browser_scroll = QScrollArea()
-        browser_scroll.setWidgetResizable(True)
-        browser_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        browser_scroll.setStyleSheet(_scroll_style)
-        browser_scroll.setWidget(self._build_browser_section())
-        outer.addWidget(browser_scroll, stretch=1)
+        browser_section = self._build_browser_section()
+        browser_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        content_lay.addWidget(browser_section)
+        content_lay.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setStyleSheet(_scroll_style)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
 
         return page
 
@@ -1964,7 +1980,7 @@ class RecordingTab(QWidget):
         self._analyze_model_chip = QLabel("-")
         self._analyze_model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._analyze_model_chip.setFixedHeight(44)
-        self._analyze_model_chip.setMinimumWidth(180)
+        self._analyze_model_chip.setMinimumWidth(140)
         btn_row.addWidget(self._analyze_model_chip)
 
         lay.addLayout(btn_row)
@@ -2006,6 +2022,7 @@ class RecordingTab(QWidget):
         self._summary_row.setSpacing(8)
 
         self._summary_lbl = QLabel("")
+        self._summary_lbl.setWordWrap(True)
         self._summary_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:12px;font-weight:700;letter-spacing:0.5px;"
         )
@@ -2013,6 +2030,7 @@ class RecordingTab(QWidget):
         self._summary_row.addStretch()
 
         self._stats_lbl = QLabel("")
+        self._stats_lbl.setWordWrap(True)
         self._stats_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-family:Consolas;"
         )
@@ -2074,7 +2092,7 @@ class RecordingTab(QWidget):
         # Frame counter
         self._nav_lbl = QLabel("-")
         self._nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._nav_lbl.setMinimumWidth(130)
+        self._nav_lbl.setMinimumWidth(96)
         self._nav_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:15px;font-weight:700;"
             f"background:{_DARK};border:1px solid {_BORDER};"
@@ -2105,7 +2123,7 @@ class RecordingTab(QWidget):
                                       bg="#3b0f0f", bd="#7f1d1d", hv="#5c1515", fs=11)
         self._nok_nav_lbl = QLabel("NOK -")
         self._nok_nav_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._nok_nav_lbl.setFixedWidth(80)
+        self._nok_nav_lbl.setFixedWidth(68)
         self._nok_nav_lbl.setStyleSheet(
             f"color:{_NOK};font-size:11px;font-weight:700;"
             f"background:#1a0a0a;border:1px solid #7f1d1d;"
@@ -2154,7 +2172,7 @@ class RecordingTab(QWidget):
         self._model_chip = QLabel("-")
         self._model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._model_chip.setFixedHeight(38)
-        self._model_chip.setMinimumWidth(140)
+        self._model_chip.setMinimumWidth(110)
         self._model_chip.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:2px;"
             f"background:{_DARK};border:1px solid {_BORDER};"
@@ -2166,7 +2184,7 @@ class RecordingTab(QWidget):
 
         # ── Result card - right of nav bar ────────────────────────────
         self._result_card = QFrame()
-        self._result_card.setMinimumWidth(280)
+        self._result_card.setMinimumWidth(210)
         self._result_card.setStyleSheet(
             f"QFrame {{ background:{_PANEL};border:1px solid {_BORDER};border-radius:8px; }}"
         )
@@ -2483,7 +2501,7 @@ class RecordingTab(QWidget):
         self._ana_progress_bar.setVisible(True)
         self._set_rec_badge("analyzing", n, self._rec_dir)
         self._set_analysis_running(True)
-        logger.info(f"[AnÃ¡lisis] iniciando: {n} frames  modelo={model}")
+        logger.info(f"[Analisis] iniciando: {n} frames  modelo={model}")
         self._worker = _AnalysisWorker(model, list(self._frame_paths), scanner_id, self)
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
