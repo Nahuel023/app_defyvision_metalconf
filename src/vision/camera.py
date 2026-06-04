@@ -401,22 +401,56 @@ class Camera:
         return headers
 
     def _snapshot_loop(self) -> None:
-        fps_target = max(0.5, float(self._settings.get("fps", 5)))
-        interval   = 1.0 / fps_target
-        timeout    = float(self._settings.get("open_timeout_s", 10.0))
-        headers    = self._build_auth_headers()
-        url        = str(self._index)
-        fail_count = 0
+        import http.client
+        from urllib.parse import urlparse
 
-        logger.info("Camera %s: modo snapshot @ %.1f fps", self._source_label(), fps_target)
+        fps_target    = max(0.5, float(self._settings.get("fps", 5)))
+        interval      = 1.0 / fps_target
+        timeout       = float(self._settings.get("open_timeout_s", 10.0))
+        # Keep showing last good frame for this many seconds before going blank
+        stale_timeout = float(self._settings.get("stale_frame_timeout_s", 3.0))
+        auth_headers  = self._build_auth_headers()
+
+        parsed   = urlparse(str(self._index))
+        host     = parsed.netloc or parsed.hostname or ""
+        req_path = parsed.path or "/"
+        if parsed.query:
+            req_path += "?" + parsed.query
+
+        conn:      http.client.HTTPConnection | None = None
+        fail_count = 0
+        last_ok_t  = 0.0
+
+        logger.info(
+            "Camera %s: modo snapshot keep-alive @ %.1f fps",
+            self._source_label(), fps_target,
+        )
 
         while self._running:
             t0 = time.monotonic()
             try:
-                request  = Request(url, headers=headers)
-                response = urlopen(request, timeout=timeout)
-                data     = response.read()
-                response.close()
+                # Reusar conexión TCP; abrir solo si no existe o fue cerrada
+                if conn is None:
+                    conn = http.client.HTTPConnection(host, timeout=timeout)
+
+                conn.request("GET", req_path, headers=auth_headers)
+                resp = conn.getresponse()
+
+                if resp.status == 401:
+                    logger.error(
+                        "Camera %s: HTTP 401 — verificar username/password en camera.yaml",
+                        self._source_label(),
+                    )
+                    resp.read()
+                    conn.close()
+                    conn = None
+                    self._sleep_interruptible(5.0)
+                    continue
+
+                if resp.status != 200:
+                    raise IOError(f"HTTP {resp.status}")
+
+                data  = resp.read()
                 arr   = np.frombuffer(data, dtype=np.uint8)
                 frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if frame is None:
@@ -428,33 +462,52 @@ class Camera:
                     frame = None
 
                 with self._lock:
-                    self._frame      = frame
+                    self._frame       = frame
                     self._snapshot_ok = frame is not None
                 if frame is not None:
-                    self._frame_times.append(time.monotonic())
+                    now = time.monotonic()
+                    self._frame_times.append(now)
+                    last_ok_t = now
                 fail_count = 0
 
             except Exception as exc:
                 fail_count += 1
-                logger.warning(
-                    "Camera %s: snapshot error #%d: %s",
-                    self._source_label(), fail_count, exc,
-                )
+                # Cerrar conexión rota para forzar reconexión en próximo intento
+                if conn is not None:
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    conn = None
+
+                now = time.monotonic()
+                stale = now - last_ok_t > stale_timeout
                 with self._lock:
                     self._snapshot_ok = False
-                    self._frame = None
-                wait = min(self._retry_max, 0.5 * (2 ** min(fail_count, 4)))
-                deadline = time.monotonic() + wait
-                while self._running and time.monotonic() < deadline:
-                    time.sleep(0.05)
+                    if stale:
+                        self._frame = None  # solo borrar tras superar timeout
+
+                logger.warning(
+                    "Camera %s: error #%d%s: %s",
+                    self._source_label(), fail_count,
+                    " (frame retenido)" if not stale else "",
+                    exc,
+                )
+                # Backoff rápido: 0.1 → 0.2 → 0.4 → 0.8 → 1.6s (máx retry_max)
+                wait = min(self._retry_max, 0.1 * (2 ** min(fail_count - 1, 4)))
+                self._sleep_interruptible(wait)
                 continue
 
             elapsed   = time.monotonic() - t0
             sleep_for = max(0.0, interval - elapsed)
-            if sleep_for > 0:
-                deadline = time.monotonic() + sleep_for
-                while self._running and time.monotonic() < deadline:
-                    time.sleep(0.01)
+            if sleep_for > 0.005:
+                self._sleep_interruptible(sleep_for)
+
+    def _sleep_interruptible(self, seconds: float) -> None:
+        """Sleep en chunks de 10ms para responder rápido a stop()."""
+        deadline = time.monotonic() + seconds
+        while self._running and time.monotonic() < deadline:
+            time.sleep(0.01)
 
     def _source_label(self) -> str:
         if isinstance(self._index, str):
