@@ -2529,7 +2529,6 @@ class RecordingTab(QWidget):
         i = self._ana_frame_idx
 
         if i >= n:
-            # Todos los frames procesados
             self._ana_running = False
             try:
                 self._on_ana_done_inner(self._results)
@@ -2542,6 +2541,15 @@ class RecordingTab(QWidget):
                 self._ana_progress_bar.setVisible(False)
                 self._set_analysis_running(False)
             return
+
+        # Mostrar "procesando frame N" ANTES de la llamada (que puede tardar 300-1500ms).
+        # processEvents() fuerza repintado inmediato para que el usuario vea el avance.
+        pct_before = int(i * 100 / n)
+        self._ana_progress.setText(
+            f"Analizando frame  {i + 1} / {n}  ({pct_before}%)..."
+        )
+        self._ana_progress_bar.setValue(i)
+        QApplication.processEvents()   # repinta la barra ANTES de bloquear en inspect_image
 
         from src.inspection import inspect_image
         try:
@@ -2559,17 +2567,17 @@ class RecordingTab(QWidget):
 
         self._ana_frame_idx += 1
         done = self._ana_frame_idx
+        pct_after = int(done * 100 / n)
         self._ana_progress_bar.setValue(done)
-        pct = int(done * 100 / n)
-        self._ana_progress.setText(f"Analizando  {done} / {n}  ({pct}%)")
-        logger.debug(f"[Análisis] frame {done}/{n}")
+        self._ana_progress.setText(f"Analizando  {done} / {n}  ({pct_after}%)")
+        logger.info(f"[Análisis] frame {done}/{n} ({pct_after}%)")
 
-        # Mostrar frame actual en el visor cada 5 frames
-        if done % 5 == 1:
+        # Mostrar frame analizado en el visor (con overlay)
+        if done % 3 == 0:
             self._show_frame(i)
 
-        # Programar siguiente frame (1 ms de pausa para que Qt repinte)
-        QTimer.singleShot(1, self._analyze_one_frame)
+        # 10 ms de pausa para que Qt procese eventos (repintado) antes del próximo frame
+        QTimer.singleShot(10, self._analyze_one_frame)
 
     def _on_stop_analyze(self) -> None:
         if self._ana_running:
