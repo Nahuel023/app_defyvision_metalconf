@@ -107,7 +107,6 @@ class ScannerPanel(QWidget):
         self._last_overlay: Optional[np.ndarray] = None
         self._overlay_until_ms: int = 0
         self._nok_threshold: int = 5
-        self._manual_mode_display: bool = False
         self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
 
         self._build_ui()
@@ -318,7 +317,6 @@ class ScannerPanel(QWidget):
         status = self._scanner.get_status()
         camera_missing = bool(status.get("camera_missing", False))
         camera_missing_sec = float(status.get("camera_missing_sec", 0.0))
-        camera_missing_timeout_s = float(status.get("camera_missing_timeout_s", 0.0))
 
         self._update_cam_info(
             connected=self._camera.is_connected,
