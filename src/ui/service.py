@@ -2483,7 +2483,7 @@ class RecordingTab(QWidget):
         self._ana_progress_bar.setVisible(True)
         self._set_rec_badge("analyzing", n, self._rec_dir)
         self._set_analysis_running(True)
-        logger.info(f"[AnÃ¡lisis] iniciando: {n} frames  modelo={model}")
+        logger.info(f"[Analisis] iniciando: {n} frames  modelo={model}")
         self._worker = _AnalysisWorker(model, list(self._frame_paths), scanner_id, self)
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
