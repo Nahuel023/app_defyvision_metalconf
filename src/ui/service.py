@@ -1533,14 +1533,23 @@ class RecordingTab(QWidget):
         container = QWidget()
         scroll.setWidget(container)
 
-        root = QVBoxLayout(container)
+        root = QHBoxLayout(container)
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
 
-        root.addWidget(self._build_recording_section())
-        root.addWidget(self._build_ip_camera_section())
-        root.addWidget(self._build_analysis_section())
-        root.addWidget(self._build_browser_section(), stretch=1)
+        # Columna izquierda: controles de grabación + análisis + browser
+        left_w = QWidget()
+        left_w.setFixedWidth(430)
+        left = QVBoxLayout(left_w)
+        left.setContentsMargins(0, 0, 0, 0)
+        left.setSpacing(10)
+        left.addWidget(self._build_recording_section())
+        left.addWidget(self._build_analysis_section())
+        left.addWidget(self._build_browser_section(), stretch=1)
+        root.addWidget(left_w)
+
+        # Columna derecha: preview de cámara IP
+        root.addWidget(self._build_ip_camera_section(), stretch=1)
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1792,9 +1801,9 @@ class RecordingTab(QWidget):
         lay.addLayout(url_row)
 
         # ── Preview ──────────────────────────────────────────────────
-        self._ip_preview = QLabel("Sin señal - ingrese la URL de la cámara y presione Conectar")
+        self._ip_preview = QLabel("Sin señal")
         self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._ip_preview.setMinimumHeight(400)
+        self._ip_preview.setMinimumHeight(280)
         self._ip_preview.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
