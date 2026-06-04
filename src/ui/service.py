@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -1538,28 +1539,32 @@ class RecordingTab(QWidget):
         lay.addWidget(self._cam_panel, stretch=1)
         return w
 
-    def _build_ana_page(self) -> QScrollArea:
-        """Página ANÁLISIS: sección análisis + browser (scroll vertical, sin scroll horizontal)."""
-        content = QWidget()
-        content.setStyleSheet(f"background:{_DARK};")
-        lay = QVBoxLayout(content)
-        lay.setContentsMargins(14, 14, 14, 14)
-        lay.setSpacing(10)
-        lay.addWidget(self._build_analysis_section())
-        lay.addWidget(self._build_browser_section(), stretch=1)
+    def _build_ana_page(self) -> QWidget:
+        """Página ANÁLISIS: controles siempre visibles arriba + visor scrolleable abajo."""
+        page = QWidget()
+        page.setStyleSheet(f"background:{_DARK};")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(10, 10, 10, 10)
+        outer.setSpacing(8)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet(
+        # ── Parte superior FIJA: selección de modelo + botones + barra de progreso ──
+        outer.addWidget(self._build_analysis_section())
+
+        # ── Parte inferior SCROLLEABLE: navegador de capturas + visor ──
+        _scroll_style = (
             f"QScrollArea {{ border:none; background:{_DARK}; }}"
             f"QScrollBar:vertical {{ background:{_PANEL};width:8px;border-radius:4px; }}"
             f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:4px;min-height:30px; }}"
             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
         )
-        scroll.setWidget(content)
-        return scroll
+        browser_scroll = QScrollArea()
+        browser_scroll.setWidgetResizable(True)
+        browser_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        browser_scroll.setStyleSheet(_scroll_style)
+        browser_scroll.setWidget(self._build_browser_section())
+        outer.addWidget(browser_scroll, stretch=1)
+
+        return page
 
     def _build_recording_section(self) -> QGroupBox:
         grp = QGroupBox("GRABACIÓN")
@@ -1957,18 +1962,32 @@ class RecordingTab(QWidget):
 
         lay.addLayout(btn_row)
 
-        # ── Fila 2: progreso + estado ─────────────────────────────────
+        # ── Fila 2: barra de progreso ────────────────────────────────
+        self._ana_progress_bar = QProgressBar()
+        self._ana_progress_bar.setRange(0, 100)
+        self._ana_progress_bar.setValue(0)
+        self._ana_progress_bar.setFixedHeight(18)
+        self._ana_progress_bar.setVisible(False)
+        self._ana_progress_bar.setStyleSheet(
+            f"QProgressBar {{ background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:8px;text-align:center;font-size:10px;font-weight:700;"
+            f"color:{_TEXT}; }}"
+            f"QProgressBar::chunk {{ background:{_ACCENT};border-radius:8px; }}"
+        )
+        lay.addWidget(self._ana_progress_bar)
+
+        # ── Fila 3: texto de progreso + estado ────────────────────────
         info_row = QHBoxLayout()
         info_row.setSpacing(12)
 
-        self._ana_progress = QLabel("")
+        self._ana_progress = QLabel("Listo para analizar")
         self._ana_progress.setStyleSheet(
-            f"color:{_ACCENT};font-size:12px;font-family:Consolas;font-weight:600;"
+            f"color:{_ACCENT};font-size:13px;font-family:Consolas;font-weight:700;"
         )
         info_row.addWidget(self._ana_progress)
         info_row.addStretch()
 
-        self._status_lbl = QLabel("Listo")
+        self._status_lbl = QLabel("")
         self._status_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-family:Consolas;"
         )
@@ -2432,20 +2451,34 @@ class RecordingTab(QWidget):
         self._overlay_jpegs.clear()
         self._stats_lbl.setText("")
         self._export_status_lbl.setText("")
-        self._ana_progress.setText("Analizando...")
-        self._set_rec_badge("analyzing", len(self._frame_paths), self._rec_dir)
+        n = len(self._frame_paths)
+        self._ana_progress.setText(f"Iniciando análisis  ({n} frames)...")
+        self._ana_progress.setStyleSheet(
+            f"color:{_ACCENT};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setRange(0, 100)
+        self._ana_progress_bar.setValue(0)
+        self._ana_progress_bar.setVisible(True)
+        self._ana_progress_bar.setStyleSheet(
+            f"QProgressBar {{ background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:8px;text-align:center;font-size:10px;font-weight:700;"
+            f"color:{_TEXT}; }}"
+            f"QProgressBar::chunk {{ background:{_ACCENT};border-radius:8px; }}"
+        )
+        self._set_rec_badge("analyzing", n, self._rec_dir)
         self._set_analysis_running(True)
+        logger.info(f"[Análisis] iniciando: {n} frames  modelo={self._active_model()}")
 
         self._worker = _AnalysisWorker(
             self._active_model(), list(self._frame_paths),
             scanner_id=self._scanner_combo.currentText() or None,
-            parent=self,
         )
         self._worker.progress.connect(self._on_ana_progress)
         self._worker.finished.connect(self._on_ana_done)
         self._worker.error.connect(self._on_ana_error)
         self._worker.cancelled.connect(self._on_ana_cancelled)
         self._worker.start()
+        logger.info("[Análisis] worker iniciado")
 
     def _on_stop_analyze(self) -> None:
         if self._worker is not None and self._worker.isRunning():
@@ -2454,7 +2487,11 @@ class RecordingTab(QWidget):
             self._ana_progress.setText("Deteniendo...")
 
     def _on_ana_cancelled(self, done: int) -> None:
-        self._ana_progress.setText(f"Análisis detenido ({done} frames)")
+        self._ana_progress.setText(f"Detenido  ({done} frames procesados)")
+        self._ana_progress.setStyleSheet(
+            f"color:{_WARN};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setVisible(False)
         self._set_analysis_running(False)
         self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
         logger.info(f"[Grabación] análisis detenido por el operador tras {done} frames")
@@ -2462,9 +2499,8 @@ class RecordingTab(QWidget):
     def _on_ana_progress(self, done: int, total: int) -> None:
         pct = int(done * 100 / total) if total else 0
         self._ana_progress.setText(f"Analizando  {done} / {total}  ({pct}%)")
-        # Mostrar frame en vivo cada 3 frames para no sobrecargar la UI con cv2.imread
-        if done > 0 and done <= len(self._frame_paths) and done % 3 == 0:
-            self._show_frame(done - 1)
+        self._ana_progress_bar.setValue(pct)
+        logger.debug(f"[Análisis] progreso {done}/{total} ({pct}%)")
 
     def _on_ana_done(self, results: list) -> None:
         try:
@@ -2532,7 +2568,17 @@ class RecordingTab(QWidget):
             except Exception:
                 pass
 
-        self._ana_progress.setText("OK Análisis completo")
+        self._ana_progress.setText(f"✓  Análisis completo  —  OK: {ok}  NOK: {nok}  ({pct}%)")
+        self._ana_progress.setStyleSheet(
+            f"color:{_OK};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setValue(100)
+        self._ana_progress_bar.setStyleSheet(
+            f"QProgressBar {{ background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:8px;text-align:center;font-size:10px;font-weight:700;"
+            f"color:{_TEXT}; }}"
+            f"QProgressBar::chunk {{ background:{_OK};border-radius:8px; }}"
+        )
         self._set_analysis_running(False)
         self._set_rec_badge("analyzed", len(results), self._rec_dir)
         self._update_model_chip()
@@ -2542,7 +2588,11 @@ class RecordingTab(QWidget):
         logger.info(f"[Grabación] análisis completo - OK={ok} NOK={nok}")
 
     def _on_ana_error(self, msg: str) -> None:
-        self._ana_progress.setText(f"ALERTA  Error: {msg}")
+        self._ana_progress.setText(f"✗  Error: {msg}")
+        self._ana_progress.setStyleSheet(
+            f"color:{_NOK};font-size:13px;font-family:Consolas;font-weight:700;"
+        )
+        self._ana_progress_bar.setVisible(False)
         self._set_analysis_running(False)
         self._set_rec_badge("ready", len(self._frame_paths), self._rec_dir)
         logger.error(f"[Grabación] error de análisis: {msg}")
