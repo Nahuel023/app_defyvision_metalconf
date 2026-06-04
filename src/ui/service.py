@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QLayout,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -1547,34 +1548,41 @@ class RecordingTab(QWidget):
         return w
 
     def _build_ana_page(self) -> QWidget:
-        """Página ANÁLISIS: controles siempre visibles arriba + visor scrolleable abajo."""
+        """Página ANÁLISIS: scroll vertical único sobre toda la página."""
         page = QWidget()
         page.setStyleSheet(f"background:{_DARK};")
         outer = QVBoxLayout(page)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # ── Parte superior FIJA: selección de modelo + botones + barra de progreso ──
         content = QWidget()
         content.setStyleSheet(f"background:{_DARK};")
+        content.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         content_lay = QVBoxLayout(content)
         content_lay.setContentsMargins(10, 10, 10, 18)
         content_lay.setSpacing(8)
-        content_lay.addWidget(self._build_analysis_section())
+        content_lay.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        content_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # ── Parte inferior SCROLLEABLE: navegador de capturas + visor ──
+        analysis_section = self._build_analysis_section()
+        analysis_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        content_lay.addWidget(analysis_section)
+
         _scroll_style = (
             f"QScrollArea {{ border:none; background:{_DARK}; }}"
             f"QScrollBar:vertical {{ background:{_PANEL};width:8px;border-radius:4px; }}"
             f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:4px;min-height:30px; }}"
             f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
         )
-        content_lay.addWidget(self._build_browser_section())
-        content_lay.addStretch()
+        browser_section = self._build_browser_section()
+        browser_section.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
+        content_lay.addWidget(browser_section)
+        content_lay.addStretch(1)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
         scroll.setStyleSheet(_scroll_style)
         scroll.setWidget(content)
         outer.addWidget(scroll)

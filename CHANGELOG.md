@@ -45,6 +45,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-04 (continuación 3) — Tadeo + Claude
 
+#### Cambio 109 — ANÁLISIS: scroll vertical único sobre toda la página
+
+**Problema:** en la pestaña de análisis el usuario podía bajar dentro de `NAVEGADOR DE CAPTURAS`,
+pero la sección superior `ANÁLISIS` quedaba ocupando espacio visual, como si no formara parte
+del mismo scroll de página.
+
+**Cambios en `src/ui/service.py`:**
+- `_build_ana_page()` vuelve a tratar `ANÁLISIS` + `NAVEGADOR DE CAPTURAS` como un solo bloque
+  vertical dentro del `QScrollArea`.
+- El layout del contenido usa `QLayout.SizeConstraint.SetMinimumSize` y alineación superior para
+  que Qt calcule la altura real del contenido y permita desplazar toda la página.
+- `analysis_section` y `browser_section` pasan a `QSizePolicy.Expanding / Maximum` para evitar
+  que se estiren artificialmente y “simulen” quedar fijos arriba.
+- El `QScrollArea` queda alineado arriba y sin barra horizontal, manteniendo el ajuste de ancho
+  previo para esta PC.
+
+**Resultado esperado:** al bajar, se mueve la página completa de análisis; la sección superior
+deja de quedar “molestando” mientras se navegan frames más abajo.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
 #### Cambio 108 — Patrones recalibrados para cámara nueva 640×480 (scanner_1/scanner_2)
 
 **Contexto:** cámara nueva, ángulo completamente diferente. Todos los patrones anteriores inválidos.
