@@ -1054,8 +1054,6 @@ class _AnalysisWorker(QThread):
         self._cancel = True
 
     def run(self) -> None:
-        import os
-        from concurrent.futures import ThreadPoolExecutor, as_completed
         from src.inspection import inspect_image
         from src.patterns.pattern_io import load_pattern, find_pattern_path
         from src.patterns.roi import load_roi
@@ -1064,23 +1062,24 @@ class _AnalysisWorker(QThread):
 
         try:
             n = len(self._paths)
+            if n == 0:
+                self.finished.emit([])
+                return
+
             tols = load_tolerances(self._model)
 
-            # Pre-load shared read-only resources once (eliminates Nx3 disk reads).
+            # Pre-cargar recursos estáticos una sola vez para evitar N lecturas de disco.
+            # ema_state se inicializa por worker (no se comparte entre frames).
             _pre: dict = {
                 "tolerances": tols,
                 "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
                 "roi":        load_roi(self._model, self._scanner_id),
+                "ema_state":  {},   # estado de suavizado de ángulo, se actualiza por frame
             }
 
-            results: list = [None] * n
-
             machine_stop_enabled = bool(tols.get("machine_stop_enabled", False))
-
             if machine_stop_enabled:
-                # Sequential processing required: MachineStopDetector is stateful and
-                # must see frames in order to accumulate streaks correctly.
-                ms_det = MachineStopDetector(
+                _pre["machine_stop_detector"] = MachineStopDetector(
                     enabled=True,
                     missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
                     min_missing=int(tols.get("machine_stop_min_missing", 1)),
@@ -1089,54 +1088,19 @@ class _AnalysisWorker(QThread):
                     track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
                     same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
                 )
-                _pre["machine_stop_detector"] = ms_det
-                # Emit progress at most every ~2% of total frames to avoid flooding
-                # the main thread event loop with cross-thread signal deliveries.
-                _emit_every = max(1, n // 50)
-                for i, path in enumerate(self._paths):
-                    if self._cancel:
-                        self.cancelled.emit(i)
-                        return
-                    results[i] = inspect_image(
-                        self._model, path,
-                        scanner_id=self._scanner_id,
-                        _preloaded=_pre,
-                    )
-                    if (i + 1) % _emit_every == 0 or i + 1 == n:
-                        self.progress.emit(i + 1, n)
-            else:
-                done = 0
-                _emit_every = max(1, n // 50)
-                # OpenCV and numpy release the GIL - parallel is safe when no stateful detector.
-                n_workers = min(os.cpu_count() or 2, 6)
 
-                def _worker(args):
-                    idx, path = args
-                    if self._cancel:
-                        return idx, None
-                    return idx, inspect_image(
-                        self._model, path,
-                        scanner_id=self._scanner_id,
-                        _preloaded=_pre,
-                    )
-
-                executor = ThreadPoolExecutor(max_workers=n_workers)
-                try:
-                    futures = {
-                        executor.submit(_worker, (i, p)): i
-                        for i, p in enumerate(self._paths)
-                    }
-                    for future in as_completed(futures):
-                        if self._cancel:
-                            self.cancelled.emit(done)
-                            return
-                        idx, result = future.result()
-                        results[idx] = result
-                        done += 1
-                        if done % _emit_every == 0 or done == n:
-                            self.progress.emit(done, n)
-                finally:
-                    executor.shutdown(wait=False, cancel_futures=True)
+            results: list = []
+            for i, path in enumerate(self._paths):
+                if self._cancel:
+                    self.cancelled.emit(i)
+                    return
+                results.append(inspect_image(
+                    self._model, path,
+                    scanner_id=self._scanner_id,
+                    _preloaded=_pre,
+                ))
+                # Emitir progreso en cada frame para que la UI muestre avance en vivo.
+                self.progress.emit(i + 1, n)
 
             self.finished.emit(results)
         except Exception as exc:
@@ -1575,7 +1539,7 @@ class RecordingTab(QWidget):
         return w
 
     def _build_ana_page(self) -> QScrollArea:
-        """Página ANÁLISIS: sección análisis + browser (con scroll)."""
+        """Página ANÁLISIS: sección análisis + browser (scroll vertical, sin scroll horizontal)."""
         content = QWidget()
         content.setStyleSheet(f"background:{_DARK};")
         lay = QVBoxLayout(content)
@@ -1586,7 +1550,14 @@ class RecordingTab(QWidget):
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border:none; background:{_DARK}; }}"
+            f"QScrollBar:vertical {{ background:{_PANEL};width:8px;border-radius:4px; }}"
+            f"QScrollBar::handle:vertical {{ background:{_BORDER};border-radius:4px;min-height:30px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
+        )
         scroll.setWidget(content)
         return scroll
 
@@ -2489,9 +2460,10 @@ class RecordingTab(QWidget):
         logger.info(f"[Grabación] análisis detenido por el operador tras {done} frames")
 
     def _on_ana_progress(self, done: int, total: int) -> None:
-        self._ana_progress.setText(f"Analizando  {done} / {total}...")
-        # Mostrar el frame más reciente desde disco (sin overlay aún)
-        if done > 0 and done <= len(self._frame_paths):
+        pct = int(done * 100 / total) if total else 0
+        self._ana_progress.setText(f"Analizando  {done} / {total}  ({pct}%)")
+        # Mostrar frame en vivo cada 3 frames para no sobrecargar la UI con cv2.imread
+        if done > 0 and done <= len(self._frame_paths) and done % 3 == 0:
             self._show_frame(done - 1)
 
     def _on_ana_done(self, results: list) -> None:
