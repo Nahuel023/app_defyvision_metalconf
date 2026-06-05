@@ -28,6 +28,14 @@ CREATE TABLE IF NOT EXISTS metrics (
     max_nok_streak      INTEGER DEFAULT 0,
     fault_count         INTEGER DEFAULT 0,
     avg_missing_holes   REAL    DEFAULT 0,
+    avg_detection_ratio REAL    DEFAULT 0,
+    align_fail_count    INTEGER DEFAULT 0,
+    low_quality_count   INTEGER DEFAULT 0,
+    low_quality_pct     REAL    DEFAULT 0,
+    machine_stop_count  INTEGER DEFAULT 0,
+    camera_missing_sec  REAL    DEFAULT 0,
+    camera_missing_events INTEGER DEFAULT 0,
+    inspection_uptime_pct REAL  DEFAULT 0,
     last_position_diff  REAL    DEFAULT 0,
     insp_per_min        REAL    DEFAULT 0,
     camera_fps          REAL    DEFAULT 0,
@@ -42,8 +50,10 @@ INSERT INTO metrics
     (ts, scanner_id, total_inspections, ok_count, nok_count,
      ok_pct, nok_streak, max_nok_streak, fault_count,
      avg_missing_holes, avg_detection_ratio, align_fail_count,
+     low_quality_count, low_quality_pct, machine_stop_count,
+     camera_missing_sec, camera_missing_events, inspection_uptime_pct,
      last_position_diff, insp_per_min, camera_fps, session_duration_s)
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
 """
 
 
@@ -128,6 +138,12 @@ class MetricsRecorder:
             migrations = [
                 ("avg_detection_ratio", "REAL DEFAULT 0"),
                 ("align_fail_count",    "INTEGER DEFAULT 0"),
+                ("low_quality_count",   "INTEGER DEFAULT 0"),
+                ("low_quality_pct",     "REAL DEFAULT 0"),
+                ("machine_stop_count",  "INTEGER DEFAULT 0"),
+                ("camera_missing_sec",  "REAL DEFAULT 0"),
+                ("camera_missing_events", "INTEGER DEFAULT 0"),
+                ("inspection_uptime_pct", "REAL DEFAULT 0"),
             ]
             for col, typedef in migrations:
                 if col not in existing:
@@ -182,6 +198,12 @@ class MetricsRecorder:
                 s.get("avg_missing_holes", 0.0),
                 s.get("avg_detection_ratio", 0.0),
                 s.get("align_fail_count", 0),
+                s.get("low_quality_count", 0),
+                s.get("low_quality_pct", 0.0),
+                s.get("machine_stop_count", 0),
+                s.get("camera_missing_sec", 0.0),
+                s.get("camera_missing_events", 0),
+                s.get("inspection_uptime_pct", 0.0),
                 s.get("last_position_diff", 0.0),
                 ipm,
                 cam.fps,

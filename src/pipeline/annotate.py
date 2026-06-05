@@ -69,10 +69,10 @@ def _draw_nok_reasons_panel(
         return
 
     font       = cv2.FONT_HERSHEY_SIMPLEX
-    hdr_scale  = 0.90
+    hdr_scale  = 0.60
     hdr_thick  = 2
-    row_scale  = 0.65
-    row_thick  = 2
+    row_scale  = 0.45
+    row_thick  = 1
     pad        = 8
     row_gap    = 4
 
@@ -150,25 +150,25 @@ def draw_compare_overlay(
     for i, (x, y) in enumerate(missing_points):
         ix, iy = int(x), int(y)
         # Círculo hueco: indica la posición esperada sin tapar el agujero debajo
-        cv2.circle(out, (ix, iy), 18, (0, 0, 0),   3)   # sombra negra
-        cv2.circle(out, (ix, iy), 18, (0, 0, 255),  2)   # borde rojo
+        cv2.circle(out, (ix, iy), 10, (0, 0, 0),   2)   # sombra negra
+        cv2.circle(out, (ix, iy), 10, (0, 0, 255),  2)   # borde rojo
         # Cruz: sombra primero, luego roja
         cv2.drawMarker(out, (ix, iy), (0, 0, 0),
-                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=28, thickness=4)
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=16, thickness=3)
         cv2.drawMarker(out, (ix, iy), (0, 0, 255),
-                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=28, thickness=2)
+                       markerType=cv2.MARKER_TILTED_CROSS, markerSize=16, thickness=2)
         # Número del faltante
         label = str(i + 1)
-        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        (lw, lh), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.35, 1)
         cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0),     3, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 0),     2, cv2.LINE_AA)
         cv2.putText(out, label, (ix - lw // 2, iy + lh // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
 
     # Extra detectados (espurios): naranja diamante
     for (x, y) in extra_points:
         cv2.drawMarker(out, (int(x), int(y)), (0, 165, 255),
-                       markerType=cv2.MARKER_DIAMOND, markerSize=20, thickness=2)
+                       markerType=cv2.MARKER_DIAMOND, markerSize=12, thickness=2)
 
     # Indicador de estado (OK/NOK). Por defecto aquí; con draw_status=False el
     # caller lo dibuja sobre el frame completo (borde izquierdo) vía draw_status_indicator.
@@ -196,7 +196,7 @@ def draw_status_indicator(
     else:
         color = (0, 220, 0) if status == "OK" else (0, 200, 255)
         cv2.putText(img, f"STATUS: {status}", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, color, 2, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
     return img
 
 
@@ -216,17 +216,17 @@ def draw_tilt_indicator(
         return img
     color = (0, 0, 255) if warn else (200, 200, 80)
     cv2.putText(img, f"Inclinacion: {tilt_deg:+.1f} grados", (10, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
     cv2.putText(img, f"Inclinacion: {tilt_deg:+.1f} grados", (10, y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
     if warn:
         label = "! CHAPA INCLINADA"
-        (tw, th), bl = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)
-        bx, by = 10, y + 14
-        cv2.rectangle(img, (bx, by), (bx + tw + 14, by + th + bl + 12), (0, 0, 150), -1)
-        cv2.rectangle(img, (bx, by), (bx + tw + 14, by + th + bl + 12), (0, 0, 255), 2)
-        cv2.putText(img, label, (bx + 7, by + th + 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2, cv2.LINE_AA)
+        (tw, th), bl = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        bx, by = 10, y + 8
+        cv2.rectangle(img, (bx, by), (bx + tw + 10, by + th + bl + 8), (0, 0, 150), -1)
+        cv2.rectangle(img, (bx, by), (bx + tw + 10, by + th + bl + 8), (0, 0, 255), 2)
+        cv2.putText(img, label, (bx + 5, by + th + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
     return img
 
 
@@ -304,10 +304,10 @@ def draw_machine_stop_badge(
     font = cv2.FONT_HERSHEY_SIMPLEX
 
     main_label = "! DETENCION DE MAQUINA"
-    main_scale, main_thick = 1.3, 3
+    main_scale, main_thick = 0.80, 2
     (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
 
-    reason_scale, reason_thick = 0.72, 2
+    reason_scale, reason_thick = 0.48, 1
     (rw, rh), rbl = (cv2.getTextSize(reason, font, reason_scale, reason_thick)
                      if reason else ((0, 0), 0))
 

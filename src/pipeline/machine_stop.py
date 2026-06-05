@@ -101,6 +101,19 @@ class MachineStopDetector:
         if not self._enabled:
             return False, []
 
+        # Excluir near-miss: un agujero faltante que tiene un detectado cerca (entre tol y
+        # 2×tol) NO es un punzón roto — el agujero está, solo corrido por fase/distorsión.
+        # Con ignore_near_miss=True no debe acumular racha ni disparar la parada. (En modo
+        # grilla esto no se aplicaba: los near-miss contaban y generaban falsas paradas.)
+        if self._ignore_near_miss and near_miss_pairs:
+            nm = {(round(float(ex)), round(float(ey))) for (ex, ey), _ in near_miss_pairs}
+            if nm:
+                _keep = [i for i, (x, y) in enumerate(missing_points)
+                         if (round(float(x)), round(float(y))) not in nm]
+                missing_points = [missing_points[i] for i in _keep]
+                if missing_cells is not None:
+                    missing_cells = [missing_cells[i] for i in _keep]
+
         if self._track_by_grid and missing_cells is not None:
             return self._update_grid(missing_points, missing_cells, frame_quality, img_h)
         return self._update_pixel(missing_points, near_miss_pairs, frame_quality, img_h)

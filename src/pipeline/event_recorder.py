@@ -150,11 +150,23 @@ class EventRecorder:
         la grabación post-evento. Ignora llamadas dentro del cooldown.
         """
         now_m = time.monotonic()
-        if now_m - self._last_flush < self._flush_cooldown:
-            return
-        self._last_flush = now_m
-
         with self._lock:
+            # Si el evento vuelve a dispararse durante la ventana post-evento,
+            # no hay buffer pre disponible. En ese caso extendemos la cola de
+            # post-evento para no perder evidencia del segundo disparo.
+            if self._post_dir is not None and now_m < self._post_until:
+                if self._post_seconds > 0:
+                    self._post_until = max(self._post_until, now_m + self._post_seconds)
+                logger.warning(
+                    f"[{self._id}] evento {event_type} durante post-evento activo: "
+                    "se extiende la ventana de grabación"
+                )
+                return
+
+            if now_m - self._last_flush < self._flush_cooldown:
+                return
+            self._last_flush = now_m
+
             if not self._buf:
                 return
             frames = list(self._buf)

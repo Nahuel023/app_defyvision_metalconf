@@ -192,6 +192,27 @@ class TestManifest:
         assert manifest["total_bytes"] == sum(len(_fake_jpeg(10_000)) for _ in range(5))
 
 
+class TestPostEventWindow:
+    def test_event_during_post_event_extends_window(self, tmp_path: Path) -> None:
+        events = tmp_path / "events"
+        r = _make_recorder(events, post_seconds=5.0)
+        frames = [(time.time(), _fake_jpeg(10_000))]
+        r._flush_sync(frames, "machine_stop", "primer stop")
+
+        assert r._post_dir is not None
+        first_until = r._post_until
+
+        with r._lock:
+            r._buf.clear()
+            r._buf_bytes = 0
+
+        time.sleep(0.02)
+        r.flush_event("fault", "segundo stop")
+
+        assert r._post_dir is not None
+        assert r._post_until >= first_until
+
+
 # ------------------------------------------------------------------
 # Truncado por presupuesto
 # ------------------------------------------------------------------
