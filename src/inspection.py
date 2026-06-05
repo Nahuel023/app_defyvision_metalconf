@@ -809,6 +809,25 @@ def _inspect_bgr(
                     _ms_reason = f"PATRON DESALINEADO (corrimiento inferior={_bottom_shift:.1f}px)"
                     final_status = "NOK"
 
+    # Desplazamiento lateral del patron: si la nube de agujeros detectados se desplaza
+    # mas de grid_lateral_shift_max_px respecto al patron de referencia, es una
+    # desviacion grande del material → parada inmediata (un solo frame alcanza).
+    # Gated por tilt_warn: cuando la chapa esta inclinada el centroide X de los
+    # agujeros detectados puede desviarse sin que sea un corrimiento real.
+    grid_lateral_shift_max_px = float(tolerances.get("grid_lateral_shift_max_px", 0.0))
+    if (grid_lateral_shift_max_px > 0.0
+            and pattern.has_grid
+            and detected_points
+            and len(pattern.points) >= 10
+            and not tilt_warn):
+        _det_mean_x = float(np.mean([x for x, _ in detected_points]))
+        _pat_mean_x = float(np.mean([x for x, _ in pattern.points]))
+        _lateral_shift = _det_mean_x - _pat_mean_x
+        if abs(_lateral_shift) > grid_lateral_shift_max_px:
+            machine_stop = True
+            _ms_reason = f"DESVIACION LATERAL ({_lateral_shift:+.1f}px)"
+            final_status = "NOK"
+
     if machine_stop:
         final_status = "NOK"
 

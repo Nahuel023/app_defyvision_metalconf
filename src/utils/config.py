@@ -58,6 +58,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     # Verticalidad: un solo frame con la chapa desviada puede parar la maquina
     # (inmediato). Los faltantes solo paran por persistencia (machine_stop_missing_frames).
     "machine_stop_on_tilt": False,
+    "grid_lateral_shift_max_px": 0.0,
     # Desalineacion del patron (corrimiento de verticalidad/cizalla): si la fraccion de
     # esperados sin ajustar supera el ratio → DETENER MAQUINA (un frame alcanza).
     # ── Grabación de evidencia pre-evento ────────────────────────────────
