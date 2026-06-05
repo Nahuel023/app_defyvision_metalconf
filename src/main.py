@@ -193,6 +193,20 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
             f"  missing={result.report.missing}  extra={result.report.extra}"
             f"  ratio={result.detection_ratio:.0%}{warn}"
         )
+
+    # Summary of most frequently missing cells — helps identify edge artifacts vs real defects
+    from collections import Counter
+    cell_counts: Counter = Counter()
+    for temporal in summary.temporal_results:
+        for cell in (temporal.result.report.missing_cells or []):
+            cell_counts[tuple(cell)] += 1
+    if cell_counts:
+        print(f"[missing-cells] celdas con mayor frecuencia de faltante (celda: N/{summary.total}):")
+        for cell, count in cell_counts.most_common(10):
+            pct = count / summary.total
+            flag = " <-- borde" if pct > 0.05 else ""
+            print(f"  celda {cell}: {count}/{summary.total}  ({pct:.0%}){flag}")
+
     return 0
 
 

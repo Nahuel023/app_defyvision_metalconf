@@ -202,6 +202,10 @@ def _inspect_bgr(
     open_ksize          = int(tolerances.get("open_ksize", 3))
     close_ksize         = int(tolerances.get("close_ksize", 5))
     edge_margin_px        = float(tolerances.get("edge_margin_px", 0.0))
+    # Margen separado para la generación de celdas esperadas en modo grilla.
+    # Permite excluir celdas proyectadas cerca del borde del frame (artefactos de borde)
+    # sin afectar la detección de agujeros. Defecto = edge_margin_px.
+    grid_compare_margin_px = float(tolerances.get("grid_compare_margin_px", edge_margin_px))
     grid_max_missing      = int(tolerances.get("grid_max_missing", 0))
     frame_missing_nok_raw = tolerances.get("frame_missing_nok_threshold", None)
     frame_missing_nok_threshold = (
@@ -422,7 +426,7 @@ def _inspect_bgr(
             pattern.phase_y,
             None,
             img_w, img_h,
-            edge_margin_px,
+            grid_compare_margin_px,
             tol_affine=tol_affine,
             stagger_x_odd=stagger_x_odd,
         )
