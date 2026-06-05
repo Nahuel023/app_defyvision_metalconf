@@ -6,6 +6,42 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Show-DesktopNotification {
+    param(
+        [string]$Title,
+        [string]$Text,
+        [string]$Kind
+    )
+
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+
+        $icon = New-Object System.Windows.Forms.NotifyIcon
+        $icon.Icon = [System.Drawing.SystemIcons]::Information
+        $icon.Visible = $true
+
+        switch ($Kind) {
+            "success" { $tipIcon = [System.Windows.Forms.ToolTipIcon]::Info }
+            "warn"    { $tipIcon = [System.Windows.Forms.ToolTipIcon]::Warning }
+            "error"   { $tipIcon = [System.Windows.Forms.ToolTipIcon]::Error }
+            default   { $tipIcon = [System.Windows.Forms.ToolTipIcon]::None }
+        }
+
+        $icon.BalloonTipTitle = $Title
+        $icon.BalloonTipText = $Text
+        $icon.BalloonTipIcon = $tipIcon
+        $icon.ShowBalloonTip(5000)
+
+        Start-Sleep -Milliseconds 5500
+        $icon.Dispose()
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function Invoke-BeepPattern {
     param([string]$Kind)
 
@@ -45,3 +81,4 @@ Write-Host ("CODex aviso [{0}] - {1}" -f $Level.ToUpperInvariant(), $Message) -F
 Write-Host ("=" * 56) -ForegroundColor DarkGray
 
 Invoke-BeepPattern -Kind $Level
+[void](Show-DesktopNotification -Title "Codex termino" -Text $Message -Kind $Level)

@@ -45,6 +45,19 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 116 - Notificacion visible de Windows en notify_done.ps1
+
+**Problema:** el script de aviso hacia sonido pero no mostraba una notificacion visible en escritorio.
+
+**Cambios:**
+- `scripts/notify_done.ps1`: agrega `Show-DesktopNotification()` con `System.Windows.Forms.NotifyIcon`.
+- Mantiene el sonido existente y suma un globo/notificacion visible por ~5 segundos.
+- Sigue sin requerir modulos externos.
+
+**Archivos modificados:** `scripts/notify_done.ps1`
+
+---
+
 #### Cambio 115 - Script PowerShell de notificacion con sonido
 
 **Pedido:** contar con una notificacion audible por PowerShell para saber cuando termina una tarea.
