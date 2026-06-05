@@ -45,6 +45,18 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 119 - Analisis: visor de capturas mas grande
+
+**Pedido:** poder bajar mejor en la pantalla de analisis y ver mas grandes las imagenes analizadas.
+
+**Cambios en `src/ui/service.py`:**
+- El `ZoomableImageView` del `NAVEGADOR DE CAPTURAS` pasa de `minimumHeight=400` a `560`.
+- La pagina sigue usando el mismo scroll vertical unico, pero ahora reserva mas alto visible para la imagen.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
 #### Cambio 118 - Microperforado gran angular: tilt de grilla corregido y sin falsos UNSTABLE
 
 **Problema reportado:** las imagenes de microperforado/esterilla con la Sony gran angular
