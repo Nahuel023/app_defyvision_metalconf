@@ -41,7 +41,7 @@ models:
     threshold: 180
     use_channel: gray
     use_otsu: false
-    use_adaptive: false
+    use_adaptive: true
     open_ksize: 1
     close_ksize: 3
     adaptive_block_size: 61
@@ -55,7 +55,7 @@ models:
     max_area_small: 2000.0
     min_area_large: 20.0
     max_area_large: 8000.0
-    tol_xy_px: 10.0
+    tol_xy_px: 14.0
     align_match_tol_px: 250.0
     min_match_count: 3
     edge_margin_px: 0.0

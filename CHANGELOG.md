@@ -45,6 +45,47 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 111 - Grabaciones con nombre fecha + scanner + patron
+
+**Pedido:** que las carpetas de `data/recordings` indiquen desde el nombre que patron
+se estaba escaneando, para reconocer la grabacion antes de abrirla.
+
+**Cambios en `src/ui/service.py`:**
+- `_on_start()` ya no crea carpetas solo con timestamp. Ahora usa formato:
+  `YYYYMMDD_HHMMSS_scanner_X_patron`.
+- El patron se toma del selector activo de la pestana de grabacion/analisis y se
+  normaliza a slug seguro para carpeta (por ejemplo `esterilla` o `microperforado`).
+- Si hubiera una colision de nombre en el mismo segundo, agrega sufijo `_02`, `_03`, etc.
+- `meta.json` guarda ademas `recording_folder` para dejar trazabilidad explicita del
+  nombre final usado en disco.
+
+**Ejemplo:** `data/recordings/20260605_153210_scanner_1_esterilla`
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 112 — esterilla: re-habilitar adaptive threshold + ampliar tol_xy_px para gran angular
+
+**Problema:** demasiados agujeros marcados en rojo (missing) al analizar esterilla con la
+cámara levemente más alejada y distorsión de barril del gran angular.
+
+**Causa 1 — detección:** `use_adaptive: false` había sido desactivado en la recalibración
+2026-06-04. El umbral adaptativo fue el cambio clave del Cambio 77 (missing 21→4): detecta
+agujeros en zonas con iluminación no uniforme que el umbral global pierde.
+
+**Causa 2 — tolerancia:** `tol_xy_px: 10.0` demasiado justo. Con barrel distortion del
+gran angular los agujeros de borde se desplazan 12-20px de su posición ideal. El mismo
+problema se dio en modelo_B (Cambio 108: 8→12px).
+
+**Cambios en `config/tolerancias.yaml` → `models.modelo_A`:**
+- `use_adaptive: false → true`
+- `tol_xy_px: 10.0 → 14.0`
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 110 — Overlay: redimensionar marcadores y texto para cámara 640×480
 
 **Problema:** con la cámara nueva (Sony 640×480, alejada), los círculos de error y los
