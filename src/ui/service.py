@@ -2282,7 +2282,7 @@ class RecordingTab(QWidget):
 
         # ── Image viewer ──────────────────────────────────────────────
         self._img_view = ZoomableImageView("Sin frames")
-        self._img_view.setMinimumHeight(400)
+        self._img_view.setMinimumHeight(560)
         lay.addWidget(self._img_view, stretch=1)
 
         return grp
