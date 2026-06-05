@@ -11,7 +11,7 @@ from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
 from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator
 from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
@@ -834,6 +834,7 @@ def _inspect_bgr(
     # para no tapar los agujeros del patrón (que viven en la ROI, a la derecha).
     overlay = draw_status_indicator(overlay, final_status, nok_reasons, badge_count)
     overlay = draw_tilt_indicator(overlay, sheet_tilt_deg, warn=tilt_warn)
+    overlay = draw_blur_indicator(overlay, blur_score, blur_score_min)
 
     return InspectionResult(
         model=model,
