@@ -178,7 +178,35 @@ se estaba escaneando, para reconocer la grabacion antes de abrirla.
 
 ---
 
-#### Cambio 114 — modelo_B: recalibración completa para cámara Sony IP 640×480
+#### Cambio 116 — texto inferior más chico + detector blur esterilla + ROI modelo_A recalibrado
+
+**Texto inferior en overlay (`annotate.py`):**
+- Filas Delta/Offset e Izq/Der: scale 0.65 → 0.42, thick 2→1
+- Fila "Vert pat": scale 0.55 → 0.38
+- Spacing entre filas: 30px → 20px; base: h-15 → h-10
+- Resultado: las 3 filas ahora ocupan ~50px en vez de ~90px → no tapan agujeros
+
+**Detector de blur para modelo_A esterilla:**
+- Nueva función `draw_blur_indicator()` en `annotate.py`: muestra "Nitidez: XXX"
+  verde cuando OK, rojo + badge "! IMAGEN BORROSA" cuando LOW_QUALITY.
+- Habilitado en tolerancias: `blur_score_min: 500.0`.
+- Calibración sobre ROI (280×480) en 290 frames buenos: min=726, p5=905.
+  Umbral 500 captura frames con borroneo significativo sin falsos positivos.
+- Frames borrosos → `frame_quality = "LOW_QUALITY"` → inspector no incrementa
+  racha NOK (evita falsos faltantes por blur).
+
+**ROI modelo_A recalibrado para cámara Sony IP 640×480:**
+- ROI anterior: `x=870,y=0,w=380,h=1080` (cámara anterior ~1080p)
+- ROI nuevo: `x=240,y=0,w=280,h=480` — dx=26px confirmado en imagen
+- Patrón reconstruido: 144 puntos (3 duplicados en bordes descartados)
+
+**Archivos:** `src/pipeline/annotate.py`, `src/inspection.py`,
+`data/patterns/modelo_A/roi.json`, `data/patterns/modelo_A/holes.json`,
+`config/tolerancias.yaml`
+
+---
+
+#### Cambio 115 — modelo_B: recalibración completa para cámara Sony IP 640×480
 
 **Contexto:** La cámara del scanner_1 (MICROPERFORADO) fue reemplazada/reposicionada.
 El ROI antiguo era para resolución ~1920×1080. Calibración realizada desde cero con

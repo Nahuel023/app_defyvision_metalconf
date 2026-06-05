@@ -289,6 +289,36 @@ def _draw_full_height_fit_line(
     _draw_transparent_line(img, (x0, 0), (x1, h - 1), color, thickness, alpha)
 
 
+def draw_blur_indicator(
+    img: np.ndarray,
+    blur_score: float,
+    blur_score_min: float,
+    y: int = 82,
+) -> np.ndarray:
+    """Muestra la nitidez Laplaciana bajo el indicador de inclinación.
+
+    Verde cuando el score supera blur_score_min (imagen nítida).
+    Rojo + badge cuando está por debajo (imagen borrosa / LOW_QUALITY).
+    """
+    if blur_score_min <= 0:
+        return img
+    import math
+    is_blurry = blur_score < blur_score_min
+    color = (0, 0, 220) if is_blurry else (80, 200, 80)
+    label = f"Nitidez: {blur_score:.0f}"
+    cv2.putText(img, label, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(img, label, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
+    if is_blurry:
+        badge = "! IMAGEN BORROSA"
+        (tw, th), bl = cv2.getTextSize(badge, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        bx, by = 10, y + 8
+        cv2.rectangle(img, (bx, by), (bx + tw + 10, by + th + bl + 8), (0, 0, 150), -1)
+        cv2.rectangle(img, (bx, by), (bx + tw + 10, by + th + bl + 8), (0, 0, 255), 2)
+        cv2.putText(img, badge, (bx + 5, by + th + 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+    return img
+
+
 def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
@@ -476,20 +506,20 @@ def draw_centering_overlay(
     sign_d = "+" if delta >= 0 else ""
     sign_o = "+" if offset >= 0 else ""
 
-    text_y_base = h - 15
+    text_y_base = h - 10
     # Row 1 (bottom): margins left / right
     cv2.putText(out, f"Izq: {lm:.0f}px   Der: {rm:.0f}px",
-                (10, text_y_base), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (180, 180, 180), 1, cv2.LINE_AA)
+                (10, text_y_base), cv2.FONT_HERSHEY_SIMPLEX, 0.42, (180, 180, 180), 1, cv2.LINE_AA)
     # Row 2: delta + offset
     cv2.putText(out, f"Delta: {sign_d}{delta:.1f}px   Offset: {sign_o}{offset:.1f}px",
-                (10, text_y_base - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2, cv2.LINE_AA)
+                (10, text_y_base - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1, cv2.LINE_AA)
     # Row 3: pattern edge verticality
     pl_slope = getattr(centering, "pattern_left_slope_deg", 0.0)
     pr_slope = getattr(centering, "pattern_right_slope_deg", 0.0)
     ps_delta = getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
     vert_color = (80, 200, 255)
     cv2.putText(out, f"Vert pat: Izq={pl_slope:+.1f}\xb0  Der={pr_slope:+.1f}\xb0  dCh={ps_delta:.1f}\xb0",
-                (10, text_y_base - 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, vert_color, 1, cv2.LINE_AA)
+                (10, text_y_base - 40), cv2.FONT_HERSHEY_SIMPLEX, 0.38, vert_color, 1, cv2.LINE_AA)
 
     # --- "CENTRADO NO CONFIABLE" badge when too few bands detected ---
     centering_reliable = getattr(centering, "centering_reliable", True)
