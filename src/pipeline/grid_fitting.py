@@ -35,7 +35,8 @@ def rotate_points(pts: np.ndarray, deg: float, cx: float, cy: float) -> np.ndarr
 def estimate_lattice_tilt_deg(
     detected_xy: np.ndarray,
     dx: float,
-    row_dy_tol: float = 20.0,
+    row_dy_tol: float | None = None,
+    dy: float | None = None,
 ) -> float:
     """Estima la rotación (tilt) de la grilla a partir de los agujeros detectados.
 
@@ -49,6 +50,11 @@ def estimate_lattice_tilt_deg(
     """
     if detected_xy is None or len(detected_xy) < 8 or dx <= 0:
         return float("nan")
+    if row_dy_tol is None:
+        if dy is not None and dy > 0:
+            row_dy_tol = max(3.0, float(dy) * 0.6)
+        else:
+            row_dy_tol = 20.0
     xs = detected_xy[:, 0]
     ys = detected_xy[:, 1]
     lo, hi = 0.5 * dx, 1.4 * dx

@@ -348,7 +348,11 @@ def _inspect_bgr(
         # → muchos falsos faltantes. Medimos el tilt de la grilla desde los agujeros,
         # de-rotamos los detectados, ajustamos la grilla en ese espacio y rotamos las
         # posiciones esperadas DE VUELTA al espacio original (donde se compara y dibuja).
-        sheet_tilt_deg = estimate_lattice_tilt_deg(detected_arr, float(pattern.dx))
+        sheet_tilt_deg = estimate_lattice_tilt_deg(
+            detected_arr,
+            float(pattern.dx),
+            dy=float(pattern.dy) if pattern.dy is not None else None,
+        )
         _derotate = (
             grid_derotate
             and not math.isnan(sheet_tilt_deg)

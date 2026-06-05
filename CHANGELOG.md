@@ -45,6 +45,38 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 118 - Microperforado gran angular: tilt de grilla corregido y sin falsos UNSTABLE
+
+**Problema reportado:** las imagenes de microperforado/esterilla con la Sony gran angular
+quedaban diagnosticadas como chapa inclinada o geometria inestable aunque la pieza estuviera bien.
+
+**Causa raiz en microperforado:** `estimate_lattice_tilt_deg()` usaba `row_dy_tol=20px` fijo.
+En `modelo_B` la grilla tiene `dy=7.5px`, asi que el estimador mezclaba filas vecinas y devolvia
+tilts falsos de aproximadamente `-32 grados`.
+
+**Cambios aplicados:**
+- `src/pipeline/grid_fitting.py`: `estimate_lattice_tilt_deg()` ahora admite `dy` y, cuando no se
+  pasa una tolerancia explicita, calcula `row_dy_tol = max(3px, 0.6 * dy)`.
+- `src/inspection.py`: al estimar tilt de grilla, ahora pasa `pattern.dy` al estimador.
+- `config/tolerancias.yaml` -> `models.modelo_B`:
+  - `verticality_quality_enabled: true -> false`
+  - `pattern_global_offset_max_px: 10.0 -> 0.0`
+  Los checks basados en bordes laterales/global offset no eran confiables con esta optica gran angular.
+
+**Validacion `MICROPERFORADO_1` (`modelo_B`, `scanner_1`):**
+- Antes: `82/82 raw OK`, pero `82/82 UNSTABLE` y tilt mediano falso ~= `-31.8 grados`.
+- Intermedio tras corregir solo tilt: `82/82 STABLE`, tilt mediano ~= `-0.25 grados`, pero aparecieron
+  falsos `pattern_alignment_warn` por offset global.
+- Final: `82/82 status OK`, `82/82 STABLE`, `tilt_warn_count=0`, `pattern_alignment_warn=0`,
+  `tilt mediano ~= -0.25 grados`.
+
+**Validacion `ESTERILLA_3` (`modelo_A`, `scanner_2`):**
+- Se mantiene `30/30 OK` sin regresion.
+
+**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 117 - Grabaciones con formato fecha-patron-secuencia
 
 **Pedido:** nombrar las grabaciones con formato tipo `DIA-MES-ANO-ESTERILLA_2` o
@@ -132,6 +164,55 @@ se estaba escaneando, para reconocer la grabacion antes de abrirla.
 **Ejemplo:** `data/recordings/20260605_153210_scanner_1_esterilla`
 
 **Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 114 — modelo_B: recalibración completa para cámara Sony IP 640×480
+
+**Contexto:** La cámara del scanner_1 (MICROPERFORADO) fue reemplazada/reposicionada.
+El ROI antiguo era para resolución ~1920×1080. Calibración realizada desde cero con
+imágenes de la carpeta MICROPERFORADO_2 (96 frames, Sony IP 640×480).
+
+**Problemas encontrados y resueltos:**
+
+1. **ROI inválido**: `x=710, w=650, h=1077` fuera de una imagen 640×480.
+   → Nuevo ROI: `x=230, y=0, w=185, h=480`.
+
+2. **Canal b (azul) → canal r (rojo)**: La iluminación naranja del backlight tiene muy
+   baja componente azul (max=217). El canal R es estable 80-200 de threshold.
+   → `use_channel: b → r`, `threshold: 180 → 120`.
+
+3. **blur_ksize=5 fusionaba agujeros adyacentes**: Con dy=8px y diámetro≈9px, los agujeros
+   casi se tocan. El blur 5×5 unía pares en blobs elongados (circularity baja) → filtrados.
+   Resultado: pipeline detectaba 243 en vez de 297 agujeros.
+   → `blur_ksize: 5 → 1` (sin blur), `close_ksize: 5 → 1`, `open_ksize: 3 → 1`.
+
+4. **grid_derotate producía tilt=-31°**: Con dy=8 y row_dy_tol=20, la función
+   `estimate_lattice_tilt_deg` incluía pares de 2 filas de distancia (ddy=16) como
+   "misma fila", contaminando el ángulo estimado.
+   → `grid_derotate: false` para modelo_B.
+
+5. **grid_dy: 7.5 → 8.0**: Medición real sobre los frames confirma dy=8px.
+
+6. **grid_min_spacing: 15.0 → 6.0**: El espaciado dx/2=12px requiere threshold menor.
+
+7. **pattern_align/center_align_enabled: true → false**: Estos checks asumen un patrón
+   vertical que no aplica al hexagonal denso. Ademas `pattern_global_offset_max_px: 0`
+   (mal configurado) declaraba NOK cualquier frame.
+
+8. **tol_xy_px: 12 → 20**: Con afín activo, las posiciones esperadas en los bordes de la
+   grilla tienen desviación de ~15-20px. Baseline medido: 19-40 faltantes en frames OK.
+
+9. **frame_missing_nok_threshold / grid_max_missing: 90 → 60**: Baseline max=40, umbral
+   20px de margen por encima para detectar defectos reales.
+
+**Resultado validado:** 95/95 frames de MICROPERFORADO_2 clasifican OK.
+Rango de faltantes en frames buenos: 19-40 (avg≈29). NOK cuando ≥60.
+
+**Archivos modificados:**
+- `data/patterns/modelo_B/roi.json` — ROI nuevo 640×480
+- `data/patterns/modelo_B/holes.json` — Patrón reconstruido (271 holes)
+- `config/tolerancias.yaml` → modelo_B completamente recalibrado
 
 ---
 
