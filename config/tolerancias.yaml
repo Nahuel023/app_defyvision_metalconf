@@ -44,7 +44,7 @@ models:
     use_adaptive: true
     open_ksize: 1
     close_ksize: 3
-    adaptive_block_size: 61
+    adaptive_block_size: 41
     adaptive_c: -5.0
     tilt_warn_deg: 2.5
     min_area: 20.0
@@ -72,7 +72,7 @@ models:
     extra_min_dist_factor: 1.5
     frame_missing_nok_threshold: 75
     consecutive_nok_frames: 5
-    continuous_position_threshold: 0.0
+    continuous_position_threshold: 3.0
     machine_stop_enabled: false
     machine_stop_missing_frames: 5
     machine_stop_min_missing: 2

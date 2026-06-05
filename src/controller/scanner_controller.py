@@ -697,10 +697,14 @@ class ScannerController:
         """Actualiza la FSM y dispara callbacks tras un resultado de inspección."""
         if (result.status == "NOK" and self._save_nok) or \
            (result.status == "OK"  and self._save_ok):
-            try:
-                save_result_images(result)
-            except Exception as exc:
-                logger.error(f"[{self._id}] error guardando imagen: {exc}")
+            _sid = self._id
+            def _save(r=result) -> None:
+                try:
+                    save_result_images(r)
+                except Exception as exc:
+                    logger.error(f"[{_sid}] error guardando imagen: {exc}")
+            threading.Thread(target=_save, daemon=True,
+                             name=f"{self._id}-save").start()
 
         consecutive_nok = self._consecutive_nok
         warn_at = max(1, consecutive_nok // 3)
