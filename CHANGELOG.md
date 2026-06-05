@@ -45,6 +45,40 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 120 - Patrones iniciales 05-06-2026: ROI mas cerradas y recalibracion con zoom nuevo
+
+**Pedido:** con el ajuste de zoom nuevo, delimitar mejor el analisis de agujeros para no
+detectar agujeros fuera del patron en `05-06-2026-PATRONES INICIALES`.
+
+**Diagnostico inicial:**
+- `ESTERILLA_1`: `133 frames`, `raw_ok=50`, `raw_nok=83`, muchas detecciones/faltantes por
+  ROI vieja + grilla de `modelo_A` desescalada para el zoom anterior.
+- `MICROPERFORADO_1`: `137 frames`, `raw_ok=136`, pero con baseline alto de missing (~50+) y
+  ROI demasiado ancha.
+
+**Cambios aplicados:**
+- `data/patterns/scanner_1/modelo_B/roi.json`: ROI lateral cerrada a `x=236, w=216`.
+- `data/patterns/scanner_2/modelo_A/roi.json`: ROI lateral cerrada finalmente a `x=258, w=190`.
+- `config/tolerancias.yaml` -> `models.modelo_A`:
+  - `grid_min_spacing: 10 -> 18`
+  - `grid_dx: 26 -> 38`
+  - `grid_dy: 14 -> 42`
+  - `grid_stagger_x_odd: 12 -> 18`
+- Reconstruidos patrones con las carpetas nuevas:
+  - `scanner_1/modelo_B/holes.json` desde `05-06-2026-MICROPERFORADO_1/frame_0077.png`
+  - `scanner_2/modelo_A/holes.json` desde `05-06-2026-ESTERILLA_1/frame_0045.png`
+
+**Validacion final:**
+- `05-06-2026-MICROPERFORADO_1` -> `137/137 raw OK`, `0 temporal NOK`, extras afuera eliminados.
+- `05-06-2026-ESTERILLA_1` -> `133/133 raw OK`, `0 temporal NOK`; missing/extras bajan fuerte y
+  la grilla queda alineada al zoom nuevo.
+
+**Archivos modificados:** `config/tolerancias.yaml`,
+`data/patterns/scanner_1/modelo_B/{roi.json,holes.json}`,
+`data/patterns/scanner_2/modelo_A/{roi.json,holes.json}`
+
+---
+
 #### Cambio 119 - Analisis: visor de capturas mas grande
 
 **Pedido:** poder bajar mejor en la pantalla de analisis y ver mas grandes las imagenes analizadas.
