@@ -100,6 +100,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pattern_center_zigzag_abs_max_px": 6.5,
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
+    "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron
     # Per-type hole classification (models with two distinct hole sizes, e.g. modelo_A)
     # 0 = disabled (single-type mode); >0 = area threshold (px²) between small/large holes
     "hole_type_split_area": 0.0,

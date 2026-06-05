@@ -24,6 +24,29 @@ from src.utils.config import load_tolerances
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
+def _filter_points_by_pattern_hull(
+    detected_points: list[tuple[float, float]],
+    compare_points: list[tuple[float, float]],
+    margin_px: float,
+    detected_types: list[str] | None = None,
+) -> tuple[list[tuple[float, float]], list[str] | None]:
+    """Keep detections inside or near the convex hull of the expected pattern."""
+    if margin_px <= 0.0 or len(compare_points) < 3 or not detected_points:
+        return detected_points, detected_types
+
+    hull = cv2.convexHull(np.array(compare_points, dtype=np.float32).reshape(-1, 1, 2))
+    kept_points: list[tuple[float, float]] = []
+    kept_types: list[str] = []
+    for idx, pt in enumerate(detected_points):
+        signed_dist = cv2.pointPolygonTest(hull, (float(pt[0]), float(pt[1])), True)
+        if signed_dist >= -margin_px:
+            kept_points.append(pt)
+            if detected_types is not None:
+                kept_types.append(detected_types[idx])
+
+    return kept_points, (kept_types if detected_types is not None else None)
+
+
 @dataclass(frozen=True)
 class InspectionResult:
     model: str
@@ -212,6 +235,7 @@ def _inspect_bgr(
     pattern_desalign_bottom_shift_px = float(tolerances.get("pattern_desalign_bottom_shift_px", 0.0))
     compare_top_ignore_px = float(tolerances.get("compare_top_ignore_px", 0.0))
     compare_bottom_ignore_px = float(tolerances.get("compare_bottom_ignore_px", 0.0))
+    pattern_hull_margin_px = float(tolerances.get("pattern_hull_margin_px", 0.0))
     grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
@@ -558,6 +582,26 @@ def _inspect_bgr(
                                    expected_types=expected_types,
                                    detected_types=detected_types)
 
+    if report.extra_points and pattern_hull_margin_px > 0.0:
+        filtered_extra_points, _ = _filter_points_by_pattern_hull(
+            list(report.extra_points),
+            compare_points,
+            pattern_hull_margin_px,
+        )
+        if len(filtered_extra_points) != len(report.extra_points):
+            report = CompareReport(
+                expected=report.expected,
+                detected=report.detected,
+                missing=report.missing,
+                status=report.status,
+                missing_points=report.missing_points,
+                matched_detected_idx=report.matched_detected_idx,
+                extra=len(filtered_extra_points),
+                extra_points=filtered_extra_points,
+                missing_cells=report.missing_cells,
+                missing_types=report.missing_types,
+            )
+
     detection_ratio = len(holes) / n_expected_total if n_expected_total > 0 else 1.0
     capture_quality_degraded = (
         quality_ratio_min > 0.0
@@ -791,8 +835,34 @@ def _inspect_bgr(
 
     badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
 
+    overlay_holes = holes
+    if compare_points:
+        if bbox_filter_margin_px >= 0:
+            xs = [p[0] for p in compare_points]
+            ys = [p[1] for p in compare_points]
+            m = bbox_filter_margin_px
+            bx1, bx2 = min(xs) - m, max(xs) + m
+            by1, by2 = min(ys) - m, max(ys) + m
+            overlay_holes = [
+                h for h in overlay_holes
+                if bx1 <= h.x <= bx2 and by1 <= h.y <= by2
+            ]
+        if compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0:
+            y_keep_min = compare_top_ignore_px
+            y_keep_max = img_h - compare_bottom_ignore_px
+            overlay_holes = [
+                h for h in overlay_holes
+                if y_keep_min <= h.y <= y_keep_max
+            ]
+        if pattern_hull_margin_px > 0.0 and len(compare_points) >= 3:
+            hull = cv2.convexHull(np.array(compare_points, dtype=np.float32).reshape(-1, 1, 2))
+            overlay_holes = [
+                h for h in overlay_holes
+                if cv2.pointPolygonTest(hull, (float(h.x), float(h.y)), True) >= -pattern_hull_margin_px
+            ]
+
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
-    overlay_roi = draw_compare_overlay(img, holes, report.missing_points, final_status,
+    overlay_roi = draw_compare_overlay(img, overlay_holes, report.missing_points, final_status,
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs,
                                        nok_reasons=nok_reasons,
