@@ -77,7 +77,7 @@ models:
     extra_min_dist_factor: 1.5
     compare_top_ignore_px: 42.0
     compare_bottom_ignore_px: 42.0
-    blur_score_min: 500.0
+    blur_score_min: 650.0
     frame_missing_nok_threshold: 40
     consecutive_nok_frames: 5
     continuous_position_threshold: 3.0
