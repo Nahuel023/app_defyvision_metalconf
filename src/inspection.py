@@ -210,6 +210,8 @@ def _inspect_bgr(
     pattern_desalign_center_std_px = float(tolerances.get("pattern_desalign_center_std_px", 0.0))
     pattern_desalign_center_abs_px = float(tolerances.get("pattern_desalign_center_abs_px", 0.0))
     pattern_desalign_bottom_shift_px = float(tolerances.get("pattern_desalign_bottom_shift_px", 0.0))
+    compare_top_ignore_px = float(tolerances.get("compare_top_ignore_px", 0.0))
+    compare_bottom_ignore_px = float(tolerances.get("compare_bottom_ignore_px", 0.0))
     grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
@@ -442,6 +444,25 @@ def _inspect_bgr(
                 if y_clip_min <= y <= y_clip_max
             ]
 
+    # Ignorar bordes superior/inferior solo en la etapa de comparacion.
+    # Sirve para no penalizar filas extremas cuando la calibracion de los bordes
+    # es inestable o el patron queda parcialmente cortado arriba/abajo.
+    if compare_points and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
+        y_keep_min = compare_top_ignore_px
+        y_keep_max = img_h - compare_bottom_ignore_px
+        if compare_cells:
+            _filtered = [
+                (p, c) for p, c in zip(compare_points, compare_cells)
+                if y_keep_min <= p[1] <= y_keep_max
+            ]
+            compare_points = [p for p, _ in _filtered]
+            compare_cells = [c for _, c in _filtered]
+        else:
+            compare_points = [
+                (x, y) for x, y in compare_points
+                if y_keep_min <= y <= y_keep_max
+            ]
+
     # Derive expected hole types from pattern radii (when type classification is active).
     # Split radius = sqrt(hole_type_split_area / π) — midpoint between small and large.
     expected_types: list[str] | None = None
@@ -499,6 +520,22 @@ def _inspect_bgr(
     else:
         detected_in_bbox = detected_points
         detected_types   = _det_types_full
+
+    if detected_in_bbox and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
+        y_keep_min = compare_top_ignore_px
+        y_keep_max = img_h - compare_bottom_ignore_px
+        if detected_types is not None:
+            _filtered = [
+                (pt, dt) for pt, dt in zip(detected_in_bbox, detected_types)
+                if y_keep_min <= pt[1] <= y_keep_max
+            ]
+            detected_in_bbox = [p for p, _ in _filtered]
+            detected_types = [t for _, t in _filtered]
+        else:
+            detected_in_bbox = [
+                (x, y) for x, y in detected_in_bbox
+                if y_keep_min <= y <= y_keep_max
+            ]
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
     report  = compare_missing_only(compare_points, detected_in_bbox,

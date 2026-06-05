@@ -45,6 +45,28 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 114 - modelo_A: ignorar bordes superior/inferior en la comparacion
+
+**Pedido:** al analizar `ESTERILLA_3` (`C:\Users\DefyC\Downloads\Sony_IP_Camera_Imagenes\ESTERILLA_3`)
+los bordes superior e inferior no debian entorpecer la comparacion del patron.
+
+**Cambios:**
+- `src/inspection.py`: nueva etapa de recorte vertical solo para comparacion, controlada por
+  `compare_top_ignore_px` y `compare_bottom_ignore_px`. Filtra expected + detected antes del matching,
+  sin tocar deteccion, alineacion ni centrado.
+- `src/utils/config.py`: defaults nuevos en `0.0` para ambos parametros.
+- `config/tolerancias.yaml` -> `models.modelo_A`: activado recorte de `56 px` arriba y `56 px` abajo.
+
+**Validacion sobre `ESTERILLA_3` (`modelo_A`, `scanner_2`):**
+- Antes del recorte: `30/30 raw OK`, `avg_missing ~= 22.17`, `avg_extra ~= 2.10`.
+- Con `56 px` por lado: `30/30 raw OK`, `avg_missing ~= 17.27`, `avg_extra ~= 1.00`.
+- Los faltantes de borde mas persistentes dejaron de contaminar la decision; aun quedan filas internas
+  con baseline de missing que pertenecen a otra calibracion pendiente.
+
+**Archivos modificados:** `src/inspection.py`, `src/utils/config.py`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 111 - Grabaciones con nombre fecha + scanner + patron
 
 **Pedido:** que las carpetas de `data/recordings` indiquen desde el nombre que patron
