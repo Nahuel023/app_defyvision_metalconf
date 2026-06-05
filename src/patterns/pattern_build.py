@@ -126,6 +126,34 @@ def build_pattern_from_image(
             pts  = [(round(points[i][0], 1), round(points[i][1], 1)) for i in idxs]
             print(f"  (ci={c[0]}, cj={c[1]}) x{cnt}: {pts}")
 
+        # Keep only the point closest to the implied grid location for each duplicate cell.
+        dedup_points: list[tuple[float, float]] = []
+        dedup_radii: list[float] = []
+        dedup_cells: list[tuple[int, int]] = []
+        by_cell: dict[tuple[int, int], list[int]] = {}
+        for idx, cell in enumerate(cells):
+            by_cell.setdefault(cell, []).append(idx)
+
+        for cell, idxs in sorted(by_cell.items(), key=lambda item: (item[0][1], item[0][0])):
+            if len(idxs) == 1:
+                keep_idx = idxs[0]
+            else:
+                ci, cj = cell
+                exp_x = phase_x + ci * dx + ((cj % 2) * (stagger_x_odd or 0.0))
+                exp_y = phase_y + cj * dy
+                keep_idx = min(
+                    idxs,
+                    key=lambda ii: (points[ii][0] - exp_x) ** 2 + (points[ii][1] - exp_y) ** 2,
+                )
+            dedup_points.append(points[keep_idx])
+            dedup_radii.append(radii[keep_idx])
+            dedup_cells.append(cell)
+
+        points = dedup_points
+        radii = dedup_radii
+        cells = dedup_cells
+        print(f"[build-pattern] Duplicadas depuradas: patron final con {len(points)} puntos.")
+
     pat = Pattern(
         model=model, image_size=(w, h), points=points, radii=radii,
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
