@@ -4745,3 +4745,37 @@ el formato del changelog para registrar mejor cambios, fallos, oportunidades y v
   para unificar nombres, encoding y formato, pero eso conviene hacerlo como tarea separada.
 - Tambien es buena oportunidad para registrar en futuras entradas pruebas fallidas y ajustes
   descartados, no solo los cambios finales que quedaron vigentes.
+
+---
+
+### Sesion 2026-06-05 (esterilla bordes) - Tadeo + Codex
+
+#### Cambio 124 - Esterilla: borde del patron mas estable evitando saltos a agujeros interiores
+
+**Pedido:** mejorar la deteccion de bordes del patron en
+`05-06-2026-PATRONES INICIALES\\05-06-2026-ESTERILLA_1`, porque algunos bordes se
+detectaban muy bien y otros se iban totalmente de foco.
+
+**Hallazgo de Codex:**
+- El problema principal no era la cantidad de bandas sino que el gate lateral del
+  borde del patron en `modelo_A` estaba demasiado ancho.
+- Con `pattern_edge_boundary_tol_px: 14.0`, algunas filas aceptaban agujeros mas
+  interiores como si fueran borde real, sobre todo del lado izquierdo.
+- Al cerrar ese margen a `10.0 px`, el borde queda mucho mas pegado a la silueta
+  real del patron y deja de pegar saltos grandes entre filas.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml` -> `models.modelo_A`:
+  - `pattern_edge_boundary_tol_px: 14.0 -> 10.0`
+
+**Validacion `05-06-2026-ESTERILLA_1`:**
+- Se mantiene `133/133 raw OK`, `0 temporal NOK`.
+- `avg_pattern_zigzag_std`: `0.839 -> 0.415`
+- `avg_pattern_zigzag_max`: `2.953 -> 1.383`
+- En un frame problematico como `frame_0025.png`, el borde izquierdo deja de alternar
+  entre puntos muy abiertos y queda mucho mas consistente visualmente.
+
+**Riesgos / oportunidades:**
+- Si se cambia de nuevo el zoom o el encuadre, este valor puede necesitar retoque.
+- La mejora actual estabiliza muy bien el borde del patron sin tocar matching ni ROI,
+  asi que es un ajuste seguro y focalizado.
