@@ -1,4 +1,18 @@
 {
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "Add-Type -AssemblyName System.Windows.Forms; Add-Type -AssemblyName System.Drawing; $b = New-Object System.Windows.Forms.NotifyIcon; $b.Icon = [System.Drawing.SystemIcons]::Information; $b.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info; $b.BalloonTipTitle = 'Claude Code'; $b.BalloonTipText = 'Tarea terminada'; $b.Visible = $true; $b.ShowBalloonTip(8000); [console]::beep(880,200); Start-Sleep -Milliseconds 400; [console]::beep(1100,300); Start-Sleep -Seconds 6; $b.Dispose()",
+            "shell": "powershell",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Bash(xargs wc:*)",
