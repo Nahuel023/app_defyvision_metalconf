@@ -58,8 +58,12 @@ models:
     tol_xy_px: 14.0
     align_match_tol_px: 250.0
     min_match_count: 3
-    edge_margin_px: 0.0
+    edge_margin_px: 15.0
     pattern_edge_margin_px: 30.0
+    edge_centering_bands: 16
+    pattern_edge_min_holes_per_band: 1
+    pattern_edge_smooth_window: 2
+    pattern_edge_boundary_tol_px: 14.0
     grid_min_spacing: 18.0
     grid_dx: 39.0
     grid_dy: 21.0
