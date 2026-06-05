@@ -129,6 +129,7 @@ def _detect_sheet_edges_in_windows(
     roi_h: int,
     n_bands: int = _N_BANDS,
     ds: int = _DS,
+    inner_px: int = _LEFT_INNER,
 ) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
     """Per-band left/right metal edge detection in search windows.
 
@@ -136,16 +137,17 @@ def _detect_sheet_edges_in_windows(
     Returns two dicts keyed by band index with values (x_roi_relative, y_roi_relative).
     Bands where no clear bright/dark transition is found are omitted.
 
-    Left window covers [roi_x - _LEFT_OUTER, roi_x + _LEFT_INNER] in full-frame x.
-    Right window covers [roi_x + roi_w - _RIGHT_INNER, roi_x + roi_w + _RIGHT_OUTER].
+    Left window covers [roi_x - _LEFT_OUTER, roi_x + inner_px] in full-frame x.
+    Right window covers [roi_x + roi_w - inner_px, roi_x + roi_w + _RIGHT_OUTER].
     The gradient peak (bright->dark for left, dark->bright for right) locates the edge.
+    Reduce inner_px to avoid capturing hole-related gradients inside the ROI.
     """
     H, W = img_full.shape[:2]
     r_ch = img_full[:, :, 2].astype(np.float32)   # R channel
 
     lw_x0 = max(0, roi_x - _LEFT_OUTER)
-    lw_x1 = min(W - 1, roi_x + _LEFT_INNER)
-    rw_x0 = max(0, roi_x + roi_w - _RIGHT_INNER)
+    lw_x1 = min(W - 1, roi_x + inner_px)
+    rw_x0 = max(0, roi_x + roi_w - inner_px)
     rw_x1 = min(W - 1, roi_x + roi_w + _RIGHT_OUTER)
 
     band_h = roi_h / n_bands
@@ -508,6 +510,7 @@ def compute_centering(
     min_holes_per_band: int = 1,
     smooth_window: int = 1,
     boundary_tol_px: float = 0.0,
+    chapa_inner_px: int = _LEFT_INNER,
 ) -> Optional[CenteringResult]:
     """Measure how centered the hole pattern is between the metal sheet edges.
 
@@ -572,7 +575,8 @@ def compute_centering(
         mid_y = roi_h / 2.0
 
         edge_left, edge_right = _detect_sheet_edges_in_windows(
-            img_bgr, roi_x, roi_w, roi_y, roi_h, n_bands=n_bands
+            img_bgr, roi_x, roi_w, roi_y, roi_h, n_bands=n_bands,
+            inner_px=chapa_inner_px,
         )
         # Values are already in ROI-relative coords
         left_pts_list  = list(edge_left.values())

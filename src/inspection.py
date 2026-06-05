@@ -621,10 +621,11 @@ def _inspect_bgr(
     _ec_min_holes    = int(tolerances.get("pattern_edge_min_holes_per_band", 1))
     _ec_smooth       = int(tolerances.get("pattern_edge_smooth_window", 1))
     _ec_boundary_tol = float(tolerances.get("pattern_edge_boundary_tol_px", 0.0))
+    _ec_chapa_inner  = int(tolerances.get("chapa_edge_inner_px", 80))
     centering = compute_centering(
         img_aligned, holes, roi=roi, tol_px=center_offset_tol_px,
         n_bands=_ec_bands, min_holes_per_band=_ec_min_holes, smooth_window=_ec_smooth,
-        boundary_tol_px=_ec_boundary_tol,
+        boundary_tol_px=_ec_boundary_tol, chapa_inner_px=_ec_chapa_inner,
     )
     centering_nok = (
         centering is not None
