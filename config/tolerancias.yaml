@@ -112,6 +112,7 @@ models:
     align_match_tol_px: 120.0
     min_match_count: 5
     edge_margin_px: 0.0
+    grid_compare_margin_px: 5.0   # excluye celdas esperadas a ≤5px del borde del frame (sin afectar detección)
     pattern_edge_margin_px: 4.0
     grid_max_missing: 60
     bbox_filter_margin_px: 20.0
