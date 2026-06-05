@@ -43,6 +43,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-05 — Tadeo + Claude
+
+#### Cambio 110 — Overlay: redimensionar marcadores y texto para cámara 640×480
+
+**Problema:** con la cámara nueva (Sony 640×480, alejada), los círculos de error y los
+textos del overlay quedaban enormes porque los tamaños estaban calibrados para resoluciones
+mayores (~1080p).
+
+**Cambios en `src/pipeline/annotate.py`:**
+
+| Elemento | Antes | Ahora |
+|---|---|---|
+| Círculo hueco missing (radio) | 18px | 10px |
+| Cruz MARKER_TILTED_CROSS (size) | 28 | 16 |
+| Número del faltante (escala) | 0.45 | 0.35 |
+| Diamante extra (markerSize) | 20 | 12 |
+| Badge "DETENCION DE MAQUINA" (escala) | 1.3 | 0.80 |
+| Razón del badge (escala) | 0.72 | 0.48 |
+| Texto "Inclinacion" (escala) | 0.6 | 0.42 |
+| Badge "CHAPA INCLINADA" (escala) | 0.8 | 0.55 |
+| Panel NOK — encabezado (escala) | 0.90 | 0.60 |
+| Panel NOK — filas (escala) | 0.65 | 0.45 |
+| "STATUS: OK/NOK" (escala) | 1.0 | 0.65 |
+
+**Archivos modificados:** `src/pipeline/annotate.py`
+
+---
+
 ### Sesión 2026-06-04 (continuación 3) — Tadeo + Claude
 
 #### Cambio 109 — ANÁLISIS: scroll vertical único sobre toda la página

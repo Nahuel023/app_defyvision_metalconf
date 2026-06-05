@@ -67,6 +67,10 @@ _HEADER_WING_W = 310
 # (id, etiqueta, unidad, tooltip para el operador)
 # ------------------------------------------------------------------
 _METRICS_DEF = [
+    ("inspection_uptime_pct", "Uptime inspección", "%",
+     "Porcentaje del tiempo de sesión en que el scanner estuvo realmente\n"
+     "disponible para inspeccionar, descontando períodos sin cámara."),
+
     ("ok_pct",             "Calidad OK",        "%",
      "Porcentaje de inspecciones sin defectos sobre el total de la sesión.\n"
      "Meta de referencia: 95 % o más."),
@@ -98,9 +102,31 @@ _METRICS_DEF = [
      "Cantidad de veces que el sistema detuvo la producción por racha NOK\n"
      "excesiva en esta sesión. Cero es lo ideal."),
 
+    ("machine_stop_count", "Stops máquina",      "",
+     "Cantidad de machine_stop disparados por lógica de defecto persistente o\n"
+     "desalineación crítica detectada por el sistema."),
+
     ("camera_fps",         "FPS cámara",         "fps",
      "Velocidad de captura real de la cámara.\n"
      "Un valor bajo puede indicar problema de hardware o conexión USB."),
+
+    ("camera_missing_events", "Cortes cámara",   "",
+     "Cantidad de veces que el sistema perdió la señal de cámara durante esta sesión."),
+
+    ("camera_missing_sec", "Sin cámara",         "s",
+     "Tiempo acumulado de sesión sin frames válidos de cámara."),
+
+    ("low_quality_pct",    "Baja calidad",       "%",
+     "Porcentaje de inspecciones que quedaron en LOW_QUALITY y no se usaron\n"
+     "plenamente para la decisión temporal."),
+
+    ("avg_detection_ratio","Detección prom.",    "%",
+     "Promedio de agujeros detectados respecto del patrón esperado. Útil para\n"
+     "evaluar si el sistema está trabajando cómodo o al límite."),
+
+    ("align_fail_count",   "Align fallback",     "",
+     "Cantidad de inspecciones donde falló la alineación principal y se usó\n"
+     "camino de fallback. Un valor alto merece revisión."),
 
     ("last_position_diff", "Desplaz. lámina",    "px",
      "Diferencia media de píxeles entre el frame actual y el último\n"
@@ -114,6 +140,8 @@ _CHART_DEF = [
     ("insp_per_min", "Inspecciones / min",  _ACCENT, "insp/min"),
     ("nok_streak",   "Racha NOK",           _NOK,    "consecutivos"),
     ("camera_fps",   "FPS cámara",          _WARN,   "fps"),
+    ("avg_detection_ratio", "Detección prom. (%)", "#a78bfa", "%"),
+    ("low_quality_pct", "Baja calidad (%)", "#f97316", "%"),
 ]
 
 _TIME_RANGES = [
@@ -212,7 +240,7 @@ class _RealTimeTab(QWidget):
             for i, (mid, label, unit, tip) in enumerate(_METRICS_DEF):
                 card = _MetricCard(label, unit, tip)
                 card.setMinimumWidth(110)
-                row, col = divmod(i, 5)
+                row, col = divmod(i, 4)
                 grid.addWidget(card, row, col)
                 cards[mid] = card
 
@@ -242,7 +270,14 @@ class _RealTimeTab(QWidget):
             streak  = s.get("nok_streak", 0)
             max_str = s.get("max_nok_streak", 0)
             fault_c = s.get("fault_count", 0)
+            machine_stop_c = s.get("machine_stop_count", 0)
             avg_mis = s.get("avg_missing_holes", 0.0)
+            avg_det_ratio = s.get("avg_detection_ratio", 0.0) * 100.0
+            align_fail_c = s.get("align_fail_count", 0)
+            low_quality_pct = s.get("low_quality_pct", 0.0)
+            camera_missing_sec = s.get("camera_missing_sec", 0.0)
+            camera_missing_events = s.get("camera_missing_events", 0)
+            insp_uptime_pct = s.get("inspection_uptime_pct", 0.0)
             pos_dif = s.get("last_position_diff", 0.0)
             fps     = cam.fps
 
@@ -256,6 +291,10 @@ class _RealTimeTab(QWidget):
                 hms = "—"
 
             updates = {
+                "inspection_uptime_pct": (
+                    f"{insp_uptime_pct:.1f}",
+                    _OK if insp_uptime_pct >= 98 else (_WARN if insp_uptime_pct >= 90 else _NOK),
+                ),
                 "ok_pct": (
                     f"{ok_pct:.1f}",
                     _OK if ok_pct >= 95 else (_WARN if ok_pct >= 80 else _NOK),
@@ -285,9 +324,33 @@ class _RealTimeTab(QWidget):
                     str(fault_c),
                     _NOK if fault_c > 0 else _MUTED,
                 ),
+                "machine_stop_count": (
+                    str(machine_stop_c),
+                    _NOK if machine_stop_c > 0 else _MUTED,
+                ),
                 "camera_fps": (
                     f"{fps:.1f}",
                     _OK if fps >= 20 else (_WARN if fps >= 5 else _NOK),
+                ),
+                "camera_missing_events": (
+                    str(camera_missing_events),
+                    _NOK if camera_missing_events > 0 else _MUTED,
+                ),
+                "camera_missing_sec": (
+                    f"{camera_missing_sec:.1f}",
+                    _NOK if camera_missing_sec > 10 else (_WARN if camera_missing_sec > 0 else _MUTED),
+                ),
+                "low_quality_pct": (
+                    f"{low_quality_pct:.1f}",
+                    _NOK if low_quality_pct > 15 else (_WARN if low_quality_pct > 5 else _OK),
+                ),
+                "avg_detection_ratio": (
+                    f"{avg_det_ratio:.1f}",
+                    _OK if avg_det_ratio >= 95 else (_WARN if avg_det_ratio >= 80 else _NOK),
+                ),
+                "align_fail_count": (
+                    str(align_fail_c),
+                    _NOK if align_fail_c > 0 else _MUTED,
                 ),
                 "last_position_diff": (
                     f"{pos_dif:.1f}",
@@ -380,8 +443,9 @@ class _HistoricalTab(QWidget):
         if _MPL:
             self._fig = Figure(figsize=(12, 6), facecolor=_DARK)
             self._axes = []
-            for i in range(4):
-                ax = self._fig.add_subplot(2, 2, i + 1)
+            n_plots = len(_CHART_DEF)
+            for i in range(n_plots):
+                ax = self._fig.add_subplot(3, 2, i + 1)
                 self._axes.append(ax)
             self._fig.tight_layout(pad=2.5)
 
