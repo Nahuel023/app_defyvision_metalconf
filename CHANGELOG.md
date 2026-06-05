@@ -58,10 +58,9 @@ tilts falsos de aproximadamente `-32 grados`.
 - `src/pipeline/grid_fitting.py`: `estimate_lattice_tilt_deg()` ahora admite `dy` y, cuando no se
   pasa una tolerancia explicita, calcula `row_dy_tol = max(3px, 0.6 * dy)`.
 - `src/inspection.py`: al estimar tilt de grilla, ahora pasa `pattern.dy` al estimador.
-- `config/tolerancias.yaml` -> `models.modelo_B`:
-  - `verticality_quality_enabled: true -> false`
-  - `pattern_global_offset_max_px: 10.0 -> 0.0`
-  Los checks basados en bordes laterales/global offset no eran confiables con esta optica gran angular.
+- `src/inspection.py`: para `modelo_B` se desactivan en runtime `verticality_quality_enabled` y
+  el chequeo `pattern_global_offset_max_px`, porque los checks basados en bordes laterales/global
+  offset no eran confiables con esta optica gran angular.
 
 **Validacion `MICROPERFORADO_1` (`modelo_B`, `scanner_1`):**
 - Antes: `82/82 raw OK`, pero `82/82 UNSTABLE` y tilt mediano falso ~= `-31.8 grados`.
@@ -73,7 +72,7 @@ tilts falsos de aproximadamente `-32 grados`.
 **Validacion `ESTERILLA_3` (`modelo_A`, `scanner_2`):**
 - Se mantiene `30/30 OK` sin regresion.
 
-**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`, `config/tolerancias.yaml`
+**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`
 
 ---
 

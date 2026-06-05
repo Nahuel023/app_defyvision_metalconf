@@ -246,6 +246,13 @@ def _inspect_bgr(
     pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
     pattern_center_zigzag_abs_max   = float(tolerances.get("pattern_center_zigzag_abs_max_px", 18.0))
 
+    # Camara Sony gran angular: en microperforado los checks basados en bordes laterales
+    # y offset global generan falsos "UNSTABLE"/desalineado, aunque la grilla central
+    # este bien. La inspeccion por matching de agujeros sigue siendo confiable.
+    if model == "modelo_B":
+        verticality_quality_enabled = False
+        pattern_global_offset_max_px = 0.0
+
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
         img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
