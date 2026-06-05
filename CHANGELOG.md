@@ -45,6 +45,43 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 122 - Microperforado: borde del patron sobre filas reales + patron reconstruido sin duplicadas
+
+**Pedido:** en microperforado, medir siempre el limite del patron a la altura de los
+agujeros reales y bajar fuerte las cruces rojas falsas de agujeros fuera de lugar.
+
+**Problema detectado:**
+- `_pattern_bounds_by_band()` podia juntar dos filas de agujeros dentro de la misma
+  banda vertical y promediar su `y`, dejando el punto del borde entre dos filas.
+- El patron activo de `modelo_B` venia de una referencia suboptima (`frame_0077`) y
+  ademas `build-pattern` conservaba celdas duplicadas aunque las detectara.
+
+**Cambios aplicados:**
+- `src/pipeline/edge_centering.py`:
+  - nuevo agrupado por filas reales de agujeros dentro de cada banda;
+  - para cada lado se elige la fila valida mas cercana al centro de la banda;
+  - la `y` del borde ahora cae sobre una fila real, no en el hueco entre filas.
+- `src/patterns/pattern_build.py`:
+  - cuando hay celdas duplicadas en el patron, ahora se depuran automaticamente;
+  - se conserva solo el punto mas cercano a la posicion ideal de esa celda.
+- Reconstruido `modelo_B` desde
+  `05-06-2026-MICROPERFORADO_1/frame_0005.png` en:
+  - `data/patterns/scanner_1/modelo_B/holes.json`
+  - `data/patterns/modelo_B/holes.json`
+
+**Validacion `05-06-2026-MICROPERFORADO_1`:**
+- Antes: `137/137 raw OK`, pero `avg_missing ~= 9.93`, `max_missing = 24`.
+- Ahora: `137/137 raw OK`, `0 temporal NOK`, `avg_missing ~= 0.445`,
+  `max_missing = 3`, `avg_extra = 0`.
+- En la practica, las cruces rojas falsas bajan muchisimo y el borde del patron
+  queda anclado a filas reales de agujeros.
+
+**Archivos modificados:** `src/pipeline/edge_centering.py`,
+`src/patterns/pattern_build.py`, `data/patterns/modelo_B/holes.json`,
+`data/patterns/scanner_1/modelo_B/holes.json`
+
+---
+
 #### Cambio 121 - Esterilla: cerco por envolvente del patron para ocultar detecciones fuera de zona util
 
 **Pedido:** endurecer el patron de `ESTERILLA_1` para que no se muestren ni cuenten

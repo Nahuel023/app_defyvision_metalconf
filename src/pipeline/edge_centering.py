@@ -311,6 +311,25 @@ def _trim_y_extremes(
     return {k: v for k, v in d.items() if lo <= v[1] <= hi}
 
 
+def _split_holes_into_y_rows(
+    holes: Sequence,
+    row_tol_px: float,
+) -> list[list]:
+    """Cluster holes into actual Y rows using a small vertical tolerance."""
+    if not holes:
+        return []
+    sorted_holes = sorted(holes, key=lambda hh: float(hh.y))
+    rows: list[list] = [[sorted_holes[0]]]
+    for hh in sorted_holes[1:]:
+        cur_row = rows[-1]
+        cur_y = float(np.median([pt.y for pt in cur_row]))
+        if abs(float(hh.y) - cur_y) <= row_tol_px:
+            cur_row.append(hh)
+        else:
+            rows.append([hh])
+    return rows
+
+
 def _pattern_bounds_by_band(
     holes: Sequence,
     img_h: int,
@@ -339,38 +358,61 @@ def _pattern_bounds_by_band(
     global_left = float(min(hh.x - hh.r for hh in all_holes))
     global_right = float(max(hh.x + hh.r for hh in all_holes))
     band_h = img_h / n_bands
+    row_tol_px = max(
+        3.0,
+        min(
+            band_h * 0.45,
+            float(np.median([hh.r for hh in all_holes])) * 1.6,
+        ),
+    )
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
 
     for i in range(n_bands):
         y0 = i * band_h
         y1 = (i + 1) * band_h
+        band_mid = (y0 + y1) / 2.0
 
         band_holes = [hh for hh in all_holes if y0 <= hh.y < y1]
         if len(band_holes) >= min_holes:
-            # In staggered patterns, some bands legitimately have no outer-column
-            # hole. Without this boundary gate, the nearest interior column becomes
-            # a fake edge and creates false pattern-zigzag positives.
-            if boundary_tol_px > 0.0:
-                left_holes = [
-                    hh for hh in band_holes
-                    if (hh.x - hh.r) <= global_left + boundary_tol_px
-                ]
-                right_holes = [
-                    hh for hh in band_holes
-                    if (hh.x + hh.r) >= global_right - boundary_tol_px
-                ]
-            else:
-                left_holes = band_holes
-                right_holes = band_holes
+            row_groups = _split_holes_into_y_rows(band_holes, row_tol_px=row_tol_px)
 
-            # Snap y to actual boundary-hole centres, not the arbitrary band midpoint.
-            if len(left_holes) >= min_holes:
-                cy_left = float(np.mean([hh.y for hh in left_holes]))
-                left_dict[i] = (float(min(hh.x - hh.r for hh in left_holes)), cy_left)
-            if len(right_holes) >= min_holes:
-                cy_right = float(np.mean([hh.y for hh in right_holes]))
-                right_dict[i] = (float(max(hh.x + hh.r for hh in right_holes)), cy_right)
+            left_candidates: list[tuple[float, float, float]] = []
+            right_candidates: list[tuple[float, float, float]] = []
+            for row_holes in row_groups:
+                # In staggered patterns, some rows legitimately have no outer-column
+                # hole. Without this boundary gate, the nearest interior hole becomes
+                # a fake edge and creates false boundary measurements.
+                if boundary_tol_px > 0.0:
+                    left_holes = [
+                        hh for hh in row_holes
+                        if (hh.x - hh.r) <= global_left + boundary_tol_px
+                    ]
+                    right_holes = [
+                        hh for hh in row_holes
+                        if (hh.x + hh.r) >= global_right - boundary_tol_px
+                    ]
+                else:
+                    left_holes = row_holes
+                    right_holes = row_holes
+
+                if len(left_holes) >= min_holes:
+                    cy_left = float(np.median([hh.y for hh in left_holes]))
+                    left_x = float(min(hh.x - hh.r for hh in left_holes))
+                    left_candidates.append((abs(cy_left - band_mid), left_x, cy_left))
+                if len(right_holes) >= min_holes:
+                    cy_right = float(np.median([hh.y for hh in right_holes]))
+                    right_x = float(max(hh.x + hh.r for hh in right_holes))
+                    right_candidates.append((abs(cy_right - band_mid), right_x, cy_right))
+
+            # Choose the real hole row closest to the band center, so Y always lands
+            # on an actual row instead of the empty gap between two rows.
+            if left_candidates:
+                _, left_x, cy_left = min(left_candidates, key=lambda item: item[0])
+                left_dict[i] = (left_x, cy_left)
+            if right_candidates:
+                _, right_x, cy_right = min(right_candidates, key=lambda item: item[0])
+                right_dict[i] = (right_x, cy_right)
 
     left_dict  = _iqr_filter_band_dict(left_dict)
     right_dict = _iqr_filter_band_dict(right_dict)
