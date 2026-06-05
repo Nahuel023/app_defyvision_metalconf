@@ -418,20 +418,18 @@ def draw_centering_overlay(
 
     _font_sm = cv2.FONT_HERSHEY_SIMPLEX
 
-    # --- Metal edges (CHAPA): fitted line for visual stability ---
-    # Per-band raw points are noisy (hole boundaries create spurious gradients);
-    # the fitted line matches the stable scalar left_x/right_x used for centering.
+    # --- Metal edges (CHAPA): actual per-band measurements as polyline ---
     _edge_color = (210, 210, 210)
     lx_vis = max(3, min(lx, w - 55))
     rx_vis = max(3, min(rx, w - 55))
     if len(left_pts) >= 2:
-        _draw_full_height_fit_line(out, left_pts, _edge_color, thickness=2, alpha=0.50)
+        _draw_edge_polyline(out, left_pts, _edge_color, thickness=2, alpha=0.50)
     else:
         _draw_transparent_line(out, (lx, 0), (lx, h - 1), _edge_color, 2, 0.45)
     cv2.putText(out, "CHAPA", (lx_vis, 28), _font_sm, 0.45, _edge_color, 1, cv2.LINE_AA)
 
     if len(right_pts) >= 2:
-        _draw_full_height_fit_line(out, right_pts, _edge_color, thickness=2, alpha=0.50)
+        _draw_edge_polyline(out, right_pts, _edge_color, thickness=2, alpha=0.50)
     else:
         _draw_transparent_line(out, (rx, 0), (rx, h - 1), _edge_color, 2, 0.45)
     cv2.putText(out, "CHAPA", (rx_vis, 28), _font_sm, 0.45, _edge_color, 1, cv2.LINE_AA)
@@ -452,9 +450,6 @@ def draw_centering_overlay(
     for pts, fallback_x in ((pat_l_pts, plx), (pat_r_pts, prx)):
         x_vis = max(3, min(fallback_x, w - 65))
         if len(pts) >= 2:
-            _draw_full_height_fit_line(out, pts, pat_color,
-                                       thickness=pat_thick + 1,
-                                       alpha=0.42 if pattern_warn else 0.34)
             if pattern_warn:
                 # Glow layer: thick dark red beneath the bright line
                 _draw_edge_polyline(out, pts, (0, 0, 80),
