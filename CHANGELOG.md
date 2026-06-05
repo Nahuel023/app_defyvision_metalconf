@@ -45,6 +45,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 121 - Esterilla: cerco por envolvente del patron para ocultar detecciones fuera de zona util
+
+**Pedido:** endurecer el patron de `ESTERILLA_1` para que no se muestren ni cuenten
+agujeros fuera de los limites reales del patron, sobre todo en la visualizacion.
+
+**Problema observado:**
+- El pipeline ya venia acotado por ROI + bounding box del patron, pero en esterilla
+  seguian apareciendo detecciones verdes por fuera de la zona util del patron.
+- Al intentar recortar esas detecciones antes del matching, subian demasiado los
+  `missing` cerca de los bordes validos del patron.
+
+**Cambios aplicados:**
+- `src/inspection.py`: nuevo filtro por **envolvente convexa del patron** usando
+  `cv2.pointPolygonTest`, configurable con `pattern_hull_margin_px`.
+- El filtro se aplica **despues del matching** sobre `extra_points` y sobre los
+  agujeros dibujados en overlay, para no romper la deteccion valida de borde.
+- `src/utils/config.py`: agregado default `pattern_hull_margin_px = 0.0`.
+- `config/tolerancias.yaml` -> `models.modelo_A`: activado `pattern_hull_margin_px: 10.0`.
+
+**Validacion `05-06-2026-ESTERILLA_1`:**
+- Se mantiene `133/133 raw OK`, `0 temporal NOK`.
+- El matching principal no pierde estabilidad y el overlay de esterilla queda mas
+  cerrado a la silueta real del patron, ocultando detecciones fuera de la zona util.
+
+**Archivos modificados:** `src/inspection.py`, `src/utils/config.py`,
+`config/tolerancias.yaml`
+
+---
+
 #### Cambio 120 - Patrones iniciales 05-06-2026: ROI mas cerradas y recalibracion con zoom nuevo
 
 **Pedido:** con el ajuste de zoom nuevo, delimitar mejor el analisis de agujeros para no
@@ -209,6 +238,23 @@ se estaba escaneando, para reconocer la grabacion antes de abrirla.
 **Ejemplo:** `data/recordings/20260605_153210_scanner_1_esterilla`
 
 **Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 117 — recalibración post-zoom: ROI + grilla + patrones + ignore top/bot
+
+**Contexto:** Ajuste de zoom en ambas cámaras Sony IP. Recalibración desde `05-06-2026-PATRONES INICIALES`.
+
+- **ROI modelo_A**: `x=215,y=0,w=275,h=480`; **modelo_B**: `x=195,y=0,w=295,h=480`
+- **modelo_A** grid: `dx=39,dy=21,stagger=20` (antes dx=26,dy=14,stagger=12)
+- **modelo_B** grid: `dx=36,dy=14,stagger=-18` (antes dx=24,dy=8,stagger=-12)
+- **compare_top/bottom_ignore_px: 42** en ambos modelos (nuevo en modelo_B)
+- **grid_affine_refinement: false** para modelo_A — el afín producía 58 missing vs 12 sin él
+- **pattern_edge_margin_px: 30** (modelo_A), **bbox_filter_margin_px: 25** (modelo_A)
+- **frame_missing_nok_threshold: 40** en ambos (baseline: modelo_A max=29, modelo_B max=27)
+- Validación: 133/133 frames esterilla OK, 137/137 frames micro OK
+
+**Archivos:** roi.json × 2, holes.json × 2, `config/tolerancias.yaml`
 
 ---
 
