@@ -45,6 +45,67 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 123 - machine_stop re-habilitado + deteccion de desviacion lateral grande
+
+**Pedido:**
+1. Que si se detecta el MISMO agujero faltante por muchos frames consecutivos (linea
+   avanzando, mismo punzon roto) se detenga la maquina — como estaba antes.
+2. Que ante grandes desviaciones del patron (borde del patron deja de ser visible) también
+   se detenga la maquina.
+
+**Diagnostico:**
+- `machine_stop_enabled: false` en ambos modelos (desactivado en Cambio 100 tras la
+  recalibracion de camara). Causa: falsos positivos con el baseline alto de la época.
+- Con la calibracion actual (avg_missing ~0.1-0.5 para modelo_B, ~0.5-2 para modelo_A)
+  el baseline es bajo y es seguro re-habilitar.
+- Para modelo_B: columnas ci=1-5 siempre tienen 1-2 holes missing por baseline de borde;
+  `min_missing=3` es el umbral correcto para ignorar ese ruido y detectar solo punzones
+  rotos reales (>=3 holes en la misma columna por frame).
+- Para grandes desviaciones laterales del material (borde del patron sale del encuadre):
+  el grid fitting adapta la fase y deja de contar esos agujeros como "faltantes". Se
+  requiere un mecanismo diferente basado en el desplazamiento del centroide de detecciones.
+
+**Cambios aplicados:**
+
+`config/tolerancias.yaml` — modelo_A:
+- `machine_stop_enabled: false → true`
+- `machine_stop_missing_frames: 5 → 3` (detecta rachas mas cortas)
+- `grid_lateral_shift_max_px: 20.0` (nuevo — parada inmediata si centroide de
+  agujeros detectados se desplaza mas de 20px del patron de referencia)
+
+`config/tolerancias.yaml` — modelo_B:
+- `machine_stop_enabled: false → true`
+- `machine_stop_missing_frames: 5 → 3`
+- `machine_stop_min_missing: 3` (sin cambio — protege contra falsos positivos del
+  ruido de borde, que tiene 1-2 holes por columna)
+- `grid_lateral_shift_max_px: 20.0` (nuevo — parada inmediata por desviacion lateral)
+
+`src/inspection.py`:
+- Nuevo bloque de deteccion de desplazamiento lateral: compara `mean_x(detected_holes)`
+  con `mean_x(pattern.points)`. Si la diferencia supera `grid_lateral_shift_max_px`,
+  dispara `machine_stop` inmediatamente con razon "DESVIACION LATERAL".
+- Gated por `tilt_warn` (cuando la chapa esta inclinada el centroide puede desviarse
+  sin ser un corrimiento real del material).
+
+`src/utils/config.py`:
+- Nuevo default `grid_lateral_shift_max_px: 0.0` (opt-in, desactivado globalmente).
+
+**Comportamiento esperado:**
+- Punzon roto (misma columna ci ausente en >=3 frames consecutivos con >=3 holes/frame):
+  → `machine_stop=True`, razon "AGUJERO FALTANTE PERSISTENTE EN COLUMNA X".
+- Gran desviacion lateral (material se corre >20px): → `machine_stop=True`,
+  razon "DESVIACION LATERAL (+Xpx)".
+- Frames con variacion normal (borde ci=1-5 con 1-2 holes, desviacion <20px): → OK.
+
+**Validacion `05-06-2026-PATRONES EDITADOS`:**
+- `ESTERILLA_1`: 133/133 temporal OK, 0 machine_stop (sin falsos positivos).
+- `MICROPERFORADO_1`: 137/137 temporal OK, 0 machine_stop (sin falsos positivos).
+
+**Archivos modificados:** `config/tolerancias.yaml`, `src/inspection.py`,
+`src/utils/config.py`
+
+---
+
 #### Cambio 122 - Microperforado: borde del patron sobre filas reales + patron reconstruido sin duplicadas
 
 **Pedido:** en microperforado, medir siempre el limite del patron a la altura de los
