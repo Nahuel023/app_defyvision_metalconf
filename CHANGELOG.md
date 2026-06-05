@@ -65,6 +65,40 @@ se estaba escaneando, para reconocer la grabacion antes de abrirla.
 
 ---
 
+#### Cambio 113 — FPS: async save + adaptive_block_size 61→41 + position threshold
+
+**Problema:** FPS cayendo a 3 en producción e inspección.
+
+**Diagnóstico de los 3 cuellos de botella acumulados:**
+
+1. **`save_result_images()` síncrono en el inspector thread** — escribía 2 PNG (máscara +
+   overlay) por cada frame NOK directamente en el hilo del inspector, bloqueándolo
+   100-200ms por write. Con calibración ajustada (muchos NOKs temporales) esto era la
+   causa principal del bajo FPS.
+
+2. **`adaptive_block_size: 61`** — kernel de 61×61px sobre 640×480 costoso. Reducido a
+   41 (~45% más rápido en la etapa de threshold).
+
+3. **`continuous_position_threshold: 0.0`** — el inspector revisaba cada frame sin filtrar
+   posición. Subido a 3.0px de diff media: skipea frames donde el material no avanzó.
+
+**Cambios:**
+
+- `src/controller/scanner_controller.py` → `_handle_result()`:
+  `save_result_images(result)` pasa a un `threading.Thread(daemon=True)` igual que
+  el buffer ok_buf. El inspector thread ya no espera el disco.
+
+- `config/tolerancias.yaml` → `models.modelo_A`:
+  - `adaptive_block_size: 61 → 41`
+  - `continuous_position_threshold: 0.0 → 3.0`
+
+**Resultado esperado:** FPS se estabiliza en 8-15fps en producción (limitado por
+`max_inspection_hz: 15`). El análisis de carpeta mejora ~40% en velocidad de pipeline.
+
+**Archivos modificados:** `src/controller/scanner_controller.py`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 112 — esterilla: re-habilitar adaptive threshold + ampliar tol_xy_px para gran angular
 
 **Problema:** demasiados agujeros marcados en rojo (missing) al analizar esterilla con la
