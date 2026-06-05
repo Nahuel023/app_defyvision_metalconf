@@ -2067,6 +2067,7 @@ class RecordingTab(QWidget):
             b = QPushButton(label)
             b.setToolTip(tooltip)
             b.setFixedHeight(h)
+            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             if w:
                 b.setFixedWidth(w)
             b.setStyleSheet(_NAV_BASE.format(
@@ -2283,6 +2284,7 @@ class RecordingTab(QWidget):
         # ── Image viewer ──────────────────────────────────────────────
         self._img_view = ZoomableImageView("Sin frames")
         self._img_view.setMinimumHeight(560)
+        self._img_view.installEventFilter(self)
         lay.addWidget(self._img_view, stretch=1)
 
         return grp
@@ -2800,6 +2802,7 @@ class RecordingTab(QWidget):
     def _show_frame(self, idx: int) -> None:
         if not self._frame_paths:
             return
+        first_load = self._current_idx == 0 and idx == 0 and self._img_view.current_pixmap() is None
         idx = max(0, min(idx, len(self._frame_paths) - 1))
         self._current_idx = idx
 
@@ -2838,6 +2841,8 @@ class RecordingTab(QWidget):
                          or prev_pxm.width() != pxm.width()
                          or prev_pxm.height() != pxm.height())
             self._img_view.set_pixmap(pxm, auto_fit=needs_fit)
+            if first_load:
+                self._img_view.setFocus()
 
         total = len(self._frame_paths)
         self._nav_lbl.setText(f"{idx + 1} / {total}")
@@ -3318,6 +3323,13 @@ class RecordingTab(QWidget):
             self._nok_nav_lbl.setText(f"NOK {pos}/{total}")
         else:
             self._nok_nav_lbl.setText(f"NOK {total}")
+
+    def eventFilter(self, obj, event) -> bool:
+        from PyQt6.QtCore import QEvent
+        if obj is self._img_view and event.type() == QEvent.Type.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        return super().eventFilter(obj, event)
 
     def keyPressEvent(self, event) -> None:
         key  = event.key()
