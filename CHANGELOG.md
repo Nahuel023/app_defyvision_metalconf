@@ -45,6 +45,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 117 - Grabaciones con formato fecha-patron-secuencia
+
+**Pedido:** nombrar las grabaciones con formato tipo `DIA-MES-ANO-ESTERILLA_2` o
+`DIA-MES-ANO-MICROPERFORADO_5`.
+
+**Cambios en `src/ui/service.py`:**
+- Se reemplaza el formato anterior con timestamp por un formato diario y legible.
+- Nuevo formato de carpeta: `DD-MM-YYYY-PATRON_N`.
+- `N` es correlativo por fecha+patron dentro de `data/recordings`.
+- Ejemplos: `05-06-2026-ESTERILLA_1`, `05-06-2026-ESTERILLA_2`,
+  `05-06-2026-MICROPERFORADO_1`.
+- No se usan barras `/` porque Windows no las permite en nombres de carpeta.
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
 #### Cambio 116 - Notificacion visible de Windows en notify_done.ps1
 
 **Problema:** el script de aviso hacia sonido pero no mostraba una notificacion visible en escritorio.

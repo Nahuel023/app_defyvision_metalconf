@@ -2299,8 +2299,8 @@ class RecordingTab(QWidget):
             return
 
         from datetime import datetime as _dt
-        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-        rec_name = self._build_recording_folder_name(ts, sid)
+        rec_date = _dt.now().strftime("%d-%m-%Y")
+        rec_name = self._build_recording_folder_name(rec_date)
         self._rec_dir = self._unique_recording_dir(rec_name)
         self._rec_dir.mkdir(parents=True, exist_ok=True)
         self._frame_paths.clear()
@@ -3037,15 +3037,28 @@ class RecordingTab(QWidget):
     def _active_model(self) -> str:
         return to_internal(self._model_combo.currentText())
 
-    def _recording_model_slug(self) -> str:
-        name = self._model_combo.currentText().strip().lower()
-        slug = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
-        return slug or "sin_modelo"
+    def _recording_model_label(self) -> str:
+        name = self._model_combo.currentText().strip().upper()
+        label = re.sub(r"[^A-Z0-9]+", "_", name).strip("_")
+        return label or "SIN_MODELO"
 
-    def _build_recording_folder_name(self, ts: str, scanner_id: str) -> str:
-        scanner_slug = re.sub(r"[^a-zA-Z0-9]+", "_", scanner_id).strip("_").lower()
-        model_slug = self._recording_model_slug()
-        return f"{ts}_{scanner_slug}_{model_slug}"
+    def _build_recording_folder_name(self, date_str: str) -> str:
+        root = Path("data/recordings")
+        model_label = self._recording_model_label()
+        prefix = f"{date_str}-{model_label}_"
+        next_idx = 1
+
+        if root.exists():
+            for path in root.iterdir():
+                if not path.is_dir():
+                    continue
+                if not path.name.startswith(prefix):
+                    continue
+                suffix = path.name[len(prefix):]
+                if suffix.isdigit():
+                    next_idx = max(next_idx, int(suffix) + 1)
+
+        return f"{date_str}-{model_label}_{next_idx}"
 
     def _unique_recording_dir(self, base_name: str) -> Path:
         root = Path("data/recordings")
