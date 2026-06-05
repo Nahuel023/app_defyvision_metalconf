@@ -45,6 +45,24 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-05 — Tadeo + Claude
 
+#### Cambio 115 - Script PowerShell de notificacion con sonido
+
+**Pedido:** contar con una notificacion audible por PowerShell para saber cuando termina una tarea.
+
+**Cambios:**
+- Nuevo script `scripts/notify_done.ps1`.
+- Acepta `-Message` y `-Level success|warn|error`.
+- Usa `Console.Beep()` con patrones distintos segun el nivel y hace fallback a
+  `System.Media.SystemSounds` si `Beep()` no esta disponible en el host.
+
+**Uso:**
+- `powershell -ExecutionPolicy Bypass -File .\scripts\notify_done.ps1`
+- `powershell -ExecutionPolicy Bypass -File .\scripts\notify_done.ps1 -Message "Termine" -Level success`
+
+**Archivos modificados:** `scripts/notify_done.ps1`
+
+---
+
 #### Cambio 114 - modelo_A: ignorar bordes superior/inferior en la comparacion
 
 **Pedido:** al analizar `ESTERILLA_3` (`C:\Users\DefyC\Downloads\Sony_IP_Camera_Imagenes\ESTERILLA_3`)
