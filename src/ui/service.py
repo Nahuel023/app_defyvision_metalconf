@@ -14,6 +14,7 @@ Acepta un InspectionSystem existente (desde OperatorWindow) o crea uno propio.
 import json
 import logging
 import os
+import re
 import shutil
 import sys
 import time
@@ -2299,7 +2300,8 @@ class RecordingTab(QWidget):
 
         from datetime import datetime as _dt
         ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-        self._rec_dir = Path("data/recordings") / ts
+        rec_name = self._build_recording_folder_name(ts, sid)
+        self._rec_dir = self._unique_recording_dir(rec_name)
         self._rec_dir.mkdir(parents=True, exist_ok=True)
         self._frame_paths.clear()
         self._results.clear()
@@ -2328,6 +2330,7 @@ class RecordingTab(QWidget):
         meta = {
             "model": self._active_model(),
             "model_display": self._model_combo.currentText(),
+            "recording_folder": self._rec_dir.name,
             "fps": self._fps_spin.value(),
             "scanner": self._scanner_combo.currentText(),
             "timestamp": _dt.now().isoformat(),
@@ -3033,6 +3036,28 @@ class RecordingTab(QWidget):
 
     def _active_model(self) -> str:
         return to_internal(self._model_combo.currentText())
+
+    def _recording_model_slug(self) -> str:
+        name = self._model_combo.currentText().strip().lower()
+        slug = re.sub(r"[^a-z0-9]+", "_", name).strip("_")
+        return slug or "sin_modelo"
+
+    def _build_recording_folder_name(self, ts: str, scanner_id: str) -> str:
+        scanner_slug = re.sub(r"[^a-zA-Z0-9]+", "_", scanner_id).strip("_").lower()
+        model_slug = self._recording_model_slug()
+        return f"{ts}_{scanner_slug}_{model_slug}"
+
+    def _unique_recording_dir(self, base_name: str) -> Path:
+        root = Path("data/recordings")
+        candidate = root / base_name
+        if not candidate.exists():
+            return candidate
+        idx = 2
+        while True:
+            candidate = root / f"{base_name}_{idx:02d}"
+            if not candidate.exists():
+                return candidate
+            idx += 1
 
     # ── Model toggle buttons ──────────────────────────────────────────
 
