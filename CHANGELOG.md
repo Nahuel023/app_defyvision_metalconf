@@ -66,6 +66,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 130 - UI producción: mostrar overlay analizado en frames NOK (en vivo)
+
+**Síntoma:** "quiero que cuando detecte un NOK o detención de máquina en estado
+INSPECCIONANDO, también muestre en pantalla el frame de detención, al igual que
+en simulación pero con la imagen o frame real analizado".
+
+**Diagnóstico:** `ScannerPanel._on_result()` solo mostraba el overlay cuando
+`result.machine_stop=True` (30s + dialog). Para `result.status == "NOK"` el overlay
+nunca se emitía — la constante `_OVERLAY_HOLD_MS = 2500` estaba definida pero sin uso.
+
+**Cambio en `src/ui/operator.py` → `ScannerPanel._on_result`:**
+- Añadido `elif result.status == "NOK"` que emite el overlay por `_OVERLAY_HOLD_MS = 2500ms`.
+- Guard inicial `if result.overlay is None: return` para evitar crash en frames sin overlay.
+- El overlay se muestra en el `camera_label` del panel correspondiente durante 2.5 segundos,
+  luego vuelve al feed en vivo automáticamente.
+- El flujo de `machine_stop` (30s + `MachineStopDialog`) sigue igual, sin cambio.
+
+**Comportamiento resultante:**
+- `result.status == "OK"` → feed de cámara en vivo (sin cambio)
+- `result.status == "NOK"` → overlay anotado visible 2.5s → vuelve a vivo
+- `result.machine_stop == True` → overlay 30s + diálogo a pantalla completa (sin cambio)
+
+**Archivos modificados:** `src/ui/operator.py`
+
+---
+
 #### Cambio 129 - Esterilla: márgenes X/Y independientes en grid_compare + columna izquierda
 
 **Síntoma:** usuario pide "elimina límites superiores e inferiores, quiero que detecte todos
