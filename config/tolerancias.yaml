@@ -24,7 +24,7 @@ max_inspection_hz: 15
 # Útil para ver cómo está funcionando la detección sin errores.
 ok_buffer_enabled: true
 ok_buffer_count: 200          # frames a mantener por scanner (~20 MB a 100 KB/frame)
-ok_buffer_every: 3            # guardar 1 de cada 3 frames OK (reduce I/O)
+ok_buffer_every: 1            # guardar todos los frames OK
 ok_buffer_jpeg_quality: 75    # calidad JPEG
 
 events_enabled: true

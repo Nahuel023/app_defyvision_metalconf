@@ -43,6 +43,27 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-08 — Nahuel + Claude (continuación)
+
+#### Cambio 129 - force_auto_mode: forzar modo AUTO sin depender del switch PLC
+
+**Síntoma:** X0 y X2 apagadas (MANUAL) → inspector nunca arranca → contadores OK/NOK en 0.
+
+**Causa:** cableado del switch de modo no llega al PLC todavía.
+
+**Cambios:**
+- `config/io_map.yaml`: `force_auto_mode: true` en `scanner_1` y `scanner_2`
+- `src/controller/scanner_controller.py`:
+  - `__init__`: lee `force_auto_mode` del config; inicializa `self._mode = AUTO` si activo
+  - `_poll_loop`: no actualiza modo desde PLC si `force_auto` está activo
+  - `get_status`: ídem
+
+**Para revertir cuando el cableado esté listo:** poner `force_auto_mode: false` (o eliminar la línea) en `io_map.yaml` y reiniciar.
+
+**Salidas afectadas:** ninguna bloqueada — el solenoide nunca se activa por software (solo se apaga en fault/stop).
+
+---
+
 ### Sesión 2026-06-08 — Tadeo + Claude
 
 #### Cambio 128 - Esterilla: reconstruir patrón scanner_2 + pattern_edge_margin_px=50

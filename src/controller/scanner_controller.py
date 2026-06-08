@@ -70,9 +70,10 @@ class ScannerController:
         )
         _max_hz = float(tols.get("max_inspection_hz", 0))
         self._min_insp_interval = (1.0 / _max_hz) if _max_hz > 0 else 0.0
+        self._force_auto    = bool(cfg.get("force_auto_mode", False))
 
         self._state      = ScannerState.IDLE
-        self._mode       = OperationMode.MANUAL
+        self._mode       = OperationMode.AUTO if self._force_auto else OperationMode.MANUAL
         self._nok_streak = 0
         self._lq_streak  = 0
         self._last_result: Optional[InspectionResult] = None
@@ -454,10 +455,12 @@ class ScannerController:
 
     def get_status(self) -> dict:
         # Lee el switch directamente del PLC para reflejar cambios en cualquier estado
-        mode_raw = self._io.read(f"{self._id}.mode_switch")
-        if mode_raw is not None:
-            with self._lock:
-                self._mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
+        # (ignorar si force_auto_mode está activo)
+        if not self._force_auto:
+            mode_raw = self._io.read(f"{self._id}.mode_switch")
+            if mode_raw is not None:
+                with self._lock:
+                    self._mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
 
         with self._lock:
             avg_missing = (
@@ -516,12 +519,13 @@ class ScannerController:
         _tick = 0
         _prev_blink: Optional[bool] = None
         while not self._stop_event.is_set():
-            # Leer switch de modo
-            mode_raw = self._io.read(f"{self._id}.mode_switch")
-            if mode_raw is not None:
-                new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
-                with self._lock:
-                    self._mode = new_mode
+            # Leer switch de modo (ignorar si force_auto_mode está activo)
+            if not self._force_auto:
+                mode_raw = self._io.read(f"{self._id}.mode_switch")
+                if mode_raw is not None:
+                    new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
+                    with self._lock:
+                        self._mode = new_mode
 
             with self._lock:
                 state  = self._state

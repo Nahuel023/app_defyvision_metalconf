@@ -5756,6 +5756,17 @@ class ServiceWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         self._timer.stop()
         logging.getLogger().removeHandler(self._log_handler)
+        # Detener workers de cámara IP antes de destruir los widgets para evitar
+        # que threads activos emitan señales a objetos Qt ya eliminados (crash intermitente).
+        try:
+            self._rec_tab._on_ip_disconnect()
+        except Exception:
+            pass
+        try:
+            for slot in range(2):
+                self._cam_tab._disconnect_ip_slot(slot)
+        except Exception:
+            pass
         event.accept()
 
 
