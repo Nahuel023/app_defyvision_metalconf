@@ -45,6 +45,49 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 128 - Esterilla: reconstruir patrón scanner_2 + pattern_edge_margin_px=50
+
+**Síntoma:** "no se está detectando correctamente todo el patrón de agujeros, hay varios
+agujeros que no se están viendo". Análisis de carpeta `05-06-2026-ESTERILLA_1` mostraba
+`detection_ratio=180%` y resultados inconsistentes.
+
+**Diagnóstico:**
+1. `run-folder` sin `--scanner` usaba el patrón GLOBAL (`data/patterns/modelo_A/holes.json`
+   con 57 puntos e `image_size=[275,480]`) en lugar del de scanner_2 (93 puntos, [255,480]).
+   El patrón global es obsoleto/incorrecto para la configuración actual de cámara.
+2. El patrón de scanner_2 tenía `pattern_edge_margin_px=5`, incluyendo columnas del borde
+   izquierdo (x~34px) y derecho (x~205px) que solo son visibles de manera intermitente.
+   Esto causaba sistemáticamente missing en columna (ci=1,cj=3/5/8/10) con tasas del 37-59%.
+3. Al reconstruir con margin=5 y frame_0034 se incluyó columna ci=5 (x~209-229px) ausente
+   en el 86-99% de frames → 126/133 temporal NOK (falsos positivos masivos).
+
+**Causa raíz:** las columnas del borde de la esterilla entran y salen del encuadre según
+la posición del material. Incluirlas en el patrón genera falsas alarmas permanentes.
+
+**Cambios en `config/tolerancias.yaml` — modelo_A:**
+- `pattern_edge_margin_px: 5.0 → 50.0`
+  Excluye las columnas izquierda (x<70px) y derecha (x>205px) del patrón.
+  Solo afecta `build-pattern`; la detección durante inspección no cambia.
+
+**Patrón reconstruido `data/patterns/scanner_2/modelo_A/holes.json`:**
+- Referencia: frame_0034 (más limpio: 0 missing, 0 extra)
+- Resultado: **58 agujeros**, 4 columnas (ci=1-4), X=70-193px, Y=72-420px
+- Antes: 93 agujeros, X=34-205px, con columna izquierda inestable
+
+**Validación `05-06-2026-ESTERILLA_1` con `--scanner scanner_2`:**
+- Con nueva pattern: raw_ok=129, raw_nok=4, **temporal_nok=0**
+- Missing max: 5% (celda de borde) — sin columnas sistemáticamente ausentes
+- Los 4 NOK raw son frames borrosos (frame_0001, 0129 y similares)
+
+**Nota sobre cobertura:** la esterilla física abarca x=14-242px en la ROI, pero
+solo x=70-193px se monitorea de forma confiable. Los bordes izquierdo/derecho
+(~1 columna por lado) son zonas de transición del encuadre — no monitoreables sin
+ajustar ROI/cámara.
+
+**Archivos modificados:** `config/tolerancias.yaml`, `data/patterns/scanner_2/modelo_A/holes.json`
+
+---
+
 #### Cambio 127 - Badge "DESVIACION LATERAL" (título correcto en warning sin parada)
 
 **Síntoma:** el badge que aparece en frames con desviación lateral mostraba
