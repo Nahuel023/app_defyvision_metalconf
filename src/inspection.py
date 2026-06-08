@@ -811,9 +811,12 @@ def _inspect_bgr(
 
     # Desplazamiento lateral del patron: si la nube de agujeros detectados se desplaza
     # mas de grid_lateral_shift_max_px respecto al patron de referencia, es una
-    # desviacion grande del material → parada inmediata (un solo frame alcanza).
-    # Gated por tilt_warn: cuando la chapa esta inclinada el centroide X de los
-    # agujeros detectados puede desviarse sin que sea un corrimiento real.
+    # Desviacion lateral del material: marca NOK + badge visual pero NO para la maquina
+    # en un solo frame. El temporal logic (consecutive_nok_frames) decide la parada.
+    # Gated por tilt_warn: con la chapa inclinada el centroide X puede desviarse
+    # sin ser un corrimiento real del material.
+    _lateral_shift_warn = False
+    _lateral_shift_reason = ""
     grid_lateral_shift_max_px = float(tolerances.get("grid_lateral_shift_max_px", 0.0))
     if (grid_lateral_shift_max_px > 0.0
             and pattern.has_grid
@@ -824,8 +827,8 @@ def _inspect_bgr(
         _pat_mean_x = float(np.mean([x for x, _ in pattern.points]))
         _lateral_shift = _det_mean_x - _pat_mean_x
         if abs(_lateral_shift) > grid_lateral_shift_max_px:
-            machine_stop = True
-            _ms_reason = f"DESVIACION LATERAL ({_lateral_shift:+.1f}px)"
+            _lateral_shift_warn = True
+            _lateral_shift_reason = f"DESVIACION LATERAL ({_lateral_shift:+.1f}px)"
             final_status = "NOK"
 
     if machine_stop:
@@ -847,6 +850,8 @@ def _inspect_bgr(
             nok_reasons.append(f"PATRON INCLINADO ({delta_ang:.1f} deg)")
         if not pattern_offset_warn and not pattern_slope_warn:
             nok_reasons.append("PATRON DESALINEADO")
+    if _lateral_shift_warn:
+        nok_reasons.append(_lateral_shift_reason)
     if machine_stop:
         nok_reasons.append("PARADA DE MAQUINA")
     if frame_geometry_quality == "UNSTABLE":
@@ -857,7 +862,7 @@ def _inspect_bgr(
     if tilt_warn:
         nok_reasons.append(f"CHAPA INCLINADA {sheet_tilt_deg:+.1f} grados")
 
-    badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
+    badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn)) + int(bool(_lateral_shift_warn))
 
     overlay_holes = holes
     if compare_points:
@@ -923,6 +928,9 @@ def _inspect_bgr(
         overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
     elif pattern_alignment_warn:
         overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
+    if _lateral_shift_warn:
+        idx = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
+        overlay = draw_machine_stop_badge(overlay, reason=_lateral_shift_reason, index=idx, title="! DESVIACION LATERAL")
 
     # Estado OK/NOK dibujado al borde IZQUIERDO del frame completo (zona oscura),
     # para no tapar los agujeros del patrón (que viven en la ROI, a la derecha).
