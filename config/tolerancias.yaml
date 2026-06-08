@@ -59,7 +59,11 @@ models:
     align_match_tol_px: 280.0
     min_match_count: 3
     edge_margin_px: 5.0
-    pattern_edge_margin_px: 50.0
+    pattern_edge_margin_px: 5.0
+    pattern_edge_margin_left_px: 15.0
+    pattern_edge_margin_right_px: 40.0
+    pattern_edge_margin_top_px: 5.0
+    pattern_edge_margin_bottom_px: 5.0
     pattern_use_clahe: false
     edge_centering_bands: 16
     pattern_edge_min_holes_per_band: 1
@@ -77,8 +81,8 @@ models:
     pattern_hull_margin_px: 10.0
     grid_affine_refinement: false
     extra_min_dist_factor: 1.5
-    compare_top_ignore_px: 24.0
-    compare_bottom_ignore_px: 24.0
+    compare_top_ignore_px: 0.0
+    compare_bottom_ignore_px: 0.0
     blur_score_min: 800.0
     frame_missing_nok_threshold: 5
     consecutive_nok_frames: 5
@@ -156,7 +160,7 @@ models:
     pattern_edge_min_holes_per_band: 1
     pattern_edge_smooth_window: 2
     pattern_edge_boundary_tol_px: 8.0
-    compare_top_ignore_px: 42.0
+    compare_top_ignore_px: 46.0
     compare_bottom_ignore_px: 42.0
     frame_missing_nok_threshold: 10
     tilt_warn_deg: 0.0
