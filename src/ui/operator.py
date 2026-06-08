@@ -323,12 +323,8 @@ class ScannerPanel(QWidget):
             missing=camera_missing,
         )
 
-        # Determinar qué frame mostrar
-        now_ms = int(time.monotonic() * 1000)
-        if self._last_overlay is not None and now_ms < self._overlay_until_ms:
-            frame = self._last_overlay
-        else:
-            frame = self._camera.get_frame()
+        # Siempre mostrar el feed de cámara en vivo
+        frame = self._camera.get_frame()
 
         rect = self.camera_label.contentsRect()
         w = max(440, rect.width() - 4)
@@ -343,8 +339,8 @@ class ScannerPanel(QWidget):
             self.camera_label.setStyleSheet(
                 f"background:#000000;border-radius:6px;border:2px solid {_BORDER};"
             )
-        elif self._last_shown_pixmap is not None and not camera_missing:
-            # Micro-corte transitorio: mantener último frame sin parpadear
+        elif self._last_shown_pixmap is not None:
+            # Sin frame nuevo: retener último frame conocido (corte transitorio o camera_missing)
             self.camera_label.setPixmap(self._last_shown_pixmap)
             self.camera_label.setText("")
         else:
