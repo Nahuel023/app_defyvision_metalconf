@@ -66,6 +66,33 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 131 - Esterilla: eliminar missing falsos en filas del borde superior e inferior
+
+**Síntoma:** frames 5, 6, 15, 16, 17 y otros mostraban 1-4 missing en las filas más
+extremas (borde superior/inferior del material). Las celdas (ci, cj=1) y (ci, cj=21)
+tenían tasas de missing del 44% y 23% respectivamente aunque no había defectos reales.
+
+**Causa:** `grid_compare_margin_y_px: 5` era demasiado pequeño. Las filas cj=1 (y≈21px)
+y cj=21 (y≈441px) son el borde físico del material de esterilla. Cuando el material entra
+o sale del encuadre, esas filas aparecen parcialmente y la detección las pierde → missing.
+El mecanismo es idéntico al que se solucionó en X con `grid_compare_margin_x_px: 40`.
+
+**Cambio en `config/tolerancias.yaml` — modelo_A:**
+- `grid_compare_margin_y_px: 5.0 → 40.0`
+  Excluye dinámicamente celdas proyectadas a menos de 40px del borde superior/inferior.
+  Con dy=21px: excluye cj=0 (y=0) y cj=1 (y=21) arriba, y cj=21 (y=441) y cj=22 (y=462) abajo.
+  Las filas cj=2 a cj=20 (y=42-420px) siguen siendo chequeadas — cobertura suficiente.
+
+**Validación `05-06-2026-ESTERILLA_1`:**
+- Antes (margin_y=5):  frame_0005 missing=2, frame_0006 missing=1; celda(1,1) falla 44%
+- Después (margin_y=40): raw_ok=130, raw_nok=3, temporal_nok=0
+  frame_0005/0006/0007…0017 todos missing=0
+  Celda con mayor tasa de faltante: (3,19) al 5% (ruido residual de borde)
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 130 - UI producción: mostrar overlay analizado en frames NOK (en vivo)
 
 **Síntoma:** "quiero que cuando detecte un NOK o detención de máquina en estado
