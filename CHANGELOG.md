@@ -43,6 +43,64 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-08 — Tadeo + Claude
+
+#### Cambio 125 - Línea PATRON rota en frames con desalineamiento: corregir boundary_tol_px
+
+**Síntoma:** en frames con corrimiento lateral del material (ej. frame_0032), la línea
+PATRON del lado hacia el que se corrió el material aparecía rota, discontinua o
+desaparecida. Frame_0022 mostraba un problema similar.
+
+**Causa raíz:** `pattern_edge_boundary_tol_px` demasiado bajo para los grids hexagonales.
+`_pattern_bounds_by_band()` busca agujeros cuya extensión izquierda esté dentro de
+`global_left + boundary_tol_px`. Con stagger hexagonal:
+- modelo_B: `grid_stagger_x_odd: -18px` → filas pares tienen su agujero más izquierdo
+  18px al interior. Con `boundary_tol=6px` esas filas no pasan el filtro → mitad de bandas
+  sin punto de borde → línea rota/desaparecida.
+- modelo_A: mismo problema con `grid_stagger_x_odd: +20px` y `boundary_tol=10px`.
+
+**Cambio:** `config/tolerancias.yaml`:
+- `modelo_B`: `pattern_edge_boundary_tol_px: 6.0 → 22.0` (stagger 18px + margen 4px)
+- `modelo_A`: `pattern_edge_boundary_tol_px: 10.0 → 24.0` (stagger 20px + margen 4px)
+
+El valor es seguro: segunda columna del grid está a ≥32px de la primera, no se capturan
+columnas interiores.
+
+**Validación:** 137/137 temporal OK, 0 machine_stop (sin cambio).
+Frame_0032: línea PATRON izquierda ahora continua.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 124 - Deshabilitar parada de maquina por un solo frame (grid_lateral_shift)
+
+**Pedido:** la máquina nunca debe detenerse por missing en un solo frame (puede ser
+falso positivo por movimiento o mala detección puntual). Solo debe parar por patrones
+faltantes repetidos en múltiples frames.
+
+**Diagnóstico:**
+- `MachineStopDetector` (faltantes por columna): ya tenía `max(2, missing_frames)`
+  hardcodeado — nunca dispara con menos de 2 frames consecutivos. OK.
+- `consecutive_nok_frames = 5`: necesita 5 frames seguidos para FAULT. OK.
+- `grid_lateral_shift_max_px: 20.0`: único camino activo que disparaba `machine_stop=True`
+  en un **solo frame** si el centroide de detecciones se desplazaba >20px del patrón.
+  Podía activarse por movimiento del material, blur o mala detección puntual.
+
+**Cambio aplicado:**
+`config/tolerancias.yaml` — modelo_A y modelo_B:
+- `grid_lateral_shift_max_px: 20.0 → 0.0` (0.0 = desactivado en ambos modelos)
+
+**Resultado:** ningún mecanismo activo puede parar la máquina en un solo frame.
+La única parada por faltantes requiere la misma zona ausente en ≥3 frames consecutivos
+(`machine_stop_missing_frames=3`, `machine_stop_min_missing=3`).
+
+**Validación `05-06-2026-MICROPERFORADO_1`:** 137/137 temporal OK, 0 machine_stop (sin cambio).
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 ### Sesión 2026-06-05 — Tadeo + Claude
 
 #### Cambio 123 - machine_stop re-habilitado + deteccion de desviacion lateral grande
@@ -4840,3 +4898,40 @@ detectaban muy bien y otros se iban totalmente de foco.
 - Si se cambia de nuevo el zoom o el encuadre, este valor puede necesitar retoque.
 - La mejora actual estabiliza muy bien el borde del patron sin tocar matching ni ROI,
   asi que es un ajuste seguro y focalizado.
+
+---
+
+### Sesion 2026-06-08 (esterilla patron completo) - Tadeo + Codex
+
+#### Cambio 125 - Esterilla: reactivar filas extremas del patron en la comparacion
+
+**Pedido:** en `C:\Users\DefyC\Downloads\05-06-2026-PATRONES EDITADOS\05-06-2026-ESTERILLA_1`
+el analisis de `modelo_A` dejaba dos margenes sin revisar y no estaba tomando el patron
+completo.
+
+**Hallazgo de Codex:**
+- En `config/tolerancias.yaml`, `modelo_A` tenia `compare_top_ignore_px: 42.0` y
+  `compare_bottom_ignore_px: 42.0`.
+- El patron activo de `scanner_2/modelo_A` ocupa `y ~= 30.9 .. 454.3` dentro de una ROI
+  de `190x480`, asi que esos `42 px` excluian por configuracion las filas extrema superior
+  e inferior del patron.
+- La ROI lateral de `scanner_2` no era la causa principal del faltante: con el scanner
+  correcto el baseline de extras ya era casi cero.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml` -> `models.modelo_A`:
+  - `compare_top_ignore_px: 42.0 -> 24.0`
+  - `compare_bottom_ignore_px: 42.0 -> 24.0`
+
+**Validacion en `05-06-2026-ESTERILLA_1` usando `scanner_2`:**
+- Antes (`42/42`): `119/133 raw OK`, `14 raw NOK`, `avg_missing ~= 2.173`, `avg_extra ~= 0.015`
+- Ahora (`24/24`): `119/133 raw OK`, `14 raw NOK`, `avg_missing ~= 1.805`, `avg_extra ~= 0.008`
+- Con `24 px` vuelven a entrar las filas extremas del patron, pero sin la regresion que
+  aparecia al bajar el recorte a `20 px` o menos.
+
+**Riesgos / oportunidades:**
+- Si mas adelante queres comparar absolutamente hasta el borde fisico, todavia se puede
+  probar `20 px` o menos, pero en esta carpeta eso ya empeora la estabilidad.
+- Si aparece faltante lateral real en otra captura, conviene recalibrar patron/ROI de
+  `scanner_2/modelo_A` antes de seguir abriendo la ROI compartida, porque el patron actual
+  esta construido especificamente para `190x480`.
