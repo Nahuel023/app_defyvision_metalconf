@@ -323,17 +323,19 @@ def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
     index: int = 0,
+    title: str = "! DETENCION DE MAQUINA",
 ) -> np.ndarray:
-    """Draw compact DETENER MAQUINA strip at the top of the image.
+    """Draw compact strip at the top of the image.
 
     index: stacking order — 0 = topmost strip, 1 = immediately below the first.
     Positioned at the very top so it never covers the hole/pattern area.
+    title: header text shown in the banner (default: DETENCION DE MAQUINA).
     """
     out = img.copy()
     h, w = out.shape[:2]
     font = cv2.FONT_HERSHEY_SIMPLEX
 
-    main_label = "! DETENCION DE MAQUINA"
+    main_label = title
     main_scale, main_thick = 0.80, 2
     (mw, mh), mbl = cv2.getTextSize(main_label, font, main_scale, main_thick)
 

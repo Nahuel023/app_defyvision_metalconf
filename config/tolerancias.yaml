@@ -137,7 +137,7 @@ models:
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
-    grid_lateral_shift_max_px: 0.0
+    grid_lateral_shift_max_px: 4.0
     use_hungarian_matching: false
     verticality_quality_enabled: false
     chapa_zigzag_std_max_px: 4.0

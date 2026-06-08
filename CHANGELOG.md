@@ -45,6 +45,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 127 - Badge "DESVIACION LATERAL" (título correcto en warning sin parada)
+
+**Síntoma:** el badge que aparece en frames con desviación lateral mostraba
+"! DETENCION DE MAQUINA" aunque la máquina NO se detuvo (la parada real ocurre
+solo tras 5 frames consecutivos vía lógica temporal). Texto confuso para el operador.
+
+**Cambio en `src/pipeline/annotate.py` → `draw_machine_stop_badge`:**
+- Añadido parámetro `title: str = "! DETENCION DE MAQUINA"` (default sin cambio).
+- `main_label = title` reemplaza el literal hardcodeado.
+
+**Cambio en `src/inspection.py`:**
+- Llamada al badge de desviación lateral ahora pasa `title="! DESVIACION LATERAL"`.
+- Los badges de machine_stop real y de PATRON DESALINEADO continúan sin cambio
+  (usan el default).
+
+**Resultado:** frames con desviación lateral muestran banner rojo "! DESVIACION LATERAL"
+con la razón "DESVIACION LATERAL (±X.Xpx)" en ámbar. Sin confusión con la parada real
+de máquina.
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
+
 #### Cambio 126 - Línea PATRON pasa por centro del círculo exterior (no entre agujeros)
 
 **Síntoma:** después del Cambio 125 (boundary_tol 22px), la línea PATRON caía entre dos
