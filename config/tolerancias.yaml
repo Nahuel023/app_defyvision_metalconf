@@ -59,7 +59,7 @@ models:
     align_match_tol_px: 280.0
     min_match_count: 3
     edge_margin_px: 5.0
-    pattern_edge_margin_px: 5.0
+    pattern_edge_margin_px: 50.0
     pattern_use_clahe: false
     edge_centering_bands: 16
     pattern_edge_min_holes_per_band: 1
