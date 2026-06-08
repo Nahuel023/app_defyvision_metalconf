@@ -5346,3 +5346,45 @@ pero sin desarmar la deteccion donde si tiene que detectar.
 **Riesgos / oportunidades:**
 - El faltante principal ya no esta dominado solo por la fila superior; el borde inferior
   (`cj=30/31`) sigue pesando bastante y seria el siguiente ajuste fino si queres seguir.
+
+---
+
+### Sesion 2026-06-08 (esterilla otra estrategia) - Tadeo + Codex
+
+#### Cambio 131 - Esterilla: corregir descalce ROI/patron en scanner_2 y filtrar extras laterales
+
+**Pedido:** buscar otra solucion para `ESTERILLA_1`, porque seguir tocando margenes no
+estaba resolviendo que el patron se analice completo.
+
+**Hallazgo de Codex:**
+- El problema de fondo no era solo tolerancia: `scanner_2/modelo_A` estaba inspeccionando
+  con una ROI de `190x480`, pero el patron activo `data/patterns/scanner_2/modelo_A/holes.json`
+  ya estaba calibrado a `255x480`.
+- Eso dejaba parte del patron fuera del recorte real de inspeccion y ademas generaba un
+  estado inconsistente: el sistema comparaba con una geometria distinta a la del frame.
+- Al abrir otra vez la ROI al ancho correcto, reaparecen detecciones laterales reales que
+  antes quedaban recortadas; para no contarlas como extras falsos hacia falta endurecer
+  el filtro de `extra_min_dist_factor`.
+
+**Cambios hechos por Tadeo + Codex:**
+- `data/patterns/scanner_2/modelo_A/roi.json`
+  - `x=258, w=190 -> x=225, w=255`
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `extra_min_dist_factor: 1.5 -> 2.0`
+
+**Validacion en `05-06-2026-ESTERILLA_1` usando `scanner_2`:**
+- Antes:
+  - ROI efectiva `190x480`, patron `255x480` (descalzado)
+  - warning de resolucion en todos los frames
+  - `130/133 raw OK`, `133/133 temporal OK`
+- Ahora:
+  - ROI y patron consistentes en `255x480`
+  - `130/133 raw OK`, `133/133 temporal OK`
+  - `avg_missing ~= 0.451`
+  - extras reportados `0` tras el filtro lateral mas robusto
+
+**Riesgos / oportunidades:**
+- El `detection_ratio` medio sigue alto porque ahora entran mas agujeros reales en el
+  ancho completo; si mas adelante queres bajar ese ratio visual, el siguiente paso sano
+  ya no es recortar otra vez la ROI sino reconstruir `holes.json` de `scanner_2/modelo_A`
+  con una malla regularizada sobre esta ROI de `255 px`.
