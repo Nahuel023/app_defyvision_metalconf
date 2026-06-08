@@ -83,7 +83,7 @@ models:
     bbox_filter_margin_px: 60.0
     pattern_hull_margin_px: 10.0
     grid_affine_refinement: false
-    extra_min_dist_factor: 1.5
+    extra_min_dist_factor: 2.0
     compare_top_ignore_px: 0.0
     compare_bottom_ignore_px: 0.0
     blur_score_min: 800.0
