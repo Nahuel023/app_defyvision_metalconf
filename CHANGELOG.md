@@ -5113,3 +5113,55 @@ lo largo de toda la pieza y no se corte en la mitad inferior.
 - El faltante residual mas frecuente sigue estando en la franja superior (`cj=1`), o sea
   el siguiente ajuste fino, si hace falta, deberia enfocarse arriba a la izquierda y no
   en toda la altura del borde.
+
+---
+
+### Sesion 2026-06-08 (microperforado fino) - Tadeo + Codex
+
+#### Cambio 129 - Microperforado: patron reconstruido sin missing superiores recurrentes + sin borde artificial
+
+**Pedido:** revisar `C:\Users\DefyC\Downloads\05-06-2026-PATRONES EDITADOS\05-06-2026-MICROPERFORADO_1`
+porque varios frames marcaban `missing` donde no debia haber, sobre todo en la parte
+superior, y ademas el overlay a veces dibujaba una linea artificial de borde del patron.
+
+**Hallazgo de Codex:**
+- El problema principal ya no estaba en la tolerancia sino en el patron activo de
+  `modelo_B`: las primeras filas tenian topologia sucia y eso contaminaba el matching,
+  disparando muchos `missing` recurrentes en la zona superior (`cj=3`).
+- Al reconstruir el patron desde una referencia buena (`frame_0077.png`) para la ROI
+  actual del `scanner_1`, el baseline de missing cayo fuerte y desaparecio el problema
+  sistematico del borde superior.
+- La linea artificial del borde del patron venia del fallback en
+  `draw_centering_overlay()`: cuando no habia suficientes puntos reales, se dibujaba una
+  linea punteada vertical inventada.
+
+**Cambios hechos por Tadeo + Codex:**
+- `data/patterns/scanner_1/modelo_B/holes.json`
+  - reconstruido desde `frame_0077.png` para la ROI especifica del scanner;
+  - patron final del scanner: `65 puntos`, `216x480`.
+- `data/patterns/modelo_B/holes.json`
+  - reconstruido tambien desde `frame_0077.png` para mantener consistencia del patron
+    compartido;
+  - patron global: `119 puntos`, `295x480`.
+- `src/pipeline/annotate.py`
+  - eliminado el fallback que dibujaba una linea vertical punteada artificial para el
+    borde del patron cuando faltaban puntos reales;
+  - ahora, si no hay suficientes puntos reales del borde, no se dibuja borde inventado.
+
+**Validacion en `05-06-2026-MICROPERFORADO_1` usando `scanner_1`:**
+- Antes:
+  - `131/137 raw OK`, `6 raw NOK`, `1 temporal NOK`
+  - missing superiores recurrentes muy concentrados en `cj=3`
+    (`(2,3)=49`, `(4,3)=49`, `(5,3)=49`, `(1,3)=45`).
+- Ahora:
+  - `133/137 raw OK`, `4 raw NOK`, `0 temporal NOK`
+  - los `missing` superiores recurrentes desaparecen;
+  - ya no quedan faltantes frecuentes en filas superiores (`top_row = []`);
+  - el faltante residual principal queda solo en borde inferior:
+    `celda (4,30): 12/137`.
+
+**Riesgos / oportunidades:**
+- Los `4 raw NOK` residuales ya no vienen del borde superior; quedan asociados a otro
+  fenomeno puntual y separado del problema original.
+- Si queres seguir afinando microperforado, el proximo ajuste conviene enfocarlo en ese
+  borde inferior y/o en el bloque puntual de extras, pero ya no en la parte superior.
