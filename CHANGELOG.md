@@ -5076,3 +5076,40 @@ siempre, sin falta, al terminar un bloque de cambios solicitado por Tadeo.
 **Riesgos / oportunidades:**
 - Si en algun caso queres revisar localmente antes de publicar, hace falta pedirlo de forma
   explicita para exceptuar esta regla operativa.
+
+---
+
+### Sesion 2026-06-08 (esterilla columna izquierda) - Tadeo + Codex
+
+#### Cambio 128 - Esterilla: extender columna extrema izquierda en la mitad inferior del patron
+
+**Pedido:** mejorar la deteccion de la columna mas a la izquierda para que quede tomada a
+lo largo de toda la pieza y no se corte en la mitad inferior.
+
+**Hallazgo de Codex:**
+- El problema no estaba principalmente en `edge_margin_px`: bajarlo de `5 -> 0` casi no
+  cambiaba los faltantes de esa zona.
+- El patron activo de `scanner_2/modelo_A` seguia teniendo la columna izquierda incompleta:
+  en `ci=1` faltaban varias filas pares de la mitad inferior (`cj=12,14,16,18,20`).
+- Eso hacia que una parte real del borde izquierdo quedara fuera del patron y apareciera
+  como ruido/extra o directamente no quedara comparada de forma consistente.
+
+**Cambios hechos por Tadeo + Codex:**
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - se extendio manualmente la columna `ci=1` agregando las filas faltantes
+    `cj=12,14,16,18,20`;
+  - las nuevas coordenadas se derivaron de la geometria vecina del patron
+    (`ci=2` en las mismas filas, desplazado `39 px` a la izquierda);
+  - el patron pasa de `88 -> 93 puntos`.
+
+**Validacion en `05-06-2026-ESTERILLA_1` usando `scanner_2`:**
+- Se mantiene `123/133 raw OK`, `10 raw NOK`, `133/133 temporal OK`.
+- `avg_detection_ratio` baja de aproximadamente `113% -> 107%`, lo que indica menos
+  detecciones sobrantes en el lateral izquierdo.
+- La columna izquierda ahora queda modelada tambien en la mitad inferior, en vez de
+  cortarse despues de la zona media.
+
+**Riesgos / oportunidades:**
+- El faltante residual mas frecuente sigue estando en la franja superior (`cj=1`), o sea
+  el siguiente ajuste fino, si hace falta, deberia enfocarse arriba a la izquierda y no
+  en toda la altura del borde.
