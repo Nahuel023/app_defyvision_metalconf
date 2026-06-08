@@ -43,6 +43,49 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-08 — Tadeo + Claude (continuación 3)
+
+#### Cambio 133 - Microperforado: estabilizar líneas PATRON + lateral shift más limpio
+
+**Síntoma:** "tengo problemas con la detección de bordes del patrón en microperforado,
+tiene que ser más uniforme y consistente, hay varios patrones que son mal detectados y
+eso me produce falla y detención de línea cuando el frame está bien".
+
+**Diagnóstico:**
+1. `compute_centering` recibía ALL los `holes` detectados (incluyendo detecciones extra
+   en zona de retroiluminación / fuera del patrón). Con ratio de detección ~245%, los
+   blobs de backlight en x>220px en el ROI elevaban `global_right`, haciendo que
+   `_pattern_bounds_by_band` saltara a posiciones inestables. La línea PATRON derecha
+   aparecía en distinta posición frame a frame.
+2. `grid_lateral_shift_max_px`: la comparación usaba `detected_points` (todos los holes,
+   incluyendo extras de backlight) vs `pattern.points`. Los blobs extra en posiciones
+   extremas desplazaban la media de los detectados, generando una "desviación lateral"
+   artificial (~28px en vez de ~15px reales).
+
+**Cambios en `src/inspection.py`:**
+- Líneas 545-568 (bbox filter): añadida construcción de `holes_in_bbox` (lista de `Hole`
+  objects con mismo filtro de bounding box que `detected_in_bbox`). Default: todos los
+  holes si no hay bbox filter.
+- `compute_centering(img_aligned, holes_in_bbox, ...)`: pasa solo los holes en la región
+  de comparación → `global_right`/`global_left` en `_pattern_bounds_by_band` ya no salta
+  a posiciones de backlight. Líneas PATRON estables frame a frame.
+- `grid_lateral_shift_max_px`: cambiado de `detected_points` a `detected_in_bbox` como
+  base para la media X del detector. El umbral sigue siendo `pattern.points` (referencia
+  fija). Reduce ruido de blobs extra sin eliminar la señal de desplazamiento real.
+
+**Efecto medido en MICROPERFORADO_2:**
+- PATRON boundary: estable en x≈195 (antes: saltaba a x≈288 en algunos frames)
+- Lateral shift frame_0022: -28.7px → -15.0px (eliminación de ruido de backlight)
+
+**Nota sobre calibración pendiente:** la detección muestra 28 missing consistentes en
+todos los frames con el patrón actual (roi x=195, w=295 incluye zona de backlight derecho
+→ patron con holes en x=200-224 que son zona de transición/backlight y nunca se detectan).
+No se modifica en este commit — requiere recalibración del patrón con ROI ajustado.
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
 ### Sesión 2026-06-08 — Tadeo + Claude (continuación 2)
 
 #### Cambio 132 - Microperforado: eliminar missing falsos en filas borde superior/inferior

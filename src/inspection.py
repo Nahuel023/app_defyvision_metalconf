@@ -544,8 +544,11 @@ def _inspect_bgr(
 
     # Filtrar detecciones al bounding box del patrón esperado para eliminar agujeros
     # reales del material fuera de la ventana del patrón (reducen extra y costo de matching).
-    # Los holes originales se mantienen intactos para el cálculo de centrado.
+    # holes_in_bbox se usa para compute_centering para estabilizar los bordes PATRON:
+    # usar solo los agujeros en la región de comparación evita que detecciones extra
+    # fuera del area del patrón desplacen global_left/global_right.
     detected_types: list[str] | None = None
+    holes_in_bbox: list = holes  # default: all holes (updated below when bbox is applied)
     if compare_points and bbox_filter_margin_px >= 0:
         xs = [p[0] for p in compare_points]
         ys = [p[1] for p in compare_points]
@@ -562,6 +565,7 @@ def _inspect_bgr(
         else:
             detected_in_bbox = [(x, y) for x, y in detected_points
                                 if bx1 <= x <= bx2 and by1 <= y <= by2]
+        holes_in_bbox = [hh for hh in holes if bx1 <= hh.x <= bx2 and by1 <= hh.y <= by2]
     else:
         detected_in_bbox = detected_points
         detected_types   = _det_types_full
@@ -629,7 +633,7 @@ def _inspect_bgr(
     _ec_boundary_tol = float(tolerances.get("pattern_edge_boundary_tol_px", 0.0))
     _ec_chapa_inner  = int(tolerances.get("chapa_edge_inner_px", 80))
     centering = compute_centering(
-        img_aligned, holes, roi=roi, tol_px=center_offset_tol_px,
+        img_aligned, holes_in_bbox, roi=roi, tol_px=center_offset_tol_px,
         n_bands=_ec_bands, min_holes_per_band=_ec_min_holes, smooth_window=_ec_smooth,
         boundary_tol_px=_ec_boundary_tol, chapa_inner_px=_ec_chapa_inner,
     )
@@ -826,10 +830,12 @@ def _inspect_bgr(
     grid_lateral_shift_max_px = float(tolerances.get("grid_lateral_shift_max_px", 0.0))
     if (grid_lateral_shift_max_px > 0.0
             and pattern.has_grid
-            and detected_points
+            and detected_in_bbox
             and len(pattern.points) >= 10
             and not tilt_warn):
-        _det_mean_x = float(np.mean([x for x, _ in detected_points]))
+        # Usar detected_in_bbox (filtrado al bbox del patrón) para evitar que
+        # detecciones extra fuera del area del patrón desplacen el centroide X.
+        _det_mean_x = float(np.mean([x for x, _ in detected_in_bbox]))
         _pat_mean_x = float(np.mean([x for x, _ in pattern.points]))
         _lateral_shift = _det_mean_x - _pat_mean_x
         if abs(_lateral_shift) > grid_lateral_shift_max_px:
