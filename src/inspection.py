@@ -206,6 +206,10 @@ def _inspect_bgr(
     # Permite excluir celdas proyectadas cerca del borde del frame (artefactos de borde)
     # sin afectar la detección de agujeros. Defecto = edge_margin_px.
     grid_compare_margin_px = float(tolerances.get("grid_compare_margin_px", edge_margin_px))
+    _gcm_x_raw = tolerances.get("grid_compare_margin_x_px")
+    _gcm_y_raw = tolerances.get("grid_compare_margin_y_px")
+    grid_compare_margin_x_px = float(_gcm_x_raw) if _gcm_x_raw is not None else None
+    grid_compare_margin_y_px = float(_gcm_y_raw) if _gcm_y_raw is not None else None
     grid_max_missing      = int(tolerances.get("grid_max_missing", 0))
     frame_missing_nok_raw = tolerances.get("frame_missing_nok_threshold", None)
     frame_missing_nok_threshold = (
@@ -429,6 +433,8 @@ def _inspect_bgr(
             grid_compare_margin_px,
             tol_affine=tol_affine,
             stagger_x_odd=stagger_x_odd,
+            margin_x=grid_compare_margin_x_px,
+            margin_y=grid_compare_margin_y_px,
         )
         # Posiciones esperadas de vuelta al espacio original (imagen sin de-rotar).
         if _derotate and compare_points:

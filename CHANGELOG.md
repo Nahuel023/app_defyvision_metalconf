@@ -66,6 +66,57 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 129 - Esterilla: márgenes X/Y independientes en grid_compare + columna izquierda
+
+**Síntoma:** usuario pide "elimina límites superiores e inferiores, quiero que detecte todos
+los agujeros, le falta detectar una columna a la izquierda". Con el patrón de Cambio 128
+(58 agujeros, ci=1-4) faltaba la columna ci=0 y había límites verticales en Y=72-420px.
+
+**Problema raíz:** `grid_compare_points` usaba un único `margin` para los 4 lados. No era
+posible filtrar solo las columnas laterales sin también recortar los bordes superior/inferior.
+
+**Solución — `src/pipeline/grid_fitting.py`:**
+- Añadidos parámetros `margin_x: float | None = None` y `margin_y: float | None = None`
+  a `grid_compare_points()`. Si se suministran, reemplazan a `margin` para X e Y
+  respectivamente. Default: ambos `= margin` (sin cambio de comportamiento para callers
+  existentes).
+- `mx` y `my` se usan en los 3 puntos de filtrado: fase X, fase Y, y posiciones finales.
+
+**Solución — `src/inspection.py`:**
+- Lectura de dos nuevos parámetros: `grid_compare_margin_x_px` y `grid_compare_margin_y_px`.
+- Ambos son opcionales; si no están definidos, se pasan como `None` → `grid_compare_points`
+  usa `grid_compare_margin_px` para ese eje.
+- Se pasan como `margin_x=` / `margin_y=` en la llamada a `grid_compare_points`.
+
+**Solución — `config/tolerancias.yaml` — modelo_A:**
+- `pattern_edge_margin_px: 50 → 5` (uniforme, incluye ci=0 y cobertura Y completa)
+- `pattern_edge_margin_left_px: 5`, `pattern_edge_margin_right_px: 40` → ci=5 excluido del patrón
+  (ci=5 a x≈209px: 255-209=46px de borde → no confiable cuando material se corre)
+- `grid_compare_margin_px: 5.0` — margen mínimo Y (cobertura vertical completa)
+- `grid_compare_margin_x_px: 40.0` — excluye celdas con x_esperada < 40 ó > 215px
+  (ci=0 even at x=36 < 40 → excluido dinámicamente cuando el material está en posición normal;
+   incluido cuando el material se corre a la derecha y ci=0 pasa a x>40)
+- `grid_compare_margin_y_px: 5.0` — sin límites Y efectivos (solo y<5 excluida = exactamente el borde)
+- `compare_top_ignore_px: 0.0`, `compare_bottom_ignore_px: 0.0` (sin filtros verticales)
+
+**Patrón reconstruido `data/patterns/scanner_2/modelo_A/holes.json`:**
+- Referencia: frame_0034
+- Resultado: **81 agujeros**, ci=0-4 (5 columnas), X=36-187px, Y=0-460px
+- ci=0 (x~36-56px) incluido en patrón pero dinámicamente excluido de comparación
+  cuando el material está en posición nominal (x_esperada < 40px)
+- ci=5 excluido del patrón (`pattern_edge_margin_right_px=40`)
+
+**Validación `05-06-2026-ESTERILLA_1` con `--scanner scanner_2`:**
+- **raw_ok=124, raw_nok=9, temporal_nok=0** (antes: 0 temporal NOK con 58 agujeros)
+- Cobertura ampliada: 81 agujeros vs 58 anteriores (columna ci=0 + filas completas)
+- Los 9 raw-NOK nunca alcanzan 5 consecutivos
+- Celda con mayor tasa de missing: (1,1) al 44% — borde superior izquierdo (normal)
+
+**Archivos modificados:** `src/pipeline/grid_fitting.py`, `src/inspection.py`,
+`config/tolerancias.yaml`, `data/patterns/scanner_2/modelo_A/holes.json`
+
+---
+
 #### Cambio 128 - Esterilla: reconstruir patrón scanner_2 + pattern_edge_margin_px=50
 
 **Síntoma:** "no se está detectando correctamente todo el patrón de agujeros, hay varios

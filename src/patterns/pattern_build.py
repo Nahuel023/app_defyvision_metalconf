@@ -65,19 +65,32 @@ def build_pattern_from_image(
         close_ksize=int(tolerances.get("close_ksize", 5)),
     )
     # Use pattern_edge_margin_px if set; falls back to edge_margin_px.
+    # Supports per-side overrides: pattern_edge_margin_left/right/top/bottom_px.
     # A larger build margin excludes edge-zone holes that only appear at the
     # reference position and disappear when the sheet shifts.
     build_margin = float(tolerances.get(
         "pattern_edge_margin_px",
         tolerances.get("edge_margin_px", 0.0),
     ))
+    m_left   = float(tolerances.get("pattern_edge_margin_left_px",   build_margin))
+    m_right  = float(tolerances.get("pattern_edge_margin_right_px",  build_margin))
+    m_top    = float(tolerances.get("pattern_edge_margin_top_px",    build_margin))
+    m_bottom = float(tolerances.get("pattern_edge_margin_bottom_px", build_margin))
+
     holes = detect_holes_from_mask(
         mask,
         min_area=min_area,
         circularity_min=circularity_min,
         aspect_ratio_max=aspect_ratio_max,
-        edge_margin_px=build_margin,
+        edge_margin_px=0.0,  # per-side filtering applied below
     )
+    holes = [
+        hh for hh in holes
+        if hh.x - hh.r >= m_left
+        and hh.x + hh.r <= w - m_right
+        and hh.y - hh.r >= m_top
+        and hh.y + hh.r <= h - m_bottom
+    ]
 
     points = [(h_.x, h_.y) for h_ in holes]
     radii = [h_.r for h_ in holes]
