@@ -43,12 +43,17 @@ def build_pattern_from_image(
         img = img_aligned
 
     h, w = img.shape[:2]
+    build_use_clahe = bool(tolerances.get(
+        "pattern_use_clahe",
+        tolerances.get("use_clahe", False),
+    ))
+
     mask = preprocess_for_holes(
         img,
         threshold=threshold,
         use_channel=str(tolerances["use_channel"]),
         polarity=str(tolerances["polarity"]),
-        use_clahe=bool(tolerances.get("use_clahe", False)),
+        use_clahe=build_use_clahe,
         clahe_clip=float(tolerances.get("clahe_clip", 2.0)),
         clahe_tile=int(tolerances.get("clahe_tile", 8)),
         use_otsu=bool(tolerances.get("use_otsu", False)),

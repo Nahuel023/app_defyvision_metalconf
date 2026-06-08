@@ -4968,3 +4968,88 @@ completo.
 - Si aparece faltante lateral real en otra captura, conviene recalibrar patron/ROI de
   `scanner_2/modelo_A` antes de seguir abriendo la ROI compartida, porque el patron actual
   esta construido especificamente para `190x480`.
+
+---
+
+### Sesion 2026-06-08 (esterilla ancho completo) - Tadeo + Codex
+
+#### Cambio 126 - Esterilla: ROI mas ancha + patron reconstruido sin recortar columnas laterales
+
+**Pedido:** el analisis de `ESTERILLA_1` seguia dejando una fila/columna afuera a derecha
+y otra a izquierda. Hacia falta abrir la zona util, aumentar tolerancias y dejar de
+recortar demasiado el patron.
+
+**Hallazgo de Codex:**
+- El patron activo de `scanner_2/modelo_A` estaba subdimensionado: solo tenia `4`
+  columnas utiles y una ROI de `190 px` de ancho.
+- Al abrir la ROI sin controlar el preprocesado del build, `build-pattern` podia pasarse
+  y crear columnas falsas de borde (`ci=0` y `ci=6`) por detecciones espurias laterales.
+- La mejor combinacion para esta carpeta fue:
+  - inspeccion mas permisiva;
+  - ROI mas ancha;
+  - build del patron con margen de borde chico;
+  - desactivar CLAHE solo en `build-pattern` para `modelo_A`, evitando columnas falsas.
+
+**Cambios hechos por Tadeo + Codex:**
+- `data/patterns/scanner_2/modelo_A/roi.json`
+  - `x=258, w=190 -> x=225, w=255`
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `tol_xy_px: 14.0 -> 18.0`
+  - `align_match_tol_px: 250.0 -> 280.0`
+  - `edge_margin_px: 15.0 -> 5.0`
+  - `pattern_edge_margin_px: 5.0`
+  - `bbox_filter_margin_px: 45.0 -> 60.0`
+  - `pattern_use_clahe: false` (nuevo, solo para construir patron)
+- `src/patterns/pattern_build.py`
+  - nuevo override `pattern_use_clahe` para que `build-pattern` pueda usar un
+    preprocesado distinto al de inspeccion cuando haga falta.
+- Reconstruido `data/patterns/scanner_2/modelo_A/holes.json` desde:
+  - `C:\Users\DefyC\Downloads\05-06-2026-PATRONES EDITADOS\05-06-2026-ESTERILLA_1\frame_0045.png`
+  - resultado final: `88 puntos`, ROI `255x480`, columnas utiles `ci=1..5`
+
+**Validacion en `05-06-2026-ESTERILLA_1` usando `scanner_2`:**
+- Antes:
+  - patron de `74 puntos`, ROI `190x480`, columnas `ci=1..4`
+  - `119/133 raw OK`, `14 raw NOK`, `133/133 temporal OK`
+- Ahora:
+  - patron de `88 puntos`, ROI `255x480`, columnas `ci=1..5`
+  - `123/133 raw OK`, `10 raw NOK`, `133/133 temporal OK`
+  - `machine_stop_frames=0`
+- Los faltantes mas frecuentes dejan de concentrarse como una columna completa ausente
+  en ambos laterales; el baseline pasa a quedar mucho mas repartido y bajo.
+
+**Riesgos / oportunidades:**
+- El `avg_detection_ratio` queda alto (~`113%`), o sea seguimos detectando algunos extras.
+  El matching ya no pierde columnas laterales, pero mas adelante se puede limpiar mejor
+  afinando preprocess o filtrado de extras sin volver a cerrar la ROI.
+- Si vuelve a cambiar el zoom/encuadre del scanner_2, esta calibracion debe rehacerse
+  desde una imagen OK nueva con la misma estrategia.
+
+---
+
+### Sesion 2026-06-08 (disciplina de entrega) - Tadeo + Codex
+
+#### Cambio 127 - Regla operativa: commit y push siempre al cerrar cambios
+
+**Pedido:** dejar asentado en el changelog que Codex tiene que hacer `commit` y `push`
+siempre, sin falta, al terminar un bloque de cambios solicitado por Tadeo.
+
+**Hallazgo de Codex:**
+- En esta conversacion hubo un `push` previo del commit `a968245`, pero luego siguieron
+  cambios nuevos de calibracion que todavia no estaban publicados al momento de la consulta.
+- Conviene dejar la regla explicita en el historial operativo para que no quede a criterio
+  del momento y se mantenga una disciplina de entrega consistente.
+
+**Cambios hechos por Tadeo + Codex:**
+- Se documenta como regla operativa permanente:
+  - al cerrar un cambio de codigo/configuracion solicitado por Tadeo, Codex debe hacer
+    `git add`, `git commit` y `git push` sin falta;
+  - si por alguna razon no puede hacer `push`, debe informarlo explicitamente en la
+    respuesta final y dejar claro que el trabajo quedo solo local.
+
+**Validacion:**
+- La regla queda registrada desde este cambio en adelante dentro del `CHANGELOG.md`.
+
+**Riesgos / oportunidades:**
+- Si en algun caso queres revisar localmente antes de publicar, hace falta pedirlo de forma
+  explicita para exceptuar esta regla operativa.
