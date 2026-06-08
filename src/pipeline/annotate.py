@@ -468,6 +468,10 @@ def draw_centering_overlay(
                 cv2.circle(out, wp, 22, (255, 255, 255), 1)
                 cv2.putText(out, "!", (wp[0] - 7, wp[1] + 9),
                             _font_sm, 0.9, (0, 0, 255), 3, cv2.LINE_AA)
+        else:
+            for yy in range(0, h, 20):
+                cv2.line(out, (fallback_x, yy),
+                         (fallback_x, min(yy + 12, h - 1)), pat_color, 1)
         cv2.putText(out, pat_label, (x_vis, 44), _font_sm, 0.45, pat_color, pat_lw, cv2.LINE_AA)
 
     # --- Sheet center: real per-band polyline + fitted extension, or dashed fallback ---
