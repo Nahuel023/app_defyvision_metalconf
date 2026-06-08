@@ -357,8 +357,11 @@ def _pattern_bounds_by_band(
         return {}, {}
 
     all_holes = list(holes)
-    global_left = float(min(hh.x - hh.r for hh in all_holes))
-    global_right = float(max(hh.x + hh.r for hh in all_holes))
+    # Use hole CENTERS (not outer edges) as the reference for boundary selection.
+    # This ensures the drawn PATRON line passes through the centre of the outermost
+    # hole circle rather than between two adjacent columns when the grid is staggered.
+    global_left  = float(min(hh.x for hh in all_holes))
+    global_right = float(max(hh.x for hh in all_holes))
     band_h = img_h / n_bands
     row_tol_px = max(
         3.0,
@@ -382,17 +385,19 @@ def _pattern_bounds_by_band(
             left_candidates: list[tuple[float, float, float]] = []
             right_candidates: list[tuple[float, float, float]] = []
             for row_holes in row_groups:
-                # In staggered patterns, some rows legitimately have no outer-column
-                # hole. Without this boundary gate, the nearest interior hole becomes
-                # a fake edge and creates false boundary measurements.
+                # Center-based boundary gate: only keep holes whose X centre is
+                # within boundary_tol_px of the globally outermost centre.  This
+                # selects exactly the outermost column (for tight tol values well
+                # below the stagger offset) so the resulting line always passes
+                # through hole centres and never falls between two columns.
                 if boundary_tol_px > 0.0:
                     left_holes = [
                         hh for hh in row_holes
-                        if (hh.x - hh.r) <= global_left + boundary_tol_px
+                        if hh.x <= global_left + boundary_tol_px
                     ]
                     right_holes = [
                         hh for hh in row_holes
-                        if (hh.x + hh.r) >= global_right - boundary_tol_px
+                        if hh.x >= global_right - boundary_tol_px
                     ]
                 else:
                     left_holes = row_holes
@@ -400,11 +405,11 @@ def _pattern_bounds_by_band(
 
                 if len(left_holes) >= min_holes:
                     cy_left = float(np.median([hh.y for hh in left_holes]))
-                    left_x = float(min(hh.x - hh.r for hh in left_holes))
+                    left_x = float(min(hh.x for hh in left_holes))
                     left_candidates.append((abs(cy_left - band_mid), left_x, cy_left))
                 if len(right_holes) >= min_holes:
                     cy_right = float(np.median([hh.y for hh in right_holes]))
-                    right_x = float(max(hh.x + hh.r for hh in right_holes))
+                    right_x = float(max(hh.x for hh in right_holes))
                     right_candidates.append((abs(cy_right - band_mid), right_x, cy_right))
 
             # Choose the real hole row closest to the band center, so Y always lands

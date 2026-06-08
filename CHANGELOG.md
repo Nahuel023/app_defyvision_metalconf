@@ -45,6 +45,39 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-08 — Tadeo + Claude
 
+#### Cambio 126 - Línea PATRON pasa por centro del círculo exterior (no entre agujeros)
+
+**Síntoma:** después del Cambio 125 (boundary_tol 22px), la línea PATRON caía entre dos
+columnas de agujeros del grid hexagonal en vez de pasar por el centro de un agujero real.
+
+**Causa:** `_pattern_bounds_by_band` usaba `hh.x - hh.r` / `hh.x + hh.r` (arista exterior
+del círculo) como referencia para seleccionar y calcular el punto de borde. Con boundary_tol
+amplio (22px > stagger 18px), bandas con filas pares e impares del grid hexagonal aportaban
+valores de x alternantes (x_odd y x_odd+18). El ajuste de línea caía en el promedio de
+ambas → entre los dos agujeros, sin tocar ninguno.
+
+**Cambio en `src/pipeline/edge_centering.py` → `_pattern_bounds_by_band`:**
+- `global_left/right`: de `min(hh.x - hh.r)` / `max(hh.x + hh.r)` → `min(hh.x)` / `max(hh.x)`
+- Filtro por banda: de `(hh.x - hh.r) <= global_left + tol` → `hh.x <= global_left + tol`
+- Valor por banda: de `min(hh.x - hh.r)` / `max(hh.x + hh.r)` → `min(hh.x)` / `max(hh.x)`
+
+Con la selección basada en centro, `boundary_tol_px=8` (< stagger 18/20px) selecciona
+solo la columna más exterior del grid. Las bandas sin esa columna quedan vacías pero la
+línea robusta interpola correctamente con los puntos de las bandas que sí la tienen.
+
+**`config/tolerancias.yaml`:**
+- `modelo_A`: `pattern_edge_boundary_tol_px: 24 → 8` (stagger 20px → tol bien por debajo)
+- `modelo_B`: `pattern_edge_boundary_tol_px: 22 → 8` (stagger 18px → tol bien por debajo)
+
+**Resultado:** línea PATRON pasa por el centro de los círculos más exteriores, sin
+caer entre agujeros. Línea continua y estable incluso con corrimiento lateral del material.
+
+**Validación:** 137/137 temporal OK, 0 machine_stop (sin cambio).
+
+**Archivos modificados:** `src/pipeline/edge_centering.py`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 125 - Línea PATRON rota en frames con desalineamiento: corregir boundary_tol_px
 
 **Síntoma:** en frames con corrimiento lateral del material (ej. frame_0032), la línea
