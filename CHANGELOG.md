@@ -5270,6 +5270,16 @@ siempre, sin falta, al terminar un bloque de cambios solicitado por Tadeo.
 - Si en algun caso queres revisar localmente antes de publicar, hace falta pedirlo de forma
   explicita para exceptuar esta regla operativa.
 
+**Regla reforzada y vigente sin excepciones implicitas:**
+- Codex debe hacer siempre `git add`, `git commit` y `git push` al cerrar cualquier bloque
+  de cambios pedido por Tadeo.
+- No alcanza con dejar el commit local: el cierre correcto del trabajo incluye publicarlo
+  en remoto.
+- Si por cualquier motivo tecnico no se puede hacer `push`, Codex debe avisarlo de forma
+  explicita en la respuesta final y dejar asentado que el trabajo quedo solo local.
+- Esta regla se considera operativa por defecto en todas las sesiones futuras, salvo que
+  Tadeo pida explicitamente no publicar todavia.
+
 ---
 
 ### Sesion 2026-06-08 (esterilla columna izquierda) - Tadeo + Codex
