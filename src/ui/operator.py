@@ -504,6 +504,8 @@ class ScannerPanel(QWidget):
         pass  # el badge de estado se actualiza por el timer de refresh_status
 
     def _on_result(self, result: InspectionResult, streak: int) -> None:
+        if result.overlay is None:
+            return
         if result.machine_stop:
             until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_FAULT_MS
             overlay = result.overlay.copy()
@@ -515,6 +517,9 @@ class ScannerPanel(QWidget):
             label = f"SCANNER {_num}  ·  {_td(model) if model else '—'}"
             reason = _stop_reason(result)
             self._sig_stop_alert.emit(overlay, label, reason)
+        elif result.status == "NOK":
+            until_ms = int(time.monotonic() * 1000) + _OVERLAY_HOLD_MS
+            self._sig_overlay.emit(result.overlay.copy(), until_ms)
 
     def _set_overlay(self, overlay: np.ndarray, until_ms: int) -> None:
         self._last_overlay     = overlay
