@@ -43,6 +43,31 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-08 — Tadeo + Claude (continuación 2)
+
+#### Cambio 132 - Microperforado: eliminar missing falsos en filas borde superior/inferior
+
+**Síntoma:** frames 54, 110, 111, 120 (y otros) mostraban 2-5 missing en las filas
+extremas del material. celdas (ci, cj=3) al 9-12% y (ci, cj=30) al 12% de frames.
+
+**Causa:** igual que esterilla (Cambio 131) pero en modelo_B. `grid_compare_margin_px: 5`
+sin override Y evaluaba filas borde cuando el material entraba/salía del encuadre:
+- cj=3 → y = 10 + 3×14 = **52px** desde el borde superior
+- cj=30 → y = 10 + 30×14 = **430px** (50px desde abajo), cj=31 → 444px
+
+**Cambio en `config/tolerancias.yaml` — modelo_B:**
+- Añadido `grid_compare_margin_y_px: 55.0` — excluye celdas proyectadas a <55px del borde.
+  Fija cj=3 (y=52<55) y cj=30/31 (y=430,444 > 480-55=425). Primera fila incluida: cj=4 (y=66px).
+
+**Validación `05-06-2026-MICROPERFORADO_1`:**
+- frames 54/110/111/120 → missing=0 ✓
+- temporal_nok=1 (frame_0026): defecto real, 13 agujeros faltantes + desviación -6.7px ✓
+- Celda residual máxima: (4,4) al 4%
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 ### Sesión 2026-06-08 — Nahuel + Claude (continuación)
 
 #### Cambio 129 - force_auto_mode: forzar modo AUTO sin depender del switch PLC
