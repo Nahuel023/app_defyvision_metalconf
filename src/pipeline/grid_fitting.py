@@ -221,6 +221,8 @@ def grid_compare_points(
     tol_affine: float = 0.0,
     min_affine_matches: int = 12,
     stagger_x_odd: float = 0.0,
+    margin_x: float | None = None,
+    margin_y: float | None = None,
 ) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
     """
     Return expected hole positions in the CURRENT frame.
@@ -250,6 +252,9 @@ def grid_compare_points(
     if len(detected_xy) == 0 or not cells:
         return []
 
+    mx = margin if margin_x is None else margin_x
+    my = margin if margin_y is None else margin_y
+
     # ── Step 1: global X-phase ──────────────────────────────────────────────
     ci_arr  = np.array([ci for ci, _ in cells], dtype=np.float32)
     cj_arr  = np.array([cj for _, cj in cells], dtype=np.float32)
@@ -271,7 +276,7 @@ def grid_compare_points(
         # Even-cj rows use px_cand; odd-cj rows have origin (px_cand+stagger)%dx
         origins = (px_cand + parity * stagger_x_odd) % dx
         exp_xs = origins + ci_arr * dx
-        valid_x = (exp_xs >= margin) & (exp_xs <= img_w - margin)
+        valid_x = (exp_xs >= mx) & (exp_xs <= img_w - mx)
         if not valid_x.any():
             continue
         exp_xs_v = exp_xs[valid_x]
@@ -301,7 +306,7 @@ def grid_compare_points(
     best_dist_y  = float("inf")
     for phase_candidate in np.arange(0.0, dy, 1.0):
         exp_ys = phase_candidate + cj_arr * dy
-        valid  = (exp_ys >= margin) & (exp_ys <= img_h - margin)
+        valid  = (exp_ys >= my) & (exp_ys <= img_h - my)
         if not valid.any():
             continue
         det_ys_col = detected_xy[:, 1:2]
@@ -351,7 +356,7 @@ def grid_compare_points(
         key = (round(ex), round(ey))
         if key in seen:
             continue
-        if margin <= ex <= img_w - margin and margin <= ey <= img_h - margin:
+        if mx <= ex <= img_w - mx and my <= ey <= img_h - my:
             seen.add(key)
             result.append((ex, ey))
             result_cells.append((ci, cj))
