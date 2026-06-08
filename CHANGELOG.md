@@ -5177,3 +5177,43 @@ lo largo de toda la pieza y no se corte en la mitad inferior.
 - El faltante residual mas frecuente sigue estando en la franja superior (`cj=1`), o sea
   el siguiente ajuste fino, si hace falta, deberia enfocarse arriba a la izquierda y no
   en toda la altura del borde.
+
+---
+
+### Sesion 2026-06-08 (microperforado quirurgico) - Tadeo + Codex
+
+#### Cambio 130 - Microperforado: recorte superior minimo + sin linea artificial de borde
+
+**Pedido:** hacer un ajuste mas quirurgico en microperforado: menos `missing` falsos,
+pero sin desarmar la deteccion donde si tiene que detectar.
+
+**Hallazgo de Codex:**
+- La fila superior problematica del patron (`cj=3`) cae alrededor de `y ~= 45..48 px`,
+  muy pegada al borde superior util.
+- Con `compare_top_ignore_px: 42.0`, esa fila entraba completa al matching y dejaba
+  muchos `missing` falsos recurrentes.
+- Al subir apenas ese recorte a `46 px`, el problema baja bastante sin recurrir a una
+  reconstruccion total del patron.
+- La linea vertical punteada del borde del patron venia de un fallback del overlay, no
+  de una medicion real.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml` -> `models.modelo_B`
+  - `compare_top_ignore_px: 42.0 -> 46.0`
+- `src/pipeline/annotate.py`
+  - eliminado el fallback que dibujaba una linea vertical punteada artificial para el
+    borde del patron cuando no habia suficientes puntos reales.
+
+**Validacion en `05-06-2026-MICROPERFORADO_1` usando `scanner_1`:**
+- Antes:
+  - `131/137 raw OK`, `6 raw NOK`, `1 temporal NOK`
+  - fila superior recurrente:
+    `((2,3),49)`, `((4,3),49)`, `((5,3),49)`, `((1,3),45)`, `((3,3),35)`
+- Ahora:
+  - `132/137 raw OK`, `5 raw NOK`, `1 temporal NOK`
+  - fila superior bastante mas contenida:
+    `((4,3),12)`, `((5,3),12)`, `((2,3),9)`, `((1,3),7)`, `((3,3),6)`
+
+**Riesgos / oportunidades:**
+- El faltante principal ya no esta dominado solo por la fila superior; el borde inferior
+  (`cj=30/31`) sigue pesando bastante y seria el siguiente ajuste fino si queres seguir.
