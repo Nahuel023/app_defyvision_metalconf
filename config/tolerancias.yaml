@@ -123,6 +123,7 @@ models:
     min_match_count: 5
     edge_margin_px: 0.0
     grid_compare_margin_px: 5.0
+    grid_compare_margin_x_px: 22.0   # excluye col 6 (x≈197-203) que nunca detecta la camara en este ROI
     grid_compare_margin_y_px: 55.0   # excluye filas borde superior (cj=3, y=52px) e inferior (cj=30, y=430px)
     pattern_edge_margin_px: 50.0
     grid_max_missing: 60
