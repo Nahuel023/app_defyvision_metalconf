@@ -710,6 +710,29 @@ class ScannerController:
             threading.Thread(target=_save, daemon=True,
                              name=f"{self._id}-save").start()
 
+        # Si el recorder está grabando el post-evento, guardar overlay del frame analizado
+        if self._recorder is not None and result.overlay is not None:
+            event_dir = self._recorder.get_post_event_dir()
+            if event_dir is not None:
+                _overlay = result.overlay
+                _sid = self._id
+                def _save_ev_overlay(ov=_overlay, d=event_dir) -> None:
+                    try:
+                        # Buscar el último frame post guardado y crear overlay con mismo índice
+                        existing = sorted(d.glob("post_[0-9]*.jpg"))
+                        existing = [f for f in existing if "_overlay" not in f.name]
+                        if existing:
+                            idx = int(existing[-1].stem.split("_")[1])
+                            ov_path = d / f"post_{idx:04d}_overlay.jpg"
+                            if not ov_path.exists():
+                                import cv2 as _cv2
+                                _cv2.imwrite(str(ov_path), ov,
+                                             [_cv2.IMWRITE_JPEG_QUALITY, 85])
+                    except Exception as exc:
+                        logger.debug(f"[{_sid}] overlay post-evento: {exc}")
+                threading.Thread(target=_save_ev_overlay, daemon=True,
+                                 name=f"{self._id}-ev-ov").start()
+
         consecutive_nok = self._consecutive_nok
         warn_at = max(1, consecutive_nok // 3)
 
@@ -816,10 +839,16 @@ class ScannerController:
                 quality   = self._ok_buf_quality
                 buf_dir   = self._ok_buf_dir
 
-                def _write(img=overlay, p=out_path, q=quality, d=buf_dir) -> None:
+                raw_frame = result.image
+                raw_path  = self._ok_buf_dir / f"ok_{slot:04d}_raw.jpg"
+
+                def _write(img=overlay, p=out_path, q=quality, d=buf_dir,
+                           raw=raw_frame, rp=raw_path) -> None:
                     try:
                         d.mkdir(parents=True, exist_ok=True)
                         cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, q])
+                        if raw is not None:
+                            cv2.imwrite(str(rp), raw, [cv2.IMWRITE_JPEG_QUALITY, 85])
                     except Exception:
                         pass  # buffer circular, pérdida de un frame es aceptable
 

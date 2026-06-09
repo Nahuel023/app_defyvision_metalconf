@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 from typing import Optional
 
+import shutil
+import yaml
 import cv2
 import numpy as np
 from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
@@ -50,6 +52,7 @@ _WARN    = "#d29922"
 
 _EVENTS_DIR   = _ROOT / "data" / "events"
 _OK_BUF_BASE  = _ROOT / "data" / "output" / "ok_buffer"
+_NOK_DIR      = _ROOT / "data" / "output" / "nok"
 
 _THUMB_W = 90
 _THUMB_H = 60
@@ -85,7 +88,7 @@ def _event_summary(event_dir: Path) -> dict:
         except Exception:
             pass
     pre  = sorted(event_dir.glob("frame_*.jpg"))
-    post = sorted(event_dir.glob("post_*.jpg"))
+    post = sorted(f for f in event_dir.glob("post_*.jpg") if "_overlay" not in f.name)
     return {
         "dir": event_dir,
         "name": event_dir.name,
@@ -172,6 +175,37 @@ class _FrameView(QLabel):
         self.setPixmap(_bgr_to_pixmap(self._img, w, h))
 
 
+def _get_model_for_scanner(scanner_id: str) -> str:
+    """Lee io_map.yaml y devuelve el modelo activo para el scanner dado."""
+    try:
+        io_map_path = _ROOT / "config" / "io_map.yaml"
+        cfg = yaml.safe_load(io_map_path.read_text(encoding="utf-8"))
+        return cfg.get(scanner_id, {}).get("model", "modelo_A")
+    except Exception:
+        return "modelo_A"
+
+
+class _InspectWorker(QThread):
+    """Corre inspect_image en background y emite el overlay resultante."""
+    done = pyqtSignal(np.ndarray)  # overlay BGR
+
+    def __init__(self, frame_path: Path, model: str, scanner_id: str, parent=None):
+        super().__init__(parent)
+        self._path = frame_path
+        self._model = model
+        self._scanner_id = scanner_id
+
+    def run(self):
+        try:
+            from src.inspection import inspect_image
+            result = inspect_image(self._model, str(self._path),
+                                   scanner_id=self._scanner_id)
+            if result.overlay is not None:
+                self.done.emit(result.overlay)
+        except Exception:
+            pass
+
+
 # ── Panel de navegación de un evento ─────────────────────────────────────────
 
 class _EventNavPanel(QWidget):
@@ -183,6 +217,11 @@ class _EventNavPanel(QWidget):
         self._current: int = 0
         self._loader: Optional[_ThumbLoader] = None
         self._thumb_widgets: list[QLabel] = []
+        self._show_overlay: bool = True   # toggle overlay/raw
+        self._scanner_id: str = ""        # para análisis on-demand
+        self._model: str = ""
+        self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
+        self._inspect_worker: Optional[_InspectWorker] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -237,6 +276,19 @@ class _EventNavPanel(QWidget):
         self._next_btn.clicked.connect(self._go_next)
         nav.addWidget(self._next_btn)
 
+        self._overlay_btn = QPushButton("👁  Con overlay")
+        self._overlay_btn.setMinimumHeight(36)
+        self._overlay_btn.setCheckable(True)
+        self._overlay_btn.setChecked(True)
+        self._overlay_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:checked {{ background:{_ACCENT}; color:#ffffff; border-color:{_ACCENT}; }}"
+            f"QPushButton:hover:!checked {{ border-color:{_ACCENT}; color:{_TEXT}; }}"
+        )
+        self._overlay_btn.clicked.connect(self._toggle_overlay)
+        nav.addWidget(self._overlay_btn)
+
         root.addLayout(nav)
 
         # ── Tira de miniaturas ────────────────────────────────────────
@@ -264,6 +316,9 @@ class _EventNavPanel(QWidget):
     def load_event(self, summary: dict) -> None:
         self._frames = summary["all_frames"]
         self._current = 0
+        self._scanner_id = summary.get("scanner_id", "")
+        self._model = _get_model_for_scanner(self._scanner_id)
+        self._is_event_mode = True
 
         # Separar pre/post para colorear la tira
         n_pre = summary["pre_count"]
@@ -309,6 +364,7 @@ class _EventNavPanel(QWidget):
     def load_ok_buffer(self, frames: list[Path], scanner_label: str) -> None:
         self._frames = frames
         self._current = 0
+        self._is_event_mode = False
         self._info_lbl.setText(
             f"{scanner_label}   ·   Buffer OK — últimas {len(frames)} inspecciones correctas"
         )
@@ -357,11 +413,23 @@ class _EventNavPanel(QWidget):
             return
         idx = max(0, min(idx, len(self._frames) - 1))
         self._current = idx
-        img = cv2.imread(str(self._frames[idx]))
-        if img is not None:
-            self._view.set_image(img)
+        path = self._frames[idx]
+
+        if self._is_event_mode and self._show_overlay:
+            # Análisis on-demand: mostrar frame crudo inmediatamente y lanzar worker
+            img = cv2.imread(str(path))
+            if img is not None:
+                self._view.set_image(img)
+            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {len(self._frames)}  ·  Analizando…")
+            self._launch_inspect(path)
+        else:
+            img = cv2.imread(str(self._resolve_frame_path(path)))
+            if img is not None:
+                self._view.set_image(img)
+
         n = len(self._frames)
-        self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}")
+        if not (self._is_event_mode and self._show_overlay):
+            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}")
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
@@ -374,6 +442,56 @@ class _EventNavPanel(QWidget):
             else:
                 if "border:3px" in ss:
                     w.setStyleSheet(ss.replace("border:3px", "border:2px"))
+
+    def _launch_inspect(self, path: Path) -> None:
+        """Lanza análisis on-demand en background para frames de evento."""
+        if self._inspect_worker is not None and self._inspect_worker.isRunning():
+            self._inspect_worker.done.disconnect()
+            self._inspect_worker.quit()
+        self._inspect_worker = _InspectWorker(path, self._model, self._scanner_id)
+        self._inspect_worker.done.connect(self._on_inspect_done)
+        self._inspect_worker.start()
+
+    def _on_inspect_done(self, overlay: np.ndarray) -> None:
+        """Recibe el overlay analizado y lo muestra si el frame no cambió."""
+        self._view.set_image(overlay)
+        n = len(self._frames)
+        self._pos_lbl.setText(f"Frame  {self._current + 1}  /  {n}")
+
+    def _toggle_overlay(self) -> None:
+        self._show_overlay = self._overlay_btn.isChecked()
+        self._show_frame(self._current)
+
+    def _resolve_frame_path(self, path: Path) -> Path:
+        """Devuelve la ruta del frame a mostrar según el toggle overlay/raw.
+
+        Casos soportados:
+          - ok_NNNN.jpg          ↔  ok_NNNN_raw.jpg
+          - *_overlay.png/jpg    ↔  *_raw.jpg
+          - post_NNNN.jpg        ↔  post_NNNN_overlay.jpg  (invertido: raw→overlay)
+          - frame_NNNN.jpg       — pre-evento, no hay overlay disponible
+        """
+        stem = path.stem
+        parent = path.parent
+
+        if self._show_overlay:
+            # Queremos overlay: si el archivo YA es overlay devolver tal cual.
+            # Para frames crudos (post_NNNN, ok_NNNN, frame_NNNN) buscar versión overlay.
+            if "_overlay" in stem or "_raw" in stem:
+                return path  # ya es overlay o no aplica
+            # post_NNNN → post_NNNN_overlay.jpg
+            overlay = parent / (stem + "_overlay.jpg")
+            if overlay.exists():
+                return overlay
+            # ok_NNNN → ok_NNNN.jpg ya es overlay (el overlay se guarda como ok_NNNN.jpg)
+            return path
+        else:
+            # Queremos raw
+            if stem.endswith("_overlay"):
+                raw = parent / (stem[: -len("_overlay")] + "_raw.jpg")
+                return raw if raw.exists() else path
+            raw = parent / (stem + "_raw.jpg")
+            return raw if raw.exists() else path
 
     def _go_prev(self) -> None:
         self._show_frame(self._current - 1)
@@ -399,7 +517,7 @@ class OperatorFrameViewer(QMainWindow):
     def __init__(self, system, parent=None):
         super().__init__(parent)
         self._system = system
-        self._mode = "events"   # "events" | "ok"
+        self._mode = "events"   # "events" | "ok" | "nok"
         self._summaries: list[dict] = []
 
         self.setWindowTitle("Visor de Frames — DEFYVISION")
@@ -487,9 +605,11 @@ class OperatorFrameViewer(QMainWindow):
 
         self._events_btn = _tab_btn("⚠  Paradas de línea", "events", _NOK_CLR)
         self._ok_btn     = _tab_btn("✓  Frames OK recientes", "ok", _OK_CLR)
+        self._nok_btn    = _tab_btn("✗  Frames NOK recientes", "nok", _WARN)
 
         lay.addWidget(self._events_btn)
         lay.addWidget(self._ok_btn)
+        lay.addWidget(self._nok_btn)
 
         reload_btn = QPushButton("↺  Recargar")
         reload_btn.setFixedHeight(30)
@@ -501,6 +621,12 @@ class OperatorFrameViewer(QMainWindow):
         reload_btn.clicked.connect(self.reload)
         lay.addWidget(reload_btn)
 
+        self._disk_lbl = QLabel("")
+        self._disk_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;background:transparent;border:none;"
+        )
+        lay.addWidget(self._disk_lbl)
+
         return bar
 
     # ── Modos ─────────────────────────────────────────────────────────
@@ -509,16 +635,51 @@ class OperatorFrameViewer(QMainWindow):
         self._mode = mode
         self._events_btn.setChecked(mode == "events")
         self._ok_btn.setChecked(mode == "ok")
+        self._nok_btn.setChecked(mode == "nok")
         self._populate_list()
 
     def reload(self) -> None:
         self._populate_list()
 
+    def _update_disk_label(self) -> None:
+        try:
+            # Presupuesto configurado
+            tol_path = _ROOT / "config" / "tolerancias.yaml"
+            max_gb = 10.0
+            try:
+                tols = yaml.safe_load(tol_path.read_text(encoding="utf-8"))
+                max_gb = float(tols.get("events_max_disk_gb", 10.0))
+            except Exception:
+                pass
+
+            ev_bytes = sum(f.stat().st_size for f in _EVENTS_DIR.rglob("*") if f.is_file()) \
+                       if _EVENTS_DIR.exists() else 0
+            ev_gb   = ev_bytes / 1_073_741_824
+            pct     = min(100.0, ev_gb / max_gb * 100) if max_gb > 0 else 0.0
+            free_gb = max(0.0, max_gb - ev_gb)
+
+            bar_total = 16
+            bar_fill  = int(round(pct / 100 * bar_total))
+            bar = "█" * bar_fill + "░" * (bar_total - bar_fill)
+
+            color = _OK_CLR if pct < 70 else (_WARN if pct < 90 else _NOK_CLR)
+            self._disk_lbl.setText(
+                f"💾  Buffer evidencias:  {ev_gb:.2f} / {max_gb:.0f} GB  [{bar}]  {pct:.0f}%  ({free_gb:.2f} GB libres)"
+            )
+            self._disk_lbl.setStyleSheet(
+                f"color:{color};font-size:10px;background:transparent;border:none;"
+            )
+        except Exception:
+            pass
+
     def _populate_list(self) -> None:
+        self._update_disk_label()
         self._list_widget.clear()
 
         if self._mode == "events":
             self._populate_events()
+        elif self._mode == "nok":
+            self._populate_nok()
         else:
             self._populate_ok()
 
@@ -615,7 +776,7 @@ class OperatorFrameViewer(QMainWindow):
             return
 
         for sdir in scanner_dirs:
-            frames = sorted(sdir.glob("ok_*.jpg"))
+            frames = sorted(f for f in sdir.glob("ok_*.jpg") if "_raw" not in f.name)
             if not frames:
                 continue
             summary = {
@@ -655,6 +816,64 @@ class OperatorFrameViewer(QMainWindow):
 
         return w
 
+    def _populate_nok(self) -> None:
+        """Lee data/output/nok/ y agrupa los overlays NOK por scanner."""
+        self._summaries = []
+        if not _NOK_DIR.exists():
+            item = QListWidgetItem("Sin frames NOK grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        # Agrupar archivos PNG por scanner (prefijo "scanner_X_" del nombre)
+        files = sorted(_NOK_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if not files:
+            item = QListWidgetItem("Sin frames NOK grabados")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        # Agrupar por scanner_id
+        groups: dict[str, list[Path]] = {}
+        for f in files:
+            m = re.match(r"^(scanner_\w+)_", f.name)
+            sid = m.group(1) if m else "unknown"
+            groups.setdefault(sid, []).append(f)
+
+        for sid, frames in sorted(groups.items()):
+            summary = {"type": "nok", "scanner_id": sid, "frames": frames}
+            self._summaries.append(summary)
+            widget = self._make_nok_card(summary)
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+    def _make_nok_card(self, s: dict) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(3)
+
+        scanner = _scanner_display(s["scanner_id"])
+        title = QLabel(scanner)
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:12px;font-weight:700;background:transparent;"
+        )
+        lay.addWidget(title)
+
+        n = len(s["frames"])
+        count_lbl = QLabel(f"{n} frames NOK guardados")
+        count_lbl.setStyleSheet(
+            f"color:{_WARN};font-size:10px;font-weight:600;background:transparent;"
+        )
+        lay.addWidget(count_lbl)
+
+        return w
+
     # ── Selección ─────────────────────────────────────────────────────
 
     def _on_list_select(self, row: int) -> None:
@@ -663,6 +882,9 @@ class OperatorFrameViewer(QMainWindow):
         s = self._summaries[row]
         if self._mode == "events":
             self._nav_panel.load_event(s)
+        elif self._mode == "nok":
+            scanner_label = _scanner_display(s["scanner_id"])
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
         else:
             scanner_label = _scanner_display(s["scanner_id"])
             self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
@@ -671,10 +893,7 @@ class OperatorFrameViewer(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if self._mode == "events":
-            self._events_btn.setChecked(True)
-            self._ok_btn.setChecked(False)
-        else:
-            self._events_btn.setChecked(False)
-            self._ok_btn.setChecked(True)
+        self._events_btn.setChecked(self._mode == "events")
+        self._ok_btn.setChecked(self._mode == "ok")
+        self._nok_btn.setChecked(self._mode == "nok")
         self._populate_list()

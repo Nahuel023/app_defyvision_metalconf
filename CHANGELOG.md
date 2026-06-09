@@ -116,6 +116,28 @@ No se modifica en este commit — requiere recalibración del patrón con ROI aj
 
 ---
 
+### Sesión 2026-06-08 — Nahuel + Claude (continuación 2)
+
+#### Cambio 135 - Análisis on-demand en visor de eventos + disco en header
+
+**Problema:** el toggle "Con overlay" en el tab de paradas de línea mostraba el frame crudo porque los frames pre-evento nunca son analizados (están en buffer de RAM antes de la parada).
+
+**Solución:** análisis on-demand — al activar el overlay en modo eventos, se lanza `inspect_image` en un `QThread` worker (`_InspectWorker`) sobre el frame actual. Mientras procesa, se muestra el frame crudo con "Analizando…" en el contador. Al terminar, se reemplaza con el overlay del resultado.
+
+**Cambios en `src/ui/frame_viewer.py`:**
+- `_get_model_for_scanner()`: lee `config/io_map.yaml` para obtener el modelo activo del scanner del evento
+- `_InspectWorker(QThread)`: corre `inspect_image` en background, emite `done(overlay_bgr)`
+- `_EventNavPanel`: campos `_scanner_id`, `_model`, `_is_event_mode`, `_inspect_worker`
+- `load_event()`: guarda `scanner_id` y `model`, activa `_is_event_mode = True`
+- `load_ok_buffer()`: desactiva `_is_event_mode = False`
+- `_show_frame()`: en modo evento+overlay → muestra raw inmediatamente y lanza worker; en otros modos → comportamiento anterior
+- `_launch_inspect()` + `_on_inspect_done()`: gestión del worker
+- Header: label `_disk_lbl` que muestra espacio usado por evidencias y disco total/libre
+- `_update_disk_label()`: calcula MB de `data/events/` + uso de disco con `shutil.disk_usage`
+- `_populate_list()`: llama `_update_disk_label()` en cada recarga
+
+---
+
 ### Sesión 2026-06-08 — Tadeo + Claude (continuación 2)
 
 #### Cambio 132 - Microperforado: eliminar missing falsos en filas borde superior/inferior
@@ -142,6 +164,63 @@ sin override Y evaluaba filas borde cuando el material entraba/salía del encuad
 ---
 
 ### Sesión 2026-06-08 — Nahuel + Claude (continuación)
+
+#### Cambio 133 - Overlay en frames de parada de línea (post-evento)
+
+**Síntoma:** al activar "Con overlay" en eventos de parada, se mostraba el frame crudo porque los overlays no se guardaban junto a los frames post-evento.
+
+**Causa:** `EventRecorder.add_frame` solo guarda el frame crudo. El overlay (resultado del análisis) se produce en `_handle_result` que corre después, y nunca se asociaba al frame del evento.
+
+**Cambios:**
+- `src/pipeline/event_recorder.py`:
+  - `add_frame` acepta parámetro opcional `overlay: np.ndarray | None` — si se pasa, guarda `post_{idx}_overlay.jpg` junto a `post_{idx}.jpg`
+  - Nuevos métodos `is_post_event_active()` y `get_post_event_dir()` para que el scanner controller sepa si está en ventana post-evento
+- `src/controller/scanner_controller.py`: en `_handle_result`, si el recorder está grabando post-evento, guarda el overlay del resultado en `post_{idx}_overlay.jpg` (buscando el último `post_*.jpg` sin `_overlay` y asociándolo)
+- `src/ui/frame_viewer.py`:
+  - `_event_summary`: filtra `post_*_overlay.jpg` de la lista de frames para no mostrarlos como frames separados
+  - `_populate_ok`: filtra `ok_*_raw.jpg` del listado para no duplicar
+  - `_resolve_frame_path`: lógica extendida para manejar `post_NNNN.jpg → post_NNNN_overlay.jpg` cuando overlay está activo, y `ok_NNNN.jpg → ok_NNNN_raw.jpg` cuando está desactivado
+
+**Comportamiento final:**
+- Frames pre-evento (`frame_NNNN.jpg`): siempre crudos, no hay overlay disponible
+- Frames post-evento (`post_NNNN.jpg`): toggle muestra raw ↔ overlay del análisis
+- Frames OK buffer: toggle muestra overlay ↔ raw
+- Frames NOK: toggle muestra overlay ↔ raw
+
+---
+
+#### Cambio 132 - Toggle overlay/raw en el visor de frames
+
+**Pedido:** activar/desactivar el overlay de análisis al revisar frames OK, NOK y eventos de parada.
+
+**Lógica:**
+- Al guardar un frame con overlay (OK buffer, NOK), ahora también se guarda el frame crudo (`_raw.jpg`) en la misma carpeta con el mismo nombre base.
+- El visor tiene un botón "👁 Con overlay" (toggle) en la barra de navegación. Cuando está desactivado, `_resolve_frame_path()` busca el `_raw.jpg` correspondiente y lo muestra. Si no existe (frames de eventos, que ya son crudos), muestra el archivo original.
+
+**Cambios:**
+- `src/inspection.py`: campo `image` en `InspectionResult` + guardar `_raw.jpg` en `save_result_images`
+- `src/controller/scanner_controller.py`: OK buffer guarda `ok_{slot}_raw.jpg` junto al overlay
+- `src/ui/frame_viewer.py`: botón toggle `_overlay_btn`, método `_resolve_frame_path()`, `_show_frame()` usa resolución condicional
+
+---
+
+#### Cambio 130 - Visor de frames NOK en OperatorFrameViewer
+
+**Pedido:** poder ver los overlays de frames NOK (y paradas de máquina) para analizar el escaneo sin entrar al modo servicio.
+
+**Cambios en `src/ui/frame_viewer.py`:**
+- Agregada constante `_NOK_DIR = _ROOT / "data" / "output" / "nok"`
+- Nueva pestaña "✗ Frames NOK recientes" (`_nok_btn`) en el header, con color `_WARN` (naranja)
+- `_switch_mode()` actualiza el estado checked del nuevo botón
+- `_populate_list()` rutea al nuevo método `_populate_nok()` cuando `mode == "nok"`
+- `_populate_nok()`: lee `data/output/nok/*.png` ordenados por mtime (más reciente primero), agrupa por scanner parseando el prefijo del nombre de archivo, y muestra tarjetas
+- `_make_nok_card()`: tarjeta con nombre de scanner y conteo de frames NOK en color naranja
+- `_on_list_select()`: selección en modo NOK llama a `_nav_panel.load_ok_buffer()` (reutiliza el panel de navegación de frames OK, que acepta cualquier lista de imágenes)
+- `showEvent()` simplificado para manejar los tres modos uniformemente
+
+**Nota:** los frames NOK se guardan en `data/output/nok/` como PNG con nombres como `scanner_2_cont_162550_0005_overlay.png`. El visor los muestra con overlay de análisis para diagnóstico.
+
+---
 
 #### Cambio 129 - force_auto_mode: forzar modo AUTO sin depender del switch PLC
 

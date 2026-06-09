@@ -15,6 +15,7 @@
   },
   "permissions": {
     "allow": [
+      "PowerShell(*)",
       "Bash(xargs wc:*)",
       "Bash(find 'c:/DEFYMOTION/DEFYVISION - Metalconf/app_defyvision_metalconf/setup_prov_pc' -type f -name README* -o -name *.pdf -o -name *.txt)",
       "Bash(.venv\\\\Scripts\\\\pip.exe install *)",
