@@ -39,16 +39,16 @@ models:
     edge_align_enabled: false
     polarity: bright
     threshold: 180
-    use_channel: r
+    use_channel: gray
     use_otsu: false
-    use_clahe: true
+    use_clahe: false
     clahe_clip: 3.0
     clahe_tile: 8
     use_adaptive: true
     open_ksize: 1
     close_ksize: 3
-    adaptive_block_size: 21
-    adaptive_c: 3.0
+    adaptive_block_size: 41
+    adaptive_c: -5.0
     tilt_warn_deg: 2.5
     min_area: 20.0
     circularity_min: 0.15
