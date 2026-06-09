@@ -86,16 +86,30 @@ def assign_cells(
     dy: float,
     phase_x: float,
     phase_y: float,
+    stagger_x_odd: float = 0.0,
 ) -> list[tuple[int, int]]:
     """Assign each hole to its (col, row) grid cell index.
 
     Uses round-half-up (int(x + 0.5)) instead of Python's banker's rounding
     (round()) to avoid collisions when a coordinate falls exactly at mid-period.
+
+    When stagger_x_odd != 0, odd-cj rows have their X origin shifted by
+    stagger_x_odd pixels relative to even-cj rows.  The CI assignment
+    subtracts this shift before dividing by dx so that staggered holes map
+    to the correct column index, consistent with how grid_compare_points
+    generates expected positions.
     """
-    return [
-        (int((x - phase_x) / dx + 0.5), int((y - phase_y) / dy + 0.5))
-        for x, y in points
-    ]
+    result: list[tuple[int, int]] = []
+    for x, y in points:
+        cj = int((y - phase_y) / dy + 0.5)
+        if stagger_x_odd != 0.0 and cj % 2 == 1:
+            # Odd row: X origin is (phase_x + stagger_x_odd) % dx
+            x_origin_odd = (phase_x + stagger_x_odd) % dx
+            ci = int((x - x_origin_odd) / dx + 0.5)
+        else:
+            ci = int((x - phase_x) / dx + 0.5)
+        result.append((ci, cj))
+    return result
 
 
 def _fit_affine_to_grid(

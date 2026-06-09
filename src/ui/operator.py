@@ -620,13 +620,14 @@ class MachineStopDialog(QDialog):
         # ── Banner rojo superior ──────────────────────────────────────
         header = QLabel(f"  ⚠   DETENCIÓN DE MÁQUINA   —   {self._scanner_label}")
         header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        header.setFixedHeight(52)
         header.setStyleSheet(
             "background:#7f1d1d;color:#fecaca;"
-            "font-size:22px;font-weight:700;letter-spacing:2px;padding:18px;"
+            "font-size:22px;font-weight:700;letter-spacing:2px;padding:0 18px;"
         )
         root.addWidget(header)
 
-        # ── Imagen del frame con el defecto ───────────────────────────
+        # ── Imagen del frame con el defecto — ocupa el máximo espacio ─
         self._img_lbl = QLabel()
         self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_lbl.setStyleSheet("background:#000000;")
@@ -635,27 +636,34 @@ class MachineStopDialog(QDialog):
         )
         root.addWidget(self._img_lbl, stretch=1)
 
-        # ── Motivo ────────────────────────────────────────────────────
-        reason_lbl = QLabel(f"Motivo detectado:   {self._reason}")
-        reason_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        reason_lbl.setStyleSheet(
-            "background:#1a0000;color:#fca5a5;"
-            "font-size:15px;font-weight:600;padding:12px;"
-        )
-        root.addWidget(reason_lbl)
+        # ── Pie: motivo + botón ACEPTAR en la misma fila ─────────────
+        footer = QWidget()
+        footer.setFixedHeight(52)
+        footer.setStyleSheet("background:#1a0000;border-top:2px solid #7f1d1d;")
+        foot_lay = QHBoxLayout(footer)
+        foot_lay.setContentsMargins(16, 0, 0, 0)
+        foot_lay.setSpacing(0)
 
-        # ── Botón ACEPTAR ─────────────────────────────────────────────
+        reason_lbl = QLabel(f"⚠  {self._reason}")
+        reason_lbl.setStyleSheet(
+            "color:#fca5a5;font-size:15px;font-weight:600;background:transparent;"
+        )
+        foot_lay.addWidget(reason_lbl, stretch=1)
+
         btn = QPushButton("ACEPTAR")
-        btn.setMinimumHeight(70)
+        btn.setFixedHeight(52)
+        btn.setMinimumWidth(160)
         btn.setStyleSheet(
-            "background:#991b1b;color:#ffffff;"
-            "font-size:22px;font-weight:700;letter-spacing:1px;"
-            "border:none;border-top:2px solid #7f1d1d;"
+            "QPushButton { background:#991b1b;color:#ffffff;"
+            "font-size:20px;font-weight:700;letter-spacing:1px;"
+            "border:none;border-left:2px solid #7f1d1d; }"
             "QPushButton:hover { background:#dc2626; }"
             "QPushButton:pressed { background:#7f1d1d; }"
         )
         btn.clicked.connect(self.accept)
-        root.addWidget(btn)
+        foot_lay.addWidget(btn)
+
+        root.addWidget(footer)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

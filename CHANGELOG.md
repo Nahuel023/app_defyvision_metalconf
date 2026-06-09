@@ -83,6 +83,24 @@ falta en ≥3 frames consecutivos → machine_stop → STOPPED → línea parada
 
 **Archivos modificados:** `config/tolerancias.yaml`
 
+#### Cambio 138 - Esterilla scanner_2: ROI corregido para incluir todas las columnas
+
+**Diagnóstico:** el ROI anterior (x=215, w=275 → cubre x=215 a x=490) cortaba las 2-3
+columnas de la izquierda de la esterilla. La esterilla física ocupa aproximadamente x=125
+a x=505 en el frame completo de 640px. El patrón mostraba "COLUMNA 1,2,3,4,5 FALTANTES"
+con Delta≈-142px, lo que confirma que el detector nunca veía el lado izquierdo.
+
+**Cambio:** `data/patterns/scanner_2/modelo_A/roi.json`
+- Antes: `x=215, w=275` (cubre 215-490)
+- Ahora: `x=110, w=415` (cubre 110-525, margen de ~15px en cada borde del patrón)
+
+**PENDIENTE — acción manual obligatoria:**
+Después de este cambio el patrón `holes.json` es inválido (fue construido para el ROI viejo).
+Hay que reconstruirlo con una imagen de referencia limpia:
+```
+.\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/ref_s2.jpg" --scanner scanner_2
+```
+
 ---
 
 #### Cambio 136 - Analisis: mostrar ROI visible en overlays
@@ -126,6 +144,34 @@ facil la columna izquierda.
 
 **Archivos modificados:** `data/patterns/scanner_2/modelo_A/roi.json`,
 `data/patterns/scanner_2/modelo_A/holes.json`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 136 - Diálogo de parada a pantalla completa: bug fix + imagen más grande
+
+**Síntoma:** al ocurrir una detención de máquina (machine_stop=True, ya sea real o por "Simular
+parada"), el diálogo `MachineStopDialog` nunca aparecía. El frame con el defecto no se mostraba.
+
+**Causa raíz:** en `_handle_result` (`src/controller/scanner_controller.py`), cuando
+`machine_stop_triggered=True`, el método ejecutaba `return` antes de llegar al bloque
+`if self.on_result:` (línea ~825). El callback de UI nunca se disparaba → `_sig_stop_alert`
+nunca se emitía → `MachineStopDialog` nunca se creaba.
+
+**Cambios:**
+
+`src/controller/scanner_controller.py` línea ~806:
+- Añadida llamada `self.on_result(result, streak)` dentro del bloque `machine_stop_triggered`,
+  antes del `return`. Dispara el callback hacia la UI incluso cuando la parada es inmediata.
+
+`src/ui/operator.py` — `MachineStopDialog._build_ui()`:
+- Header: cambiado a `setFixedHeight(52)` y `padding:0 18px` (antes era solo `padding:18px`
+  que inflaba el alto sin control).
+- Motivo + botón ACEPTAR: combinados en un `QWidget` footer de altura fija 52px en una sola fila
+  horizontal. Elimina ~80px de espacio fijo que comía la imagen. La imagen ahora ocupa casi
+  toda la ventana maximizada.
+
+**Efecto:** el diálogo aparece correctamente tanto en paradas reales como al presionar
+"Simular parada". La imagen del frame defectuoso ocupa ~90% de la ventana.
 
 ---
 
@@ -197,6 +243,28 @@ No se modifica en este commit — requiere recalibración del patrón con ROI aj
 
 ---
 
+### Sesión 2026-06-08 — Nahuel + Claude (continuación 2)
+
+#### Cambio 135 - Análisis on-demand en visor de eventos + disco en header
+
+**Problema:** el toggle "Con overlay" en el tab de paradas de línea mostraba el frame crudo porque los frames pre-evento nunca son analizados (están en buffer de RAM antes de la parada).
+
+**Solución:** análisis on-demand — al activar el overlay en modo eventos, se lanza `inspect_image` en un `QThread` worker (`_InspectWorker`) sobre el frame actual. Mientras procesa, se muestra el frame crudo con "Analizando…" en el contador. Al terminar, se reemplaza con el overlay del resultado.
+
+**Cambios en `src/ui/frame_viewer.py`:**
+- `_get_model_for_scanner()`: lee `config/io_map.yaml` para obtener el modelo activo del scanner del evento
+- `_InspectWorker(QThread)`: corre `inspect_image` en background, emite `done(overlay_bgr)`
+- `_EventNavPanel`: campos `_scanner_id`, `_model`, `_is_event_mode`, `_inspect_worker`
+- `load_event()`: guarda `scanner_id` y `model`, activa `_is_event_mode = True`
+- `load_ok_buffer()`: desactiva `_is_event_mode = False`
+- `_show_frame()`: en modo evento+overlay → muestra raw inmediatamente y lanza worker; en otros modos → comportamiento anterior
+- `_launch_inspect()` + `_on_inspect_done()`: gestión del worker
+- Header: label `_disk_lbl` que muestra espacio usado por evidencias y disco total/libre
+- `_update_disk_label()`: calcula MB de `data/events/` + uso de disco con `shutil.disk_usage`
+- `_populate_list()`: llama `_update_disk_label()` en cada recarga
+
+---
+
 ### Sesión 2026-06-08 — Tadeo + Claude (continuación 2)
 
 #### Cambio 132 - Microperforado: eliminar missing falsos en filas borde superior/inferior
@@ -223,6 +291,63 @@ sin override Y evaluaba filas borde cuando el material entraba/salía del encuad
 ---
 
 ### Sesión 2026-06-08 — Nahuel + Claude (continuación)
+
+#### Cambio 133 - Overlay en frames de parada de línea (post-evento)
+
+**Síntoma:** al activar "Con overlay" en eventos de parada, se mostraba el frame crudo porque los overlays no se guardaban junto a los frames post-evento.
+
+**Causa:** `EventRecorder.add_frame` solo guarda el frame crudo. El overlay (resultado del análisis) se produce en `_handle_result` que corre después, y nunca se asociaba al frame del evento.
+
+**Cambios:**
+- `src/pipeline/event_recorder.py`:
+  - `add_frame` acepta parámetro opcional `overlay: np.ndarray | None` — si se pasa, guarda `post_{idx}_overlay.jpg` junto a `post_{idx}.jpg`
+  - Nuevos métodos `is_post_event_active()` y `get_post_event_dir()` para que el scanner controller sepa si está en ventana post-evento
+- `src/controller/scanner_controller.py`: en `_handle_result`, si el recorder está grabando post-evento, guarda el overlay del resultado en `post_{idx}_overlay.jpg` (buscando el último `post_*.jpg` sin `_overlay` y asociándolo)
+- `src/ui/frame_viewer.py`:
+  - `_event_summary`: filtra `post_*_overlay.jpg` de la lista de frames para no mostrarlos como frames separados
+  - `_populate_ok`: filtra `ok_*_raw.jpg` del listado para no duplicar
+  - `_resolve_frame_path`: lógica extendida para manejar `post_NNNN.jpg → post_NNNN_overlay.jpg` cuando overlay está activo, y `ok_NNNN.jpg → ok_NNNN_raw.jpg` cuando está desactivado
+
+**Comportamiento final:**
+- Frames pre-evento (`frame_NNNN.jpg`): siempre crudos, no hay overlay disponible
+- Frames post-evento (`post_NNNN.jpg`): toggle muestra raw ↔ overlay del análisis
+- Frames OK buffer: toggle muestra overlay ↔ raw
+- Frames NOK: toggle muestra overlay ↔ raw
+
+---
+
+#### Cambio 132 - Toggle overlay/raw en el visor de frames
+
+**Pedido:** activar/desactivar el overlay de análisis al revisar frames OK, NOK y eventos de parada.
+
+**Lógica:**
+- Al guardar un frame con overlay (OK buffer, NOK), ahora también se guarda el frame crudo (`_raw.jpg`) en la misma carpeta con el mismo nombre base.
+- El visor tiene un botón "👁 Con overlay" (toggle) en la barra de navegación. Cuando está desactivado, `_resolve_frame_path()` busca el `_raw.jpg` correspondiente y lo muestra. Si no existe (frames de eventos, que ya son crudos), muestra el archivo original.
+
+**Cambios:**
+- `src/inspection.py`: campo `image` en `InspectionResult` + guardar `_raw.jpg` en `save_result_images`
+- `src/controller/scanner_controller.py`: OK buffer guarda `ok_{slot}_raw.jpg` junto al overlay
+- `src/ui/frame_viewer.py`: botón toggle `_overlay_btn`, método `_resolve_frame_path()`, `_show_frame()` usa resolución condicional
+
+---
+
+#### Cambio 130 - Visor de frames NOK en OperatorFrameViewer
+
+**Pedido:** poder ver los overlays de frames NOK (y paradas de máquina) para analizar el escaneo sin entrar al modo servicio.
+
+**Cambios en `src/ui/frame_viewer.py`:**
+- Agregada constante `_NOK_DIR = _ROOT / "data" / "output" / "nok"`
+- Nueva pestaña "✗ Frames NOK recientes" (`_nok_btn`) en el header, con color `_WARN` (naranja)
+- `_switch_mode()` actualiza el estado checked del nuevo botón
+- `_populate_list()` rutea al nuevo método `_populate_nok()` cuando `mode == "nok"`
+- `_populate_nok()`: lee `data/output/nok/*.png` ordenados por mtime (más reciente primero), agrupa por scanner parseando el prefijo del nombre de archivo, y muestra tarjetas
+- `_make_nok_card()`: tarjeta con nombre de scanner y conteo de frames NOK en color naranja
+- `_on_list_select()`: selección en modo NOK llama a `_nav_panel.load_ok_buffer()` (reutiliza el panel de navegación de frames OK, que acepta cualquier lista de imágenes)
+- `showEvent()` simplificado para manejar los tres modos uniformemente
+
+**Nota:** los frames NOK se guardan en `data/output/nok/` como PNG con nombres como `scanner_2_cont_162550_0005_overlay.png`. El visor los muestra con overlay de análisis para diagnóstico.
+
+---
 
 #### Cambio 129 - force_auto_mode: forzar modo AUTO sin depender del switch PLC
 
@@ -5552,3 +5677,46 @@ estaba resolviendo que el patron se analice completo.
   ancho completo; si mas adelante queres bajar ese ratio visual, el siguiente paso sano
   ya no es recortar otra vez la ROI sino reconstruir `holes.json` de `scanner_2/modelo_A`
   con una malla regularizada sobre esta ROI de `255 px`.
+
+---
+
+### Sesion 2026-06-09 (esterilla assign_cells stagger bug) - Tadeo + Claude
+
+#### Cambio 139 - Fix bug assign_cells: CI incorrecto en filas impares con stagger
+
+**Pedido:** esterilla scanner_2 reporta 7 agujeros missing en cada frame a pesar de ROI
+y patron correctos.
+
+**Hallazgo:**
+- `assign_cells` en `src/pipeline/grid_fitting.py` calculaba el indice de columna (CI) de
+  todos los agujeros usando la formula simple `CI = round((x - phase_x) / dx)`, sin
+  considerar el stagger de filas impares.
+- Para la esterilla con `stagger_x_odd=20.0` y `dx=39`, los agujeros de filas impares
+  (CJ impar) en X≈307-327 recibían CI=8 en vez de CI=7. Esto es porque sin compensar el
+  offset de fase, la distancia al centro de la celda CI=8 resultaba la minima.
+- `grid_compare_points` genera la posicion esperada para CI=8 fila impar como
+  `(14+20)%39 + 8*39 = 34 + 312 = 346 px`, que es inalcanzable con origin_x razonable
+  cuando las detecciones reales estan en X=307-327.
+- Resultado: 7 celdas (CI=8, CJ=5/7/9/11/13/17/19) generaban expected en X=346 que
+  nunca matcheaban → 7 missing permanentes en cada frame.
+
+**Cambios:**
+- `src/pipeline/grid_fitting.py` — `assign_cells()`:
+  - Agrega parametro `stagger_x_odd: float = 0.0` (backward-compatible).
+  - Para filas impares (CJ%2==1): calcula `x_origin_odd = (phase_x + stagger_x_odd) % dx`
+    y usa ese origen para el CI en vez de `phase_x`.
+  - Ejemplo esterilla: X=307.6, CJ=5 (impar) → `CI = round((307.6 - 34) / 39) = 7` ✓
+    (antes era CI=8 incorrecto).
+- `src/patterns/pattern_build.py` — `build_pattern_from_image()`:
+  - Reestructurado para determinar `stagger_x_odd` (desde config o estimado desde datos)
+    **antes** de llamar a `assign_cells`, y pasarlo en la llamada.
+  - Si `grid_stagger_x_odd` esta en config, se usa directamente (caso modelo_A y modelo_B).
+  - Si no esta en config, se hace un primer `assign_cells` sin stagger para separar filas
+    pares/impares, se estima el stagger, y se re-llama con el valor correcto.
+- `data/patterns/scanner_2/modelo_A/holes.json`:
+  - Reconstruido desde `data/recordings/ESTERILLA_5/frame_0047.png` con cells corregidas.
+  - Las 7 celdas que antes eran (CI=8, CJ=5/7/9/11/13/17/19) ahora son (CI=7, ...) y
+    generan expected en X=307 — donde los agujeros realmente se detectan.
+
+**Validacion pendiente:** ejecutar `run-folder` sobre ESTERILLA_5 y confirmar que missing
+baja de 7 a 0 o cerca en frames buenos.
