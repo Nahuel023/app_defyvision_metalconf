@@ -803,6 +803,13 @@ class ScannerController:
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
 
+            # Notificar UI con el frame que causó la parada (overlay + diálogo pantalla completa)
+            if self.on_result:
+                try:
+                    self.on_result(result, streak)
+                except Exception as _exc:
+                    logger.error(f"[{self._id}] on_result error (machine_stop): {_exc}")
+
             # No actualizar luces al final del método: el scanner ya está STOPPED
             return
 
