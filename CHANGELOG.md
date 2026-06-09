@@ -48,6 +48,28 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 141 - Unificacion de contexto entre analisis e inspeccion
+
+**Pedido:** que `ANALISIS` y `modo inspeccion` usen exactamente el mismo contexto
+base de analisis para no tener que perseguir diferencias invisibles entre ambos.
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - `inspect_folder()` ahora tambien crea `ema_state: {}` en el preload compartido,
+    igual que el inspector vivo
+- `src/ui/service.py`
+  - el analisis en vivo durante grabacion ahora mantiene un preload persistente con
+    `tolerances`, `pattern`, `roi` y `ema_state`, en lugar de recargar solo el detector
+    de `machine_stop` frame a frame
+
+**Resultado:** carpeta comun, analisis en servicio y modo inspeccion quedan mas alineados:
+usan la misma fuente de verdad de tolerancias/ROI/patron y tambien conservan el mismo
+estado suavizado de alineacion entre frames.
+
+**Archivos modificados:** `src/inspection.py`, `src/ui/service.py`
+
+---
+
 #### Cambio 140 - Microperforado: ROI recortado y patrón reconstruido desde grabación en vivo
 
 **Síntoma:** en modo inspección en vivo (run), el ROI previo (x=195, w=295) era demasiado

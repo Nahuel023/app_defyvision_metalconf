@@ -1447,6 +1447,7 @@ class RecordingTab(QWidget):
         self._current_idx: int        = 0
         self._worker: Optional[_AnalysisWorker] = None
         self._live_ms_detector = None
+        self._live_pre: dict | None = None
 
         # Timer-based analysis state (runs in main thread, no cross-thread signal issues)
         self._ana_running:    bool          = False
@@ -2371,6 +2372,7 @@ class RecordingTab(QWidget):
         self._rec_timer.stop()
         self._recording = False
         self._live_ms_detector = None
+        self._live_pre = None
         if self._write_executor is not None:
             self._write_executor.shutdown(wait=True)   # flush pending PNG writes
             self._write_executor = None
@@ -2417,6 +2419,8 @@ class RecordingTab(QWidget):
         if self._live_chk.isChecked():
             try:
                 from src.inspection import inspect_image
+                from src.patterns.pattern_io import load_pattern, find_pattern_path
+                from src.patterns.roi import load_roi
                 from src.utils.config import load_tolerances
                 from src.pipeline.machine_stop import MachineStopDetector
 
@@ -2437,7 +2441,16 @@ class RecordingTab(QWidget):
                             same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
                         )
 
-                _pre_live: dict = {}
+                if self._live_pre is None:
+                    tols = load_tolerances(model)
+                    self._live_pre = {
+                        "tolerances": tols,
+                        "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
+                        "roi":        load_roi(model, scanner_id),
+                        "ema_state":  {},
+                    }
+
+                _pre_live = dict(self._live_pre)
                 if self._live_ms_detector is not None:
                     _pre_live["machine_stop_detector"] = self._live_ms_detector
 
