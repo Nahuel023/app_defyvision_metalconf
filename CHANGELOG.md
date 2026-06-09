@@ -48,6 +48,22 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 139 - Esterilla: CLAHE + adaptive_block_size 41→21 para ROI ampliada
+
+**Síntoma:** detección muy baja en esterilla (~10% detection_ratio). El ROI ahora mide 415px
+(ampliado por la otra máquina). Las zonas brillantes de retroiluminación a los costados del
+material elevan el promedio local del adaptive threshold → los agujeros no superan el umbral.
+
+**Cambios en `config/tolerancias.yaml` — modelo_A:**
+- `use_clahe: true` — normaliza la iluminación despareja antes de umbralizar
+- `clahe_clip: 3.0, clahe_tile: 8`
+- `adaptive_block_size: 41 → 21` — vecindad más local para ROI de 415px
+- `adaptive_c: -5.0 → 3.0` — threshold = mean - 3; más permisivo
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 138 - Esterilla: grid_compare_margin_x_px 30→40 para excluir borde izquierdo
 
 **Síntoma:** análisis de esterilla muestra ~17 faltantes constantes incluso con material bien posicionado.
