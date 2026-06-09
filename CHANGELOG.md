@@ -5642,3 +5642,46 @@ estaba resolviendo que el patron se analice completo.
   ancho completo; si mas adelante queres bajar ese ratio visual, el siguiente paso sano
   ya no es recortar otra vez la ROI sino reconstruir `holes.json` de `scanner_2/modelo_A`
   con una malla regularizada sobre esta ROI de `255 px`.
+
+---
+
+### Sesion 2026-06-09 (esterilla assign_cells stagger bug) - Tadeo + Claude
+
+#### Cambio 139 - Fix bug assign_cells: CI incorrecto en filas impares con stagger
+
+**Pedido:** esterilla scanner_2 reporta 7 agujeros missing en cada frame a pesar de ROI
+y patron correctos.
+
+**Hallazgo:**
+- `assign_cells` en `src/pipeline/grid_fitting.py` calculaba el indice de columna (CI) de
+  todos los agujeros usando la formula simple `CI = round((x - phase_x) / dx)`, sin
+  considerar el stagger de filas impares.
+- Para la esterilla con `stagger_x_odd=20.0` y `dx=39`, los agujeros de filas impares
+  (CJ impar) en X≈307-327 recibían CI=8 en vez de CI=7. Esto es porque sin compensar el
+  offset de fase, la distancia al centro de la celda CI=8 resultaba la minima.
+- `grid_compare_points` genera la posicion esperada para CI=8 fila impar como
+  `(14+20)%39 + 8*39 = 34 + 312 = 346 px`, que es inalcanzable con origin_x razonable
+  cuando las detecciones reales estan en X=307-327.
+- Resultado: 7 celdas (CI=8, CJ=5/7/9/11/13/17/19) generaban expected en X=346 que
+  nunca matcheaban → 7 missing permanentes en cada frame.
+
+**Cambios:**
+- `src/pipeline/grid_fitting.py` — `assign_cells()`:
+  - Agrega parametro `stagger_x_odd: float = 0.0` (backward-compatible).
+  - Para filas impares (CJ%2==1): calcula `x_origin_odd = (phase_x + stagger_x_odd) % dx`
+    y usa ese origen para el CI en vez de `phase_x`.
+  - Ejemplo esterilla: X=307.6, CJ=5 (impar) → `CI = round((307.6 - 34) / 39) = 7` ✓
+    (antes era CI=8 incorrecto).
+- `src/patterns/pattern_build.py` — `build_pattern_from_image()`:
+  - Reestructurado para determinar `stagger_x_odd` (desde config o estimado desde datos)
+    **antes** de llamar a `assign_cells`, y pasarlo en la llamada.
+  - Si `grid_stagger_x_odd` esta en config, se usa directamente (caso modelo_A y modelo_B).
+  - Si no esta en config, se hace un primer `assign_cells` sin stagger para separar filas
+    pares/impares, se estima el stagger, y se re-llama con el valor correcto.
+- `data/patterns/scanner_2/modelo_A/holes.json`:
+  - Reconstruido desde `data/recordings/ESTERILLA_5/frame_0047.png` con cells corregidas.
+  - Las 7 celdas que antes eran (CI=8, CJ=5/7/9/11/13/17/19) ahora son (CI=7, ...) y
+    generan expected en X=307 — donde los agujeros realmente se detectan.
+
+**Validacion pendiente:** ejecutar `run-folder` sobre ESTERILLA_5 y confirmar que missing
+baja de 7 a 0 o cerca en frames buenos.
