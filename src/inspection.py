@@ -68,6 +68,7 @@ class InspectionResult:
     frame_quality: str = "GOOD"    # "GOOD" | "LOW_QUALITY"
     machine_stop: bool = False          # True cuando una zona de agujeros faltantes supera el umbral
     frame_geometry_quality: str = "STABLE"   # "STABLE" | "UNSTABLE" (CHAPA zigzag excesivo)
+    image: "np.ndarray | None" = None        # frame crudo (antes del overlay) para guardar raw
     pattern_alignment_warn: bool = False     # True cuando el PATRON zigzaguea (desalineado)
     chapa_zigzag_std_px: float = 0.0
     chapa_zigzag_max_px: float = 0.0
@@ -980,6 +981,7 @@ def _inspect_bgr(
         pattern_center_zigzag_max_px=pattern_center_zigzag_max_px,
         sheet_tilt_deg=float(sheet_tilt_deg),
         tilt_warn=tilt_warn,
+        image=img_full,
     )
 
 
@@ -1133,11 +1135,17 @@ def inspect_folder(
 
 
 def save_result_images(result: InspectionResult) -> None:
-    """Guarda overlay en data/output/ok|nok y máscara en data/output/debug."""
+    """Guarda overlay en data/output/ok|nok y máscara en data/output/debug.
+    También guarda el frame crudo (_raw.jpg) junto al overlay para permitir toggle en el visor."""
     out_dir = Path("data/output/ok") if result.status == "OK" else Path("data/output/nok")
     dbg_dir = Path("data/output/debug")
     save_image(dbg_dir / f"{result.image_path.stem}_mask.png", result.mask)
     save_image(out_dir  / f"{result.image_path.stem}_overlay.png", result.overlay)
+    if result.image is not None:
+        raw_path = out_dir / f"{result.image_path.stem}_raw.jpg"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        import cv2 as _cv2
+        _cv2.imwrite(str(raw_path), result.image, [_cv2.IMWRITE_JPEG_QUALITY, 85])
 
 
 # Alias privado para compatibilidad interna

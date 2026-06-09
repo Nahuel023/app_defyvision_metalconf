@@ -82,9 +82,11 @@ class EventRecorder:
     # API pública
     # ------------------------------------------------------------------
 
-    def add_frame(self, frame: np.ndarray) -> None:
+    def add_frame(self, frame: np.ndarray,
+                  overlay: "Optional[np.ndarray]" = None) -> None:
         """
         Comprime el frame como JPEG y lo añade al buffer o al post-evento.
+        Si se pasa `overlay`, también guarda el overlay en post_{idx}_overlay.jpg.
         Rate-limited. Thread-safe. No bloquea (escrituras ~1 ms por frame).
         """
         now_m = time.monotonic()
@@ -121,6 +123,12 @@ class EventRecorder:
             post_dir, idx = post_write
             try:
                 (post_dir / f"post_{idx:04d}.jpg").write_bytes(data)
+                if overlay is not None:
+                    ok2, buf2 = cv2.imencode(
+                        ".jpg", overlay, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_q]
+                    )
+                    if ok2:
+                        (post_dir / f"post_{idx:04d}_overlay.jpg").write_bytes(bytes(buf2))
             except Exception as exc:
                 logger.error(f"[{self._id}] post-evento write: {exc}")
             return  # no buffering mientras se graba post-evento
@@ -143,6 +151,18 @@ class EventRecorder:
                 self._buf_bytes -= len(self._buf.popleft()[1])
             while self._buf and self._buf_bytes > self._max_buf_bytes:
                 self._buf_bytes -= len(self._buf.popleft()[1])
+
+    def is_post_event_active(self) -> bool:
+        """True si estamos dentro de la ventana de grabación post-evento."""
+        with self._lock:
+            return self._post_dir is not None and time.monotonic() < self._post_until
+
+    def get_post_event_dir(self) -> "Optional[Path]":
+        """Devuelve la carpeta del post-evento activo, o None si no hay."""
+        with self._lock:
+            if self._post_dir is not None and time.monotonic() < self._post_until:
+                return self._post_dir
+            return None
 
     def flush_event(self, event_type: str, reason: str = "") -> None:
         """

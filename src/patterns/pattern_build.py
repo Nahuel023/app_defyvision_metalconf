@@ -105,33 +105,38 @@ def build_pattern_from_image(
     dy = float(tolerances["grid_dy"]) if "grid_dy" in tolerances else estimate_spacing(ys, min_spacing=grid_min_sp)
     phase_x = estimate_phase(xs, dx)
     phase_y = estimate_phase(ys, dy)
-    cells = assign_cells(points, dx, dy, phase_x, phase_y)
+    # Determine stagger_x_odd before calling assign_cells so that odd-row holes
+    # are assigned the correct CI index (accounting for the phase shift between
+    # even and odd rows).  Use the config value when available; otherwise do a
+    # preliminary stagger-less assignment to separate even/odd rows, estimate the
+    # stagger from their X-phase difference, then re-assign with the correct stagger.
+    stagger_x_odd: float | None = None
+    stagger_override = tolerances.get("grid_stagger_x_odd")
+    if stagger_override is not None:
+        stagger_x_odd = float(stagger_override)
+        print(f"[build-pattern] Stagger (config): stagger_x_odd={stagger_x_odd:.1f}px")
+    else:
+        # First pass without stagger to get row parity
+        cells_tmp = assign_cells(points, dx, dy, phase_x, phase_y)
+        even_xs = np.array([points[i][0] for i, (_, cj) in enumerate(cells_tmp) if cj % 2 == 0])
+        odd_xs  = np.array([points[i][0] for i, (_, cj) in enumerate(cells_tmp) if cj % 2 == 1])
+        if len(even_xs) >= 4 and len(odd_xs) >= 4:
+            ph_even = estimate_phase(even_xs, dx)
+            ph_odd  = estimate_phase(odd_xs, dx)
+            stagger = float(((ph_odd - ph_even) + dx / 2.0) % dx - dx / 2.0)
+            if abs(stagger) > 2.0:
+                stagger_x_odd = stagger
+                print(f"[build-pattern] Stagger detectado: phase_even={ph_even:.1f} phase_odd={ph_odd:.1f}"
+                      f" stagger_x_odd={stagger:.1f}px")
+
+    cells = assign_cells(points, dx, dy, phase_x, phase_y,
+                         stagger_x_odd=stagger_x_odd if stagger_x_odd is not None else 0.0)
     n_total  = len(cells)
     n_unique = len(set(cells))
     n_dup    = n_total - n_unique
     print(f"[build-pattern] {len(points)} puntos  dx={dx:.1f} dy={dy:.1f}"
           f"  phase=({phase_x:.1f},{phase_y:.1f})")
     print(f"[build-pattern] Celdas totales: {n_total}  Unicas: {n_unique}  Duplicadas: {n_dup}")
-
-    # Stagger detection: if even-cj and odd-cj rows have different X-origins
-    # (e.g. Esterilla large/small hole alternation), compute the signed offset.
-    # If grid_stagger_x_odd is set in config, use that value directly (more reliable
-    # than phase estimation which is sensitive to which holes are near the frame edge).
-    even_xs = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 0])
-    odd_xs  = np.array([points[i][0] for i, (_, cj) in enumerate(cells) if cj % 2 == 1])
-    stagger_x_odd: float | None = None
-    stagger_override = tolerances.get("grid_stagger_x_odd")
-    if stagger_override is not None:
-        stagger_x_odd = float(stagger_override)
-        print(f"[build-pattern] Stagger (config): stagger_x_odd={stagger_x_odd:.1f}px")
-    elif len(even_xs) >= 4 and len(odd_xs) >= 4:
-        ph_even = estimate_phase(even_xs, dx)
-        ph_odd  = estimate_phase(odd_xs, dx)
-        stagger = float(((ph_odd - ph_even) + dx / 2.0) % dx - dx / 2.0)
-        if abs(stagger) > 2.0:  # only store if meaningful (>2px)
-            stagger_x_odd = stagger
-            print(f"[build-pattern] Stagger detectado: phase_even={ph_even:.1f} phase_odd={ph_odd:.1f}"
-                  f" stagger_x_odd={stagger:.1f}px")
     if n_dup > 0:
         from collections import Counter
         dup_cells = sorted(
