@@ -1065,6 +1065,7 @@ def inspect_folder(
         "tolerances": tolerances,
         "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
         "roi":        load_roi(model, scanner_id),
+        "ema_state":  {},
     }
 
     if ms_detector._enabled:
