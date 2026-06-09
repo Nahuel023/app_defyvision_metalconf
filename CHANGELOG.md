@@ -48,6 +48,39 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 140 - Microperforado: ROI recortado y patrón reconstruido desde grabación en vivo
+
+**Síntoma:** en modo inspección en vivo (run), el ROI previo (x=195, w=295) era demasiado
+ancho: incluía ~80px de metal sólido a la derecha de la zona perforada donde había marcas/
+arañazos que se detectaban como agujeros falsos → machine_stop → parada inmediata.
+Además, el `scanner_1/modelo_B/roi.json` previo (x=236, w=216) cortaba la parte izquierda
+de la chapa respecto a la posición real de la cámara en vivo.
+
+**Diagnóstico:** análisis de perfiles de columna en frames de `data/recordings/09-06-2026-MICROPERFORADO_1/`:
+- Zona de agujeros reales: frame x=210 a x=408 (ancho ~198px)
+- Metal sólido sin agujeros (izquierdo): x=88 a x=209
+- Metal sólido sin agujeros (derecho): x=409 a x=531
+- Borde naranja metálico (exterior): x=0-88 y x=532-640
+
+**Cambios:**
+- `data/patterns/scanner_1/modelo_B/roi.json`: `x=195,w=295` → `x=200,w=230` (x=200 a x=430)
+- `data/patterns/modelo_B/roi.json`: ídem — ahora live mode y análisis carpetas usan el mismo ROI
+- `data/patterns/scanner_1/modelo_B/holes.json`: reconstruido desde `frame_0003.png` de la grabación nueva
+  - 78 holes, image_size=[230,480], dx=36, dy=14, stagger_x_odd=-18, phase=(34,8)
+  - Antes: 121 holes (ROI viejo más ancho capturaba columnas fuera del área real)
+- `data/patterns/modelo_B/holes.json`: copiado del scanner_1 (idéntico)
+
+**Resultado:** live mode y análisis por carpetas ahora usan ROI y patrón idénticos.
+Los parámetros de detección ya eran idénticos (`load_tolerances("modelo_B")` en ambos modos).
+
+**Archivos modificados:**
+- `data/patterns/scanner_1/modelo_B/roi.json`
+- `data/patterns/modelo_B/roi.json`
+- `data/patterns/scanner_1/modelo_B/holes.json`
+- `data/patterns/modelo_B/holes.json`
+
+---
+
 #### Cambio 139 - Esterilla: CLAHE + adaptive_block_size 41→21 para ROI ampliada
 
 **Síntoma:** detección muy baja en esterilla (~10% detection_ratio). El ROI ahora mide 415px
