@@ -48,6 +48,22 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 138 - Esterilla: grid_compare_margin_x_px 30→40 para excluir borde izquierdo
+
+**Síntoma:** análisis de esterilla muestra ~17 faltantes constantes incluso con material bien posicionado.
+Los agujeros faltantes están concentrados en el lado IZQUIERDO del patrón.
+
+**Causa:** Cambio 135 expandió el ROI 10px a la izquierda (x=225→215) y bajé `grid_compare_margin_x_px`
+de 40→30. Con margen 30 se comparan posiciones esperadas muy cerca del borde izquierdo del ROI
+donde la iluminación no es uniforme y la detección no es confiable.
+
+**Cambio en `config/tolerancias.yaml` — modelo_A:**
+- `grid_compare_margin_x_px: 30.0 → 40.0` (vuelve al valor anterior a Cambio 135)
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 137 - Microperforado: excluir columna 6 del borde derecho con grid_compare_margin_x_px
 
 **Síntoma:** en producción real, la línea se detiene a los 3 frames con `machine_stop`.
