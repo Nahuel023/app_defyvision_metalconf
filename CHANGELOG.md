@@ -48,6 +48,24 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 137 - Esterilla scanner_2: ROI corregido para incluir todas las columnas
+
+**Diagnóstico:** el ROI anterior (x=215, w=275 → cubre x=215 a x=490) cortaba las 2-3
+columnas de la izquierda de la esterilla. La esterilla física ocupa aproximadamente x=125
+a x=505 en el frame completo de 640px. El patrón mostraba "COLUMNA 1,2,3,4,5 FALTANTES"
+con Delta≈-142px, lo que confirma que el detector nunca veía el lado izquierdo.
+
+**Cambio:** `data/patterns/scanner_2/modelo_A/roi.json`
+- Antes: `x=215, w=275` (cubre 215-490)
+- Ahora: `x=110, w=415` (cubre 110-525, margen de ~15px en cada borde del patrón)
+
+**PENDIENTE — acción manual obligatoria:**
+Después de este cambio el patrón `holes.json` es inválido (fue construido para el ROI viejo).
+Hay que reconstruirlo con una imagen de referencia limpia:
+```
+.\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/ref_s2.jpg" --scanner scanner_2
+```
+
 #### Cambio 135 - Esterilla: ROI de analisis mas ancha en scanner_2
 
 **Pedido:** ampliar bastante la zona analizada de `esterilla` porque estaban
