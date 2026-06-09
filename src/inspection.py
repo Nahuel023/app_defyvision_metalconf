@@ -840,8 +840,8 @@ def _inspect_bgr(
         _pat_mean_x = float(np.mean([x for x, _ in pattern.points]))
         _lateral_shift = _det_mean_x - _pat_mean_x
         if abs(_lateral_shift) > grid_lateral_shift_max_px:
-            _lateral_shift_warn = True
-            _lateral_shift_reason = f"DESVIACION LATERAL ({_lateral_shift:+.1f}px)"
+            machine_stop = True
+            _ms_reason = f"DESVIACION LATERAL ({_lateral_shift:+.1f}px)"
             final_status = "NOK"
 
     if machine_stop:

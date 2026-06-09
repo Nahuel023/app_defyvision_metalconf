@@ -48,6 +48,27 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 143 - Microperforado: parada inmediata por corrimiento lateral + parada por agujero único
+
+**Pedido:** Reactivar parada de máquina (machine_stop = True) inmediata para grandes corrimientos laterales (desalineación) como en commits más viejos, y solucionar el problema donde los agujeros faltantes al comienzo de la grabación microperforado no detenían la máquina.
+
+**Diagnóstico:**
+1. **Desalineación lateral:** Cambio 127 había degradado la desviación lateral a un simple estado warning NOK con racha temporal (no parada en un frame). Revertimos esto para que si supera `grid_lateral_shift_max_px` (25px en microperforado), actúe como parada inmediata de máquina.
+2. **Faltantes consecutivos:** El patrón del microperforado (modelo_B) es muy denso (espacio entre filas es de sólo 22.8px, menor a `2 * tol_xy_px` = 44px). Por tanto, cualquier agujero faltante tenía una detección vecina dentro del radio de exclusión y era clasificado como "near-miss" (y omitido por `ignore_near_miss: true`). Al mismo tiempo, al haber 1 solo agujero faltante por columna, no alcanzaba el umbral de `machine_stop_min_missing: 2`.
+
+**Cambios aplicados:**
+- `src/inspection.py`:
+  - Si el corrimiento lateral supera `grid_lateral_shift_max_px`, activa `machine_stop = True` y `_ms_reason = f"DESVIACION LATERAL..."` directamente (parada en un frame).
+- `config/tolerancias.yaml`:
+  - modelo_B `machine_stop_min_missing`: `2 → 1` (para detectar el punzón roto/agujero único).
+  - modelo_B `machine_stop_ignore_near_miss`: `true → false` (evita que la grilla tan densa enmascare la falla real).
+  - Comentarios corregidos para eliminar mojibakes y hacer pasar unit-tests.
+
+**Validación inmediata sobre `05-06-2026-MICROPERFORADO_1`:**
+- `machine_stop_frames` pasa de 0 a 13 frames (activados en frame_0005 a frame_0010 para columna 1, y frame_0015 a frame_0021 para columna 4).
+- 0 falsos positivos en los 115 frames restantes.
+- 17/17 pytest pasando correctamente.
+
 #### Cambio 142 - Esterilla: reconstruccion de patron desde frame_0113 para evaluar carpeta editada
 
 **Pedido:** reconstruir `scanner_2/modelo_A` usando como referencia
