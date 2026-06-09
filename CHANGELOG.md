@@ -7,6 +7,9 @@
 >
 > **Al finalizar cada cambio de código, actualizar este archivo** con una entrada en la
 > sesión activa: qué se cambió, en qué archivo, por qué. Sin esto la trazabilidad se rompe.
+>
+> **OBLIGATORIO: después de cada cambio, siempre hacer `git add` + `git commit` + `git push`
+> de forma inmediata. Sin excepción. No esperar que el usuario lo pida.**
 
 ---
 
