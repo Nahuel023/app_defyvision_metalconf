@@ -48,6 +48,26 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 136 - Analisis: mostrar ROI visible en overlays
+
+**Pedido:** activar una marca visible de la ROI en los analisis para saber con
+claridad donde esta poniendo el foco el sistema.
+
+**Cambio aplicado:**
+- `src/pipeline/annotate.py`
+  - nueva funcion `draw_roi_indicator()` que dibuja un rectangulo semitransparente
+    color cian con etiqueta `ROI` sobre el frame completo
+- `src/inspection.py`
+  - despues de recomponer el recorte analizado dentro del frame completo, ahora
+    llama a `draw_roi_indicator()` cuando existe ROI configurada
+
+**Resultado:** en los overlays de analisis ahora se ve claramente el recuadro de
+la zona inspeccionada, sin tocar la logica de deteccion ni el matching.
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
+
 #### Cambio 135 - Esterilla: ROI de analisis mas ancha en scanner_2
 
 **Pedido:** ampliar bastante la zona analizada de `esterilla` porque estaban
