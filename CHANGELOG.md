@@ -5736,3 +5736,30 @@ y patron correctos.
 
 **Validacion pendiente:** ejecutar `run-folder` sobre ESTERILLA_5 y confirmar que missing
 baja de 7 a 0 o cerca en frames buenos.
+
+---
+
+#### Cambio 140 - esterilla: revertir parametros deteccion a estado funcional original
+
+**Problema:** ciertos agujeros de esterilla no aparecen ni como verdes (detectados) ni como
+rojos X (missing en patron). La mascara binaria no los genera, son completamente invisibles.
+
+**Causa:** los cambios anteriores (Cambio 138-139) modificaron los parametros de deteccion
+de modelo_A intentando compensar el ROI ampliado (x=110, w=415), pero empeoraron la situacion:
+- `use_channel: r` — el canal R amplifica la zona de backlight rojo, elevando la media local
+  adaptativa cerca de los agujeros del borde izquierdo del material.
+- `use_clahe: true` con `clahe_tile=8` — tiles de 52×60px en zonas backlight/material distorsionan
+  el contraste local cerca de los agujeros en la transicion.
+- `adaptive_block_size: 21` — bloque pequenio captura mas ruido de iluminacion no uniforme.
+- `adaptive_c: 3.0` (positivo) — mas permisivo que antes, pero CLAHE+backlight dominan.
+
+**Decision:** restaurar exactamente los parametros que funcionaban antes de la expansion del ROI.
+Con `adaptive_c: -5.0` (negativo), threshold = media_local + 5, por lo que los agujeros solo
+se detectan si son significativamente mas brillantes que su vecindad — robusto incluso con
+zonas de backlight lateral porque esas zonas crean blobs grandes que filtran por area/circularidad.
+
+**Cambios en config/tolerancias.yaml (modelo_A):**
+- `use_channel: r` → `gray`
+- `use_clahe: true` → `false`
+- `adaptive_block_size: 21` → `41`
+- `adaptive_c: 3.0` → `-5.0`
