@@ -43,6 +43,33 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-09 — Tadeo + Claude
+
+#### Cambio 134 - Microperforado: revertir grid_lateral_shift_max_px 4.0 → 0.0
+
+**Síntoma:** en producción real, el sistema marcaba NOK casi instantáneamente (a los 5 frames)
+con badge "DESVIACION LATERAL". La línea paraba sin defecto real.
+
+**Causa raíz:** en Cambio 127 (commit 3c70229), al agregar el badge visual "DESVIACION LATERAL",
+se cambió `grid_lateral_shift_max_px: 0.0 → 4.0` para modelo_B. El umbral de 4px es demasiado
+ajustado: la posición natural del material en producción tiene una variación de ~15px respecto
+al origen del patrón (medido en Cambio 133). Resultado: cada frame activa DESVIACION LATERAL
+→ NOK → tras 5 consecutivos (consecutive_nok_frames=5) → machine_stop.
+
+La práctica validada correctamente (MICROPERFORADO_1, 137/137 OK) usaba `0.0` (desactivado).
+Cambio 124 había desactivado este parámetro deliberadamente para evitar paradas por variación
+normal de posición.
+
+**Cambio en `config/tolerancias.yaml` — modelo_B:**
+- `grid_lateral_shift_max_px: 4.0 → 0.0` (desactivado — comportamiento igual a la práctica)
+
+**Nota:** si en el futuro se quiere re-habilitar detección de corrimiento lateral real,
+usar un umbral de ≥20px (por encima de la variación natural de ~15px observada en producción).
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 ### Sesión 2026-06-08 — Tadeo + Claude (continuación 3)
 
 #### Cambio 133 - Microperforado: estabilizar líneas PATRON + lateral shift más limpio
