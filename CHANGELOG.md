@@ -72,6 +72,34 @@ facil la columna izquierda.
 
 ---
 
+#### Cambio 136 - Diálogo de parada a pantalla completa: bug fix + imagen más grande
+
+**Síntoma:** al ocurrir una detención de máquina (machine_stop=True, ya sea real o por "Simular
+parada"), el diálogo `MachineStopDialog` nunca aparecía. El frame con el defecto no se mostraba.
+
+**Causa raíz:** en `_handle_result` (`src/controller/scanner_controller.py`), cuando
+`machine_stop_triggered=True`, el método ejecutaba `return` antes de llegar al bloque
+`if self.on_result:` (línea ~825). El callback de UI nunca se disparaba → `_sig_stop_alert`
+nunca se emitía → `MachineStopDialog` nunca se creaba.
+
+**Cambios:**
+
+`src/controller/scanner_controller.py` línea ~806:
+- Añadida llamada `self.on_result(result, streak)` dentro del bloque `machine_stop_triggered`,
+  antes del `return`. Dispara el callback hacia la UI incluso cuando la parada es inmediata.
+
+`src/ui/operator.py` — `MachineStopDialog._build_ui()`:
+- Header: cambiado a `setFixedHeight(52)` y `padding:0 18px` (antes era solo `padding:18px`
+  que inflaba el alto sin control).
+- Motivo + botón ACEPTAR: combinados en un `QWidget` footer de altura fija 52px en una sola fila
+  horizontal. Elimina ~80px de espacio fijo que comía la imagen. La imagen ahora ocupa casi
+  toda la ventana maximizada.
+
+**Efecto:** el diálogo aparece correctamente tanto en paradas reales como al presionar
+"Simular parada". La imagen del frame defectuoso ocupa ~90% de la ventana.
+
+---
+
 #### Cambio 134 - Microperforado: revertir grid_lateral_shift_max_px 4.0 → 0.0
 
 **Síntoma:** en producción real, el sistema marcaba NOK casi instantáneamente (a los 5 frames)
