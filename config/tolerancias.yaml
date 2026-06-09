@@ -65,7 +65,7 @@ models:
     pattern_edge_margin_top_px: 5.0
     pattern_edge_margin_bottom_px: 5.0
     grid_compare_margin_px: 5.0
-    grid_compare_margin_x_px: 40.0
+    grid_compare_margin_x_px: 30.0
     grid_compare_margin_y_px: 40.0
     pattern_use_clahe: false
     edge_centering_bands: 16

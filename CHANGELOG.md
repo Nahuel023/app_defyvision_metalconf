@@ -48,6 +48,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 135 - Esterilla: ROI de analisis mas ancha en scanner_2
+
+**Pedido:** ampliar bastante la zona analizada de `esterilla` porque estaban
+quedando muchos agujeros afuera del recorte actual.
+
+**Cambio aplicado:**
+- `data/patterns/scanner_2/modelo_A/roi.json`
+  - `x=225, w=255 -> x=215, w=275`
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - se movio el patron `+10 px` en X y se actualizo `image_size` a `275x480`
+    para mantener consistencia geometrica con la ROI mas ancha
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `grid_compare_margin_x_px: 40.0 -> 30.0`
+
+**Motivo:** abrir la ROI sin mover el patron dejaba descalzada la comparacion.
+Con este ajuste, el recorte y `holes.json` vuelven a hablar el mismo sistema de
+coordenadas, y ademas se afloja un poco el filtro lateral para no comerse tan
+facil la columna izquierda.
+
+**Archivos modificados:** `data/patterns/scanner_2/modelo_A/roi.json`,
+`data/patterns/scanner_2/modelo_A/holes.json`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 134 - Microperforado: revertir grid_lateral_shift_max_px 4.0 → 0.0
 
 **Síntoma:** en producción real, el sistema marcaba NOK casi instantáneamente (a los 5 frames)
