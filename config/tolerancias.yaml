@@ -18,10 +18,10 @@ clahe_tile: 8
 use_otsu: true
 continuous_position_threshold: 0.0
 max_inspection_hz: 15
-# â”€â”€ Buffer circular de frames OK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Guarda las Ãºltimas ok_buffer_count inspecciones correctas (con overlay verde)
-# en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mÃ¡s viejas.
-# Ãštil para ver cÃ³mo estÃ¡ funcionando la detecciÃ³n sin errores.
+# ---------------- Buffer circular de frames OK ----------------
+# Guarda las ultimas ok_buffer_count inspecciones correctas (con overlay verde)
+# en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mas viejas.
+# Util para ver como esta funcionando la deteccion sin errores.
 ok_buffer_enabled: true
 ok_buffer_count: 200          # frames a mantener por scanner (~20 MB a 100 KB/frame)
 ok_buffer_every: 1            # guardar todos los frames OK
@@ -144,9 +144,9 @@ models:
     continuous_position_threshold: 4.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 3
-    machine_stop_min_missing: 2
+    machine_stop_min_missing: 1
     machine_stop_same_zone_px: 35.0
-    machine_stop_ignore_near_miss: true
+    machine_stop_ignore_near_miss: false
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
     grid_lateral_shift_max_px: 25.0
