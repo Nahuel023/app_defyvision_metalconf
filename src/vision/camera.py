@@ -421,7 +421,10 @@ class Camera:
         # maxsize=2 descarta frames viejos si el worker no da abasto (prefiere frescura).
         _raw_q: queue.Queue = queue.Queue(maxsize=2)
 
+        _first_frame_logged = False
+
         def _decode_worker() -> None:
+            nonlocal _first_frame_logged
             while True:
                 item = _raw_q.get()
                 if item is None:
@@ -435,6 +438,12 @@ class Camera:
                     logger.warning("Camera %s: frame duplicado detectado",
                                    self._source_label())
                     continue
+                if not _first_frame_logged:
+                    logger.info(
+                        "Camera %s: primer snapshot recibido %dx%d",
+                        self._source_label(), frame.shape[1], frame.shape[0],
+                    )
+                    _first_frame_logged = True
                 with self._lock:
                     self._frame       = frame
                     self._snapshot_ok = True

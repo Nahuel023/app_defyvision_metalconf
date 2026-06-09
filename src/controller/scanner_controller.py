@@ -661,6 +661,11 @@ class ScannerController:
             if self._recorder is not None:
                 self._recorder.add_frame(frame)
 
+            if frame_counter == 1:
+                logger.info(
+                    f"[{self._id}] primer frame inspeccionado: {frame.shape[1]}x{frame.shape[0]}px"
+                )
+
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             pos_thr = self._cont_pos_thr
