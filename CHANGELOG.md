@@ -48,6 +48,27 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 137 - Microperforado: excluir columna 6 del borde derecho con grid_compare_margin_x_px
+
+**Síntoma:** en producción real, la línea se detiene a los 3 frames con `machine_stop`.
+En el modo análisis (service UI) el mismo modelo funciona bien porque `machine_stop=True` no
+detiene la FSM del scanner, solo queda como flag en el resultado.
+
+**Causa raíz:** el patrón `holes.json` (imagen_size=[216,480]) tiene 14 puntos de la columna 6
+en x≈197-203px (borde derecho del crop ROI de 216px). Esos agujeros están en la zona de
+transición/retroiluminación derecha y la cámara nunca los detecta consistentemente.
+Con `machine_stop_track_by_grid: true` y `machine_stop_min_missing: 3`: la misma columna
+falta en ≥3 frames consecutivos → machine_stop → STOPPED → línea parada al instante.
+
+**Cambio en `config/tolerancias.yaml` — modelo_B:**
+- Añadido `grid_compare_margin_x_px: 22.0`
+  → excluye posiciones esperadas con x > 216-22=194px (toda la columna 6 x≈197-203)
+  → elimina falsos missing estructurales del borde derecho sin afectar la detección real
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 136 - Analisis: mostrar ROI visible en overlays
 
 **Pedido:** activar una marca visible de la ROI en los analisis para saber con
