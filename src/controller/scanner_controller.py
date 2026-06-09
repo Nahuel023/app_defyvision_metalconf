@@ -665,6 +665,25 @@ class ScannerController:
                 logger.info(
                     f"[{self._id}] primer frame inspeccionado: {frame.shape[1]}x{frame.shape[0]}px"
                 )
+                # Guardar frame diagnóstico con ROI dibujado para verificar calibración
+                try:
+                    from src.patterns.roi import load_roi
+                    _roi = load_roi(model, self._id)
+                    _diag = frame.copy()
+                    if _roi is not None:
+                        cv2.rectangle(_diag,
+                                      (_roi.x, _roi.y),
+                                      (_roi.x + _roi.w, _roi.y + _roi.h),
+                                      (0, 255, 0), 2)
+                        cv2.putText(_diag, f"ROI x={_roi.x} w={_roi.w}",
+                                    (_roi.x, max(20, _roi.y - 5)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+                    _diag_path = Path("data/output") / f"roi_diag_{self._id}.jpg"
+                    _diag_path.parent.mkdir(parents=True, exist_ok=True)
+                    cv2.imwrite(str(_diag_path), _diag)
+                    logger.info(f"[{self._id}] frame diagnóstico ROI guardado: {_diag_path}")
+                except Exception as _e:
+                    logger.warning(f"[{self._id}] no se pudo guardar diagnóstico ROI: {_e}")
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
