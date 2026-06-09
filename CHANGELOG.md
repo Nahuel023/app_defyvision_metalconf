@@ -66,6 +66,12 @@ base de analisis para no tener que perseguir diferencias invisibles entre ambos.
 usan la misma fuente de verdad de tolerancias/ROI/patron y tambien conservan el mismo
 estado suavizado de alineacion entre frames.
 
+**Regla permanente:** a partir de este cambio, cualquier ajuste de ROI, tolerancias,
+preprocess, lineas de borde, alineacion o matching debe impactar por igual en
+ANALISIS, modo inspeccion y pruebas equivalentes. No se debe mantener logica ni
+parametros separados entre esos modos, salvo la compuerta propia del avance real
+del material y la FSM de produccion.
+
 **Archivos modificados:** `src/inspection.py`, `src/ui/service.py`
 
 ---
