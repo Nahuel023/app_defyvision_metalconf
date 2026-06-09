@@ -48,7 +48,7 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
-#### Cambio 137 - Esterilla scanner_2: ROI corregido para incluir todas las columnas
+#### Cambio 138 - Esterilla scanner_2: ROI corregido para incluir todas las columnas
 
 **Diagnóstico:** el ROI anterior (x=215, w=275 → cubre x=215 a x=490) cortaba las 2-3
 columnas de la izquierda de la esterilla. La esterilla física ocupa aproximadamente x=125
@@ -65,6 +65,28 @@ Hay que reconstruirlo con una imagen de referencia limpia:
 ```
 .\.venv\Scripts\python.exe -m src.main build-pattern --model modelo_A --img "data/input/ref_s2.jpg" --scanner scanner_2
 ```
+
+---
+
+#### Cambio 136 - Analisis: mostrar ROI visible en overlays
+
+**Pedido:** activar una marca visible de la ROI en los analisis para saber con
+claridad donde esta poniendo el foco el sistema.
+
+**Cambio aplicado:**
+- `src/pipeline/annotate.py`
+  - nueva funcion `draw_roi_indicator()` que dibuja un rectangulo semitransparente
+    color cian con etiqueta `ROI` sobre el frame completo
+- `src/inspection.py`
+  - despues de recomponer el recorte analizado dentro del frame completo, ahora
+    llama a `draw_roi_indicator()` cuando existe ROI configurada
+
+**Resultado:** en los overlays de analisis ahora se ve claramente el recuadro de
+la zona inspeccionada, sin tocar la logica de deteccion ni el matching.
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
 
 #### Cambio 135 - Esterilla: ROI de analisis mas ancha en scanner_2
 

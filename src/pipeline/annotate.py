@@ -319,6 +319,37 @@ def draw_blur_indicator(
     return img
 
 
+def draw_roi_indicator(
+    img: np.ndarray,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    label: str = "ROI",
+) -> np.ndarray:
+    """Draw the analysis ROI on the full-frame overlay."""
+    out = img.copy()
+    x1, y1 = max(0, int(x)), max(0, int(y))
+    x2, y2 = min(out.shape[1] - 1, int(x + w)), min(out.shape[0] - 1, int(y + h))
+    if x1 >= x2 or y1 >= y2:
+        return out
+
+    layer = out.copy()
+    cv2.rectangle(layer, (x1, y1), (x2, y2), (0, 255, 255), -1)
+    cv2.addWeighted(layer, 0.08, out, 0.92, 0, out)
+    cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale, thick = 0.55, 2
+    (tw, th), bl = cv2.getTextSize(label, font, scale, thick)
+    by2 = min(out.shape[0] - 1, y1 + th + bl + 8)
+    bx2 = min(out.shape[1] - 1, x1 + tw + 14)
+    cv2.rectangle(out, (x1, y1), (bx2, by2), (0, 120, 120), -1)
+    cv2.rectangle(out, (x1, y1), (bx2, by2), (0, 255, 255), 1)
+    cv2.putText(out, label, (x1 + 7, y1 + th + 3), font, scale, (255, 255, 255), thick, cv2.LINE_AA)
+    return out
+
+
 def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
