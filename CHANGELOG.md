@@ -48,6 +48,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-09 — Tadeo + Claude
 
+#### Cambio 142 - Esterilla: reconstruccion de patron desde frame_0113 para evaluar carpeta editada
+
+**Pedido:** reconstruir `scanner_2/modelo_A` usando como referencia
+`C:\Users\DefyC\Downloads\05-06-2026-PATRONES EDITADOS\05-06-2026-ESTERILLA_1\frame_0113.png`
+y medir como se comporta la misma carpeta contra ese patron nuevo.
+
+**Cambio aplicado:**
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - reconstruido con ROI activa `x=110, w=415`
+  - build resultante: `97 puntos`, `93` celdas unicas tras depurar `4` duplicadas
+  - `dx=39`, `dy=21`, `phase=(12,2)`, `stagger_x_odd=20`
+
+**Validacion inmediata sobre `05-06-2026-ESTERILLA_1`:**
+- Antes de reconstruir:
+  - `raw_ok=33`, `raw_nok=100`
+  - `temporal_ok=123`, `temporal_nok=10`
+  - missing estructural concentrado en varias celdas fijas del patron
+- Despues de reconstruir con `frame_0113`:
+  - `raw_ok=0`, `raw_nok=133`
+  - `temporal_ok=68`, `temporal_nok=65`
+  - `machine_stop_frames=6`
+  - nuevas columnas/celdas con faltante estructural al 95-100%
+
+**Conclusion:** este frame `0113` NO sirve como nueva referencia de patron para esa
+carpeta. La reconstruccion empeora la estabilidad de forma fuerte y genera un baseline
+de missing todavia mas alto que el patron anterior.
+
+**Archivos modificados:** `data/patterns/scanner_2/modelo_A/holes.json`
+
+---
+
 #### Cambio 141 - Unificacion de contexto entre analisis e inspeccion
 
 **Pedido:** que `ANALISIS` y `modo inspeccion` usen exactamente el mismo contexto
