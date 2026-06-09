@@ -39,7 +39,7 @@ models:
     edge_align_enabled: false
     polarity: bright
     threshold: 180
-    use_channel: gray
+    use_channel: r
     use_otsu: false
     use_clahe: true
     clahe_clip: 3.0
