@@ -1841,7 +1841,7 @@ class RecordingTab(QWidget):
         sc_chip.setStyleSheet(CHIP_SS)
         sc_row.addWidget(sc_chip)
         self._roi_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
-        self._roi_scanner_combo.currentTextChanged.connect(self._refresh_current_roi_label)
+        self._roi_scanner_combo.currentTextChanged.connect(self._on_roi_scanner_changed)
         sc_row.addWidget(self._roi_scanner_combo)
         sc_row.addStretch()
         lay.addLayout(sc_row)
@@ -1961,6 +1961,24 @@ class RecordingTab(QWidget):
         return grp
 
     # ------------------------------------------------------------------ ROI handlers
+
+    def _on_roi_scanner_changed(self) -> None:
+        """Al cambiar el scanner: actualiza la etiqueta y recarga bordes sobre la imagen actual."""
+        self._refresh_current_roi_label()
+        if self._roi_frame is None:
+            return
+        from src.patterns.roi import load_roi
+        from src.utils.model_names import to_internal as _to_int
+        scanner_id = self._roi_scanner_combo.currentText() or None
+        roi = load_roi(_to_int(self._model_combo.currentText()), scanner_id)
+        W = self._roi_frame.shape[1]
+        if roi:
+            self._roi_lx = roi.x
+            self._roi_rx = roi.x + roi.w
+        else:
+            self._roi_lx = 0
+            self._roi_rx = W
+        self._roi_redraw()
 
     def _refresh_current_roi_label(self) -> None:
         from src.patterns.roi import load_roi
