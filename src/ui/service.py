@@ -3374,6 +3374,32 @@ class RecordingTab(QWidget):
 # Evidencias / Eventos
 # ==================================================================
 
+class _EvOverlayWorker(QThread):
+    """Corre inspect_image en background y emite (idx, QPixmap) con el overlay."""
+    done = pyqtSignal(int, QPixmap)
+
+    def __init__(self, idx: int, path: Path, model: str, scanner_id: str, parent=None):
+        super().__init__(parent)
+        self._idx = idx
+        self._path = path
+        self._model = model
+        self._scanner_id = scanner_id
+
+    def run(self):
+        try:
+            from src.inspection import inspect_image
+            result = inspect_image(self._model, str(self._path),
+                                   scanner_id=self._scanner_id)
+            ov = result.overlay
+            if ov is not None:
+                rgb = cv2.cvtColor(ov, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                self.done.emit(self._idx, QPixmap.fromImage(qi))
+        except Exception:
+            pass
+
+
 @dataclass
 class _EventEntry:
     folder: Path
@@ -3402,6 +3428,9 @@ class EventBrowserTab(QWidget):
         self._current_idx = 0
         self._px_cache: dict[int, QPixmap] = {}
         self._px_cache_max = 18
+        self._show_overlay: bool = False
+        self._ov_cache: dict[int, QPixmap] = {}
+        self._overlay_worker: Optional[_EvOverlayWorker] = None
         self._build_ui()
         self._refresh_events()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -3605,6 +3634,13 @@ class EventBrowserTab(QWidget):
         self._btn_event_next10 = _nav_btn("+10  >>", w=74, fs=11)
         self._btn_event_last = _nav_btn(">|", w=40, pad=0)
         self._btn_event_fit = _nav_btn("Ajustar", w=86, bg="#0f766e", bd="#0f766e", hv="#0d9488", fs=11)
+        self._btn_event_overlay = _nav_btn("OVERLAY", w=96, fs=11)
+        self._btn_event_overlay.setCheckable(True)
+        self._btn_event_overlay.setChecked(False)
+        self._btn_event_overlay.setStyleSheet(
+            self._btn_event_overlay.styleSheet()
+            + f"QPushButton:checked {{ background:{_ACCENT}; color:#ffffff; border-color:{_ACCENT}; }}"
+        )
 
         for btn in (
             self._btn_event_first, self._btn_event_prev10, self._btn_event_prev,
@@ -3619,6 +3655,7 @@ class EventBrowserTab(QWidget):
         self._btn_event_next10.clicked.connect(lambda: self._show_event_frame(self._current_idx + 10))
         self._btn_event_last.clicked.connect(lambda: self._show_event_frame(len(self._frame_paths) - 1))
         self._btn_event_fit.clicked.connect(lambda: self._event_img_view.fit())
+        self._btn_event_overlay.clicked.connect(self._on_overlay_toggled)
 
         nav.addWidget(self._btn_event_first)
         nav.addWidget(self._btn_event_prev10)
@@ -3631,6 +3668,7 @@ class EventBrowserTab(QWidget):
         nav.addWidget(self._btn_event_last)
         nav.addSpacing(10)
         nav.addWidget(self._btn_event_fit)
+        nav.addWidget(self._btn_event_overlay)
         nav.addStretch()
         return nav
 
@@ -3777,6 +3815,10 @@ class EventBrowserTab(QWidget):
         self._frame_paths = self._discover_event_frames(entry.folder)
         self._current_idx = 0
         self._px_cache.clear()
+        self._ov_cache.clear()
+        if self._overlay_worker is not None and self._overlay_worker.isRunning():
+            self._overlay_worker.done.disconnect()
+            self._overlay_worker.quit()
 
         self._event_title_lbl.setText(entry.name)
         dt_txt = entry.event_dt.strftime("%d-%m-%Y %H:%M:%S") if entry.event_dt else "-"
@@ -3818,25 +3860,33 @@ class EventBrowserTab(QWidget):
         idx = max(0, min(idx, len(self._frame_paths) - 1))
         self._current_idx = idx
 
-        pxm = self._px_cache.get(idx)
-        if pxm is None:
-            bgr = cv2.imread(str(self._frame_paths[idx]))
-            if bgr is not None:
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                h, w = rgb.shape[:2]
-                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
-                pxm = QPixmap.fromImage(qi)
-                self._px_cache[idx] = pxm
-                if len(self._px_cache) > self._px_cache_max:
-                    keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
-                    for key in keys[self._px_cache_max // 2:]:
-                        del self._px_cache[key]
+        # ── Overlay mode ──────────────────────────────────────────────
+        if self._show_overlay and self._current_entry is not None:
+            ov_pxm = self._ov_cache.get(idx)
+            if ov_pxm is not None:
+                prev = self._event_img_view.current_pixmap()
+                needs_fit = prev is None or prev.size() != ov_pxm.size()
+                self._event_img_view.set_pixmap(ov_pxm, auto_fit=needs_fit)
+                self._events_status_lbl.setText("Overlay")
             else:
-                self._event_img_view.clear("No se pudo leer la imagen seleccionada")
-                self._events_status_lbl.setText(
-                    f"Frame ilegible: {self._frame_paths[idx].name}"
-                )
+                # Mostrar frame crudo mientras se analiza
+                raw_pxm = self._load_raw_pixmap(idx)
+                if raw_pxm is not None:
+                    prev = self._event_img_view.current_pixmap()
+                    needs_fit = prev is None or prev.size() != raw_pxm.size()
+                    self._event_img_view.set_pixmap(raw_pxm, auto_fit=needs_fit)
+                self._events_status_lbl.setText("Analizando…")
+                self._launch_overlay_worker(idx)
+            self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
+            self._frame_file_lbl.setText(self._frame_paths[idx].name)
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setValue(idx)
+            self._frame_slider.blockSignals(False)
+            self._update_event_nav_state()
+            return
 
+        # ── Raw mode ──────────────────────────────────────────────────
+        pxm = self._load_raw_pixmap(idx)
         if pxm is not None:
             prev = self._event_img_view.current_pixmap()
             needs_fit = prev is None or prev.size() != pxm.size()
@@ -3844,6 +3894,9 @@ class EventBrowserTab(QWidget):
             self._events_status_lbl.setText(
                 f"Mostrando {self._current_entry.name if self._current_entry else '-'}"
             )
+        else:
+            self._event_img_view.clear("No se pudo leer la imagen seleccionada")
+            self._events_status_lbl.setText(f"Frame ilegible: {self._frame_paths[idx].name}")
 
         self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
         self._frame_file_lbl.setText(self._frame_paths[idx].name)
@@ -3851,6 +3904,54 @@ class EventBrowserTab(QWidget):
         self._frame_slider.setValue(idx)
         self._frame_slider.blockSignals(False)
         self._update_event_nav_state()
+
+    def _load_raw_pixmap(self, idx: int) -> Optional[QPixmap]:
+        pxm = self._px_cache.get(idx)
+        if pxm is None:
+            bgr = cv2.imread(str(self._frame_paths[idx]))
+            if bgr is None:
+                return None
+            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            h, w = rgb.shape[:2]
+            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            pxm = QPixmap.fromImage(qi)
+            self._px_cache[idx] = pxm
+            if len(self._px_cache) > self._px_cache_max:
+                keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
+                for key in keys[self._px_cache_max // 2:]:
+                    del self._px_cache[key]
+        return pxm
+
+    def _launch_overlay_worker(self, idx: int) -> None:
+        if self._overlay_worker is not None and self._overlay_worker.isRunning():
+            self._overlay_worker.done.disconnect()
+            self._overlay_worker.quit()
+        scanner_id = self._current_entry.scanner_id if self._current_entry else ""
+        model = self._scanner_model(scanner_id)
+        worker = _EvOverlayWorker(idx, self._frame_paths[idx], model, scanner_id)
+        worker.done.connect(self._on_overlay_done)
+        self._overlay_worker = worker
+        worker.start()
+
+    def _on_overlay_done(self, idx: int, pxm: QPixmap) -> None:
+        self._ov_cache[idx] = pxm
+        if idx == self._current_idx and self._show_overlay:
+            prev = self._event_img_view.current_pixmap()
+            needs_fit = prev is None or prev.size() != pxm.size()
+            self._event_img_view.set_pixmap(pxm, auto_fit=needs_fit)
+            self._events_status_lbl.setText("Overlay")
+
+    def _on_overlay_toggled(self) -> None:
+        self._show_overlay = self._btn_event_overlay.isChecked()
+        self._show_event_frame(self._current_idx)
+
+    def _scanner_model(self, scanner_id: str) -> str:
+        try:
+            import yaml
+            cfg = yaml.safe_load((_ROOT / "config" / "io_map.yaml").read_text(encoding="utf-8"))
+            return cfg.get(scanner_id, {}).get("model", "modelo_A")
+        except Exception:
+            return "modelo_A"
 
     def _on_slider_changed(self, value: int) -> None:
         self._show_event_frame(value)

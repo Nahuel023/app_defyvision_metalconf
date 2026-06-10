@@ -19,8 +19,8 @@ import shutil
 import yaml
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon, QImage, QPixmap
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -143,36 +143,102 @@ class _ThumbLoader(QThread):
             self.thumb_ready.emit(i, pix)
 
 
-# ── Widget: visor de un único frame a pantalla ────────────────────────────────
+# ── Widget: visor de un único frame con zoom y pan ───────────────────────────
 
-class _FrameView(QLabel):
+class ZoomableFrameView(QWidget):
+    """Visor de frame con zoom (rueda) y pan (arrastrar). API: set_image / clear_image / fit."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._img: Optional[np.ndarray] = None
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet(f"background:#000000;border-radius:6px;border:2px solid {_BORDER};")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._pixmap: Optional[QPixmap] = None
+        self._scale: float = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self._drag_start: Optional[QPointF] = None
+        self._drag_offset: Optional[QPointF] = None
         self.setMinimumSize(400, 260)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(f"background:#000000;border-radius:6px;border:2px solid {_BORDER};")
+        self.setMouseTracking(True)
 
     def set_image(self, img: np.ndarray) -> None:
-        self._img = img
-        self._update()
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w = rgb.shape[:2]
+        qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        self._pixmap = QPixmap.fromImage(qimg)
+        self.fit()
 
     def clear_image(self) -> None:
-        self._img = None
-        self.clear()
+        self._pixmap = None
+        self.update()
+
+    def fit(self) -> None:
+        if self._pixmap is None:
+            return
+        w, h = self.width(), self.height()
+        pw, ph = self._pixmap.width(), self._pixmap.height()
+        if pw == 0 or ph == 0 or w == 0 or h == 0:
+            return
+        self._scale = min(w / pw, h / ph)
+        self._offset = QPointF(
+            (w - pw * self._scale) / 2.0,
+            (h - ph * self._scale) / 2.0,
+        )
+        self.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update()
+        if self._pixmap is not None:
+            self.fit()
 
-    def _update(self):
-        if self._img is None:
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QColor("#000000"))
+        if self._pixmap is not None:
+            pw = self._pixmap.width() * self._scale
+            ph = self._pixmap.height() * self._scale
+            target = QRectF(self._offset.x(), self._offset.y(), pw, ph)
+            painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
+            painter.setPen(QColor(_MUTED))
+            painter.setFont(QFont("Segoe UI", 9))
+            badge = f"{int(round(self._scale * 100))}%"
+            painter.drawText(self.rect().adjusted(0, 4, -6, 0),
+                             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight, badge)
+
+    def wheelEvent(self, event) -> None:
+        if self._pixmap is None:
             return
-        rect = self.contentsRect()
-        w = max(100, rect.width() - 4)
-        h = max(80, rect.height() - 4)
-        self.setPixmap(_bgr_to_pixmap(self._img, w, h))
+        delta = event.angleDelta().y()
+        factor = 1.15 if delta > 0 else (1.0 / 1.15)
+        new_scale = max(0.05, min(self._scale * factor, 30.0))
+        cursor = QPointF(event.position())
+        img_x = (cursor.x() - self._offset.x()) / self._scale
+        img_y = (cursor.y() - self._offset.y()) / self._scale
+        self._scale = new_scale
+        self._offset = QPointF(
+            cursor.x() - img_x * self._scale,
+            cursor.y() - img_y * self._scale,
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = QPointF(event.position())
+            self._drag_offset = QPointF(self._offset)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start is not None and self._drag_offset is not None:
+            delta = event.position() - self._drag_start
+            self._offset = self._drag_offset + delta
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = None
+            self._drag_offset = None
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.fit()
 
 
 def _get_model_for_scanner(scanner_id: str) -> str:
@@ -239,7 +305,7 @@ class _EventNavPanel(QWidget):
         root.addWidget(self._info_lbl)
 
         # ── Frame grande ──────────────────────────────────────────────
-        self._view = _FrameView()
+        self._view = ZoomableFrameView()
         root.addWidget(self._view, stretch=1)
 
         # ── Controles de navegación ───────────────────────────────────
@@ -288,6 +354,16 @@ class _EventNavPanel(QWidget):
         )
         self._overlay_btn.clicked.connect(self._toggle_overlay)
         nav.addWidget(self._overlay_btn)
+
+        self._fit_btn = QPushButton("⊡  Ajustar")
+        self._fit_btn.setMinimumHeight(36)
+        self._fit_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ border-color:#0f766e; color:{_TEXT}; }}"
+        )
+        self._fit_btn.clicked.connect(lambda: self._view.fit())
+        nav.addWidget(self._fit_btn)
 
         root.addLayout(nav)
 
