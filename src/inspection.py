@@ -233,6 +233,9 @@ def _inspect_bgr(
     # puede DETENER LA MAQUINA (parada inmediata). Los faltantes, en cambio, solo paran
     # por persistencia. Default False; se activa por modelo.
     machine_stop_on_tilt   = bool(tolerances.get("machine_stop_on_tilt", False))
+    machine_stop_require_frame_nok = bool(
+        tolerances.get("machine_stop_require_frame_nok", False)
+    )
     # Desalineacion del patron: si la fraccion de esperados sin matchear (tras el mejor
     # ajuste) supera este ratio, es un corrimiento/cizalla del patron → DETENER MAQUINA.
     pattern_desalign_enabled       = bool(tolerances.get("pattern_desalign_enabled", False))
@@ -752,14 +755,27 @@ def _inspect_bgr(
     machine_stop = False
     _ms_reason   = "AGUJERO PERSISTENTE FALTANTE"
     if _ms_detector is not None:
+        _ms_missing_points = report.missing_points
+        _ms_missing_cells = report.missing_cells
+        _ms_near_miss_pairs = near_miss_pairs
+        if (
+            machine_stop_require_frame_nok
+            and frame_missing_nok_threshold is not None
+            and report.missing <= frame_missing_nok_threshold
+        ):
+            # For microperforado, do not accumulate machine-stop evidence from
+            # low-severity missing bursts that are still below the frame NOK gate.
+            _ms_missing_points = []
+            _ms_missing_cells = []
+            _ms_near_miss_pairs = []
         # FALTANTES: solo paran por PERSISTENCIA (>=2 frames). Los frames inclinados se
         # pasan como baja calidad para que la inclinacion (que genera muchos faltantes
         # que NO son punzon roto) no contamine ni dispare la parada por faltantes.
         # Un solo frame con faltantes NUNCA para (el metal pudo correrse).
         _ms_fq = "LOW_QUALITY" if tilt_warn else frame_quality
         machine_stop, _ms_positions = _ms_detector.update(
-            report.missing_points, near_miss_pairs, _ms_fq, img_h,
-            missing_cells=report.missing_cells,
+            _ms_missing_points, _ms_near_miss_pairs, _ms_fq, img_h,
+            missing_cells=_ms_missing_cells,
         )
         if machine_stop:
             cols = _ms_detector.triggered_columns

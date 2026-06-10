@@ -48,6 +48,71 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 156 - Microperforado: machine_stop solo acumula evidencia en frames severos
+
+**Pedido:** seguir corrigiendo la carpeta actualizada de `scanner_1` porque, aun con
+mejor matching, seguian apareciendo muchos NOK falsos por parada de maquina.
+
+**Diagnostico:**
+- el refinamiento afin mejoraba la asignacion de grilla, pero el `run-folder` seguia
+  mostrando muchas paradas porque `machine_stop` acumulaba rachas de faltantes chicos
+  y persistentes en columnas de borde
+- en otras palabras:
+  - los agujeros ya no estaban tan mal matcheados como antes
+  - pero la logica de parada seguia interpretando esas rachas chicas como punzon roto
+- para `modelo_B`, eso era demasiado agresivo en esta carpeta nueva
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - nueva compuerta `machine_stop_require_frame_nok`
+  - si esta activa y el frame no supera `frame_missing_nok_threshold`, ese frame NO
+    aporta evidencia al detector persistente de `machine_stop`
+- `config/tolerancias.yaml` -> `models.modelo_B`
+  - `machine_stop_require_frame_nok: true`
+
+**Resultado esperado:** microperforado deja de convertir pequenos faltantes falsos
+repetidos en una parada de maquina, pero sigue permitiendo `machine_stop` cuando los
+frames ya vienen con un nivel de faltantes realmente severo.
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 155 - Microperforado: activar refinamiento afin de grilla para scanner_1 actualizado
+
+**Pedido:** revisar la carpeta
+`C:\\Users\\DefyC\\Downloads\\10-06-2026-MICROPERFORADO\\10-06-2026-MICROPERFORADO_5_SCANNER_1`
+porque seguia habiendo `missing` falsos, agujeros presentes que el sistema no tomaba
+como validos y bordes de patron inconsistentes.
+
+**Diagnostico:**
+- se hizo `git pull --rebase origin master` y no habia cambios nuevos
+- sobre esa carpeta nueva, el estado actual daba:
+  - `107` frames totales
+  - `64 raw OK / 43 raw NOK`
+  - `73 temporal OK / 34 temporal NOK`
+- comparando overlays y mascaras, los agujeros estaban realmente detectados; el fallo
+  no estaba en threshold/contornos sino en la **asignacion de la grilla esperada**
+- evidencia visual:
+  - la mascara de `frame_0008` mostraba los agujeros presentes
+  - el overlay marcaba `missing` en el medio del patron aunque los circulos existian
+- pruebas en memoria sobre la carpeta completa:
+  - activar `grid_affine_refinement` baja `raw_nok` de `43 -> 22`
+  - con eso, subir `frame_missing_nok_threshold` de `5 -> 6` baja `raw_nok` a `10`
+    sin tocar el patron ni el ROI
+
+**Cambio aplicado (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `grid_affine_refinement: false -> true`
+- `frame_missing_nok_threshold: 5 -> 6`
+
+**Resultado esperado:** la grilla de microperforado acompana mejor pequenas
+deformaciones / inclinaciones locales del material en `scanner_1`, reduciendo los
+falsos `missing` donde los agujeros ya estaban detectados pero quedaban mal asignados.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 154 - Microperforado: recuperar estabilidad de matching en scanner_1 sin tocar el patron
 
 **Pedido:** revisar por que `scanner_1` con microperforado volvio a marcar muchos
