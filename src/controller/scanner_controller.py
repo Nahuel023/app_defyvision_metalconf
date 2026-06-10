@@ -40,7 +40,7 @@ from src.plc.io_map import IOMap
 from src.utils.config import load_tolerances
 from src.utils.state import OperationMode, ScannerState
 from src.vision.camera import Camera
-from src.vision.inspector import Inspector
+from src.vision.inspector import Inspector, InspectionSession
 
 logger = logging.getLogger(__name__)
 
@@ -592,21 +592,20 @@ class ScannerController:
         return True
 
     def _continuous_loop(self) -> None:
-        """Modo continuo AUTO: inspecciona cuando el material avanzó lo suficiente.
-
-        Compara cada frame con el ÚLTIMO FRAME INSPECCIONADO (no con el anterior).
-        Si la diferencia media supera continuous_position_threshold → nueva sección
-        → inspeccionar → actualizar referencia.
-        """
-        last_gray: Optional[np.ndarray] = None
+        """Modo continuo AUTO con la misma sesion/criterios que run-folder."""
         frame_counter = 0
-        last_insp_time: float = 0.0
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
+        session = InspectionSession(
+            model_init,
+            scanner_id=self._id,
+            movement_threshold=self._cont_pos_thr,
+            min_interval_sec=self._min_insp_interval,
+            resource_owner=self._inspector,
+        )
         if not self._run_startup_selftest(model_init):
             self._io.write(f"{self._id}.solenoid", False)
-            # backlight permanece encendido siempre
             self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
@@ -617,6 +616,14 @@ class ScannerController:
                     self._stop_event.wait(timeout=0.05)
                     continue
                 model = self._io.scanner_config(self._id)["model"]
+            if model != session._model:
+                session = InspectionSession(
+                    model,
+                    scanner_id=self._id,
+                    movement_threshold=self._cont_pos_thr,
+                    min_interval_sec=self._min_insp_interval,
+                    resource_owner=self._inspector,
+                )
 
             frame = self._camera.get_frame()
             if frame is None:
@@ -641,84 +648,40 @@ class ScannerController:
                         f"sin frames durante {missing_sec:.1f}s"
                     )
                     self._io.write(f"{self._id}.solenoid", False)
-                    # backlight permanece encendido siempre
                     self._set_lights(red=True)
                     self._transition(ScannerState.ERROR)
                     return
                 self._stop_event.wait(timeout=0.033)
                 continue
-            else:
-                with self._lock:
-                    if self._camera_missing_since is not None:
-                        self._camera_missing_total_s += max(
-                            0.0, time.monotonic() - self._camera_missing_since
-                        )
-                        logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
-                    self._camera_missing_since = None
-                    self._camera_missing_warned = False
 
-            # Alimentar buffer de evidencia con frame ORIGINAL (sin overlay)
+            with self._lock:
+                if self._camera_missing_since is not None:
+                    self._camera_missing_total_s += max(
+                        0.0, time.monotonic() - self._camera_missing_since
+                    )
+                    logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
+                self._camera_missing_since = None
+                self._camera_missing_warned = False
+
             if self._recorder is not None:
                 self._recorder.add_frame(frame)
-
-            if frame_counter == 1:
-                logger.info(
-                    f"[{self._id}] primer frame inspeccionado: {frame.shape[1]}x{frame.shape[0]}px"
-                )
-                # Guardar frame diagnóstico con ROI dibujado para verificar calibración
-                try:
-                    from src.patterns.roi import load_roi
-                    _roi = load_roi(model, self._id)
-                    _diag = frame.copy()
-                    if _roi is not None:
-                        cv2.rectangle(_diag,
-                                      (_roi.x, _roi.y),
-                                      (_roi.x + _roi.w, _roi.y + _roi.h),
-                                      (0, 255, 0), 2)
-                        cv2.putText(_diag, f"ROI x={_roi.x} w={_roi.w}",
-                                    (_roi.x, max(20, _roi.y - 5)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-                    _diag_path = Path("data/output") / f"roi_diag_{self._id}.jpg"
-                    _diag_path.parent.mkdir(parents=True, exist_ok=True)
-                    cv2.imwrite(str(_diag_path), _diag)
-                    logger.info(f"[{self._id}] frame diagnóstico ROI guardado: {_diag_path}")
-                except Exception as _e:
-                    logger.warning(f"[{self._id}] no se pudo guardar diagnóstico ROI: {_e}")
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            pos_thr = self._cont_pos_thr
-            min_interval = self._min_insp_interval
 
             forced = self._force_inspect.is_set()
             if forced:
                 self._force_inspect.clear()
 
-            now = time.monotonic()
-            # Límite de tasa: si no ha pasado el intervalo mínimo, saltar
-            if not forced and min_interval > 0 and (now - last_insp_time) < min_interval:
-                self._stop_event.wait(timeout=0.005)
-                continue
-
-            if last_gray is not None and not forced:
-                diff = float(np.mean(cv2.absdiff(gray, last_gray)))
-                with self._lock:
-                    self._last_position_diff = diff
-                if pos_thr > 0 and diff < pos_thr:
-                    self._stop_event.wait(timeout=0.033)
-                    continue
-                logger.debug(f"[{self._id}] nueva sección detectada (diff={diff:.1f})")
-
             frame_counter += 1
             fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
                    f"_{frame_counter:04d}")
-            res = self._inspector.inspect(model, frame, frame_id=fid,
-                                          scanner_id=self._id)
-            if res is not None:
-                last_gray = gray
-                last_insp_time = time.monotonic()
-                self._handle_result(res, model)
+            res = session.inspect_frame(frame, frame_id=fid, force=forced)
+            with self._lock:
+                self._last_position_diff = session.last_position_diff
 
+            if res is None:
+                self._stop_event.wait(timeout=0.033)
+                continue
+
+            self._handle_result(res, model)
             self._stop_event.wait(timeout=0.005)
 
     def _handle_result(self, result: InspectionResult, model: str = "") -> None:
