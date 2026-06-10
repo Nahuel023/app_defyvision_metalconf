@@ -55,6 +55,7 @@ class InspectionSession:
                 "roi": resource_owner._get_roi(model, scanner_id),
                 "ema_state": resource_owner._get_ema(scanner_id),
                 "machine_stop_detector": resource_owner._get_detector(model, scanner_id),
+                "desalign_state": {"streak": 0, "reason": ""},
             }
         else:
             tols = load_tolerances(model)
@@ -63,6 +64,7 @@ class InspectionSession:
                 "pattern": load_pattern(find_pattern_path(model, scanner_id)),
                 "roi": load_roi(model, scanner_id),
                 "ema_state": {},
+                "desalign_state": {"streak": 0, "reason": ""},
             }
             if bool(tols.get("machine_stop_enabled", False)):
                 self._preloaded["machine_stop_detector"] = MachineStopDetector(
