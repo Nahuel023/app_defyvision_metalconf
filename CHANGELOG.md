@@ -56,15 +56,45 @@ frame quieto.
 
 **Cambio aplicado:**
 - `src/controller/scanner_controller.py`
-  - se elimino la duplicacion interna de loops continuos
-  - `_continuous_loop()` quedo como unica implementacion viva del modo `INICIAR`
-  - ese loop usa `InspectionSession`, igual que `inspect_folder()`
+#### Cambio 159 - Microperforado: desalineacion de patron por RACHA de N frames (no parada en un solo frame)
 
-**Resultado esperado:** los parametros, la sesion temporal, el detector de avance y
-la decision de "inspeccionar o saltear" salen del mismo camino de ejecucion. Queda
-mucho mas dificil que vivo y carpeta vuelvan a separarse por cambios futuros.
+**Pedido:** la parada por desalineacion quedaba muy filosa — perturbaciones chicas de mala
+toma seguian disparando falsos positivos. Implementar racha de N frames consecutivos igual
+que el detector de faltantes.
 
-**Archivos modificados:** `src/controller/scanner_controller.py`
+**Diagnostico:**
+- el Cambio 158 seteaba `machine_stop=True` inmediatamente en el primer frame desalineado
+- ademas habia un bug critico: `desalign_state` se leia de `pre.get("desalign_state")`
+  pero si no existia se creaba un dict local que SE DESCARTABA al terminar el frame;
+  la racha nunca acumulaba mas de 1 porque el contador arrancaba en 0 en cada frame
+- los umbrales eran tambien demasiado ajustados (std_max=3.0 con normal ~0.5, sin margen)
+
+**Cambios aplicados:**
+
+- `src/inspection.py`:
+  - nuevo param `pattern_align_stop_frames` (default 3): cuantos frames consecutivos
+    desalineados se requieren para disparar `machine_stop`
+  - `desalign_state` se guarda de vuelta en `pre["desalign_state"]` al final del frame
+    para que persista via `_preloaded` al siguiente frame (igual que `ema_state`)
+  - la racha se resetea a 0 cuando el frame vuelve a estar alineado
+  - el motivo de parada incluye la racha `[N/stop_frames frames]`
+
+- `src/vision/inspector.py`:
+  - `InspectionSession` inicializa `desalign_state: {"streak": 0, "reason": ""}` en
+    `_preloaded` en ambas ramas (resource_owner y standalone)
+
+- `config/tolerancias.yaml` -> `models.modelo_B`:
+  - `pattern_align_std_max_px: 3.0 -> 4.0`  (mas margen al ruido; malos >=4.6px)
+  - `pattern_align_abs_max_px: 12.0 -> 14.0` (malos >=16px)
+  - `pattern_align_stop_frames: 3`
+
+**Validacion sobre `05-06-2026-MICROPERFORADO_1`:**
+- `frame_0023`: MACHINE_STOP al tercer frame consecutivo desalineado (21->22->23) correctamente
+- `frame_0025`: 1 frame aislado de desalineacion, no llega a 3, no para → 0 falsos positivos
+- `machine_stop_frames=1`, `temporal_nok=1`, 87/88 frames sin parada
+- 17/17 pytest passing
+
+**Archivos modificados:** `src/inspection.py`, `src/vision/inspector.py`, `config/tolerancias.yaml`
 
 ---
 
