@@ -332,6 +332,54 @@ def _split_holes_into_y_rows(
     return rows
 
 
+def _robust_outer_column_centers(holes: Sequence) -> tuple[float, float]:
+    """Estimate the true outermost pattern columns from X-center clusters.
+
+    Percentile-based references work when sparse outlier columns exist, but they fail
+    when the outermost real column is dense: q10/q90 can land on the 2nd column and the
+    boundary gate then mixes two adjacent columns, creating a visible zigzag.
+
+    We cluster hole centers by X and choose the outermost *dominant* cluster. If the
+    extreme cluster is much sparser than its neighbour, treat it as an outlier and use
+    the next cluster inward instead. This keeps microperforado on the real border column
+    while still ignoring tiny sparse outlier columns.
+    """
+    all_holes = list(holes)
+    if not all_holes:
+        return 0.0, 0.0
+
+    xs = sorted(float(hh.x) for hh in all_holes)
+    if len(xs) == 1:
+        return xs[0], xs[0]
+
+    median_r = float(np.median([max(float(getattr(hh, "r", 0.0)), 1.0) for hh in all_holes]))
+    cluster_gap = max(6.0, median_r * 1.25)
+
+    clusters: list[list[float]] = [[xs[0]]]
+    for x in xs[1:]:
+        if abs(x - clusters[-1][-1]) <= cluster_gap:
+            clusters[-1].append(x)
+        else:
+            clusters.append([x])
+
+    cluster_stats = [
+        {"mean": float(np.mean(c)), "count": len(c)}
+        for c in clusters
+    ]
+
+    def _pick(stats: list[dict], reverse: bool = False) -> float:
+        ordered = list(reversed(stats)) if reverse else list(stats)
+        if len(ordered) == 1:
+            return float(ordered[0]["mean"])
+        outer = ordered[0]
+        inner = ordered[1]
+        if outer["count"] < inner["count"] * 0.6:
+            return float(inner["mean"])
+        return float(outer["mean"])
+
+    return _pick(cluster_stats, reverse=False), _pick(cluster_stats, reverse=True)
+
+
 def _pattern_bounds_by_band(
     holes: Sequence,
     img_h: int,
@@ -357,15 +405,7 @@ def _pattern_bounds_by_band(
         return {}, {}
 
     all_holes = list(holes)
-    # Use robust percentile instead of global min/max as the boundary reference so that
-    # a small number of outlier holes near one end of the pattern (e.g. the staggered
-    # outer column present only in part of the image) do not pull the gate too far and
-    # exclude the main boundary column from the other bands.
-    # boundary_tol_px=8 with pct10/pct90 is equivalent to btol≈20 with the raw min/max
-    # for a pattern where the outer-outlier column is ~4% of all holes.
-    xs_all = np.array([hh.x for hh in all_holes], dtype=np.float64)
-    global_left  = float(np.percentile(xs_all, 10))
-    global_right = float(np.percentile(xs_all, 90))
+    global_left, global_right = _robust_outer_column_centers(all_holes)
     band_h = img_h / n_bands
     row_tol_px = max(
         3.0,
