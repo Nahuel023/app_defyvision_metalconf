@@ -48,6 +48,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 149 - Esterilla: overlay verde ahora representa matches reales del patron
+
+**Sintoma:** seguian apareciendo agujeros azules/cian en los bordes de la esterilla aun
+cuando el detector los encontraba y, en varios casos, el matching contra patron tambien
+los estaba aceptando. El problema ya no era "detectar", sino que el verde del overlay no
+representaba exactamente la misma lista de agujeros que usaba la comparacion.
+
+**Causa raiz:**
+- `compare_missing_only()` trabajaba con `detected_in_bbox`
+- pero el overlay verde se dibujaba desde otra lista (`overlay_holes`) filtrada de nuevo
+  por reglas visuales (`bbox` / top-bottom / hull del patron)
+- eso permitia este caso inconsistente:
+  - agujero detectado
+  - agujero usado por matching
+  - agujero NO dibujado en verde porque el overlay lo descartaba aparte
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - se conserva la lista `detected_holes_in_bbox` alineada con `detected_in_bbox`
+  - el overlay verde ahora se arma directamente desde `report.matched_detected_idx`
+  - o sea: verde = agujero que realmente matcheo con el patron
+  - cian = deteccion cruda que NO entro como match
+
+**Resultado:** el overlay deja de mentir visualmente. Si un agujero forma parte real del
+patron y el matching lo acepta, se dibuja en verde aunque antes un filtro visual lo dejara
+afuera.
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
 #### Cambio 148 - Service UI: sección "Calibración ROI" manual en página Grabación
 
 **Pedido:** agregar una sección en la pestaña Grabación para calibrar el ROI visualmente,

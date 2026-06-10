@@ -1557,13 +1557,28 @@ class RecordingTab(QWidget):
         lay.setSpacing(14)
 
         ctrl = QWidget()
+        ctrl.setStyleSheet(f"background:{_DARK};")
         ctrl_lay = QVBoxLayout(ctrl)
         ctrl_lay.setContentsMargins(0, 0, 0, 0)
         ctrl_lay.setSpacing(10)
         ctrl_lay.addWidget(self._build_recording_section())
         ctrl_lay.addWidget(self._build_roi_section())
         ctrl_lay.addStretch()
-        lay.addWidget(ctrl)
+
+        ctrl_scroll = QScrollArea()
+        ctrl_scroll.setWidgetResizable(True)
+        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        ctrl_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        ctrl_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        ctrl_scroll.setStyleSheet(
+            f"QScrollArea {{ background:{_DARK};border:none; }}"
+            f"QScrollBar:vertical {{ background:{_DARK};width:8px;border-radius:4px; }}"
+            f"QScrollBar::handle:vertical {{ background:#334155;border-radius:4px;min-height:24px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
+        )
+        ctrl_scroll.setWidget(ctrl)
+        ctrl_scroll.setFixedWidth(340)
+        lay.addWidget(ctrl_scroll)
 
         self._cam_panel = self._build_ip_camera_section()
         lay.addWidget(self._cam_panel, stretch=1)
@@ -1958,10 +1973,19 @@ class RecordingTab(QWidget):
         self._btn_roi_save.setEnabled(True)
         self._roi_redraw()
 
+    _ROI_DEFAULT_DIR = Path(r"C:\DEFYVISION - Metalconf\app_defyvision_metalconf\data\recordings")
+
+    def _roi_start_dir(self) -> str:
+        if self._rec_dir and self._rec_dir.exists():
+            return str(self._rec_dir)
+        if self._ROI_DEFAULT_DIR.exists():
+            return str(self._ROI_DEFAULT_DIR)
+        return ""
+
     def _on_roi_pick_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Seleccionar imagen",
-            str(self._rec_dir) if self._rec_dir else "",
+            self._roi_start_dir(),
             "Imágenes (*.png *.jpg *.jpeg *.bmp)"
         )
         if path:
@@ -1970,7 +1994,7 @@ class RecordingTab(QWidget):
     def _on_roi_pick_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar carpeta de frames",
-            str(self._rec_dir) if self._rec_dir else ""
+            self._roi_start_dir()
         )
         if not folder:
             return
