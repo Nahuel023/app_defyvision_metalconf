@@ -4027,6 +4027,14 @@ class EventBrowserTab(QWidget):
         self._btn_event_fit.clicked.connect(lambda: self._event_img_view.fit())
         self._btn_event_overlay.clicked.connect(self._on_overlay_toggled)
 
+        # Scanner selector para análisis overlay
+        _sc_lbl = QLabel("Scanner:")
+        _sc_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;")
+        self._overlay_scanner_combo = self._make_combo(
+            self._system.scanner_ids(), min_w=110
+        )
+        self._overlay_scanner_combo.currentTextChanged.connect(self._on_overlay_scanner_changed)
+
         nav.addWidget(self._btn_event_first)
         nav.addWidget(self._btn_event_prev10)
         nav.addWidget(self._btn_event_prev)
@@ -4039,6 +4047,9 @@ class EventBrowserTab(QWidget):
         nav.addSpacing(10)
         nav.addWidget(self._btn_event_fit)
         nav.addWidget(self._btn_event_overlay)
+        nav.addSpacing(8)
+        nav.addWidget(_sc_lbl)
+        nav.addWidget(self._overlay_scanner_combo)
         nav.addStretch()
         return nav
 
@@ -4203,6 +4214,13 @@ class EventBrowserTab(QWidget):
                 f"Motivo:     {entry.reason or '-'}",
             ])
         )
+
+        # Sincronizar combo de scanner con el del evento (sin disparar recarga)
+        if entry.scanner_id in self._system.scanner_ids():
+            self._overlay_scanner_combo.blockSignals(True)
+            self._overlay_scanner_combo.setCurrentText(entry.scanner_id)
+            self._overlay_scanner_combo.blockSignals(False)
+
         self._btn_open_folder.setEnabled(True)
         self._btn_delete_event.setEnabled(True)
         self._btn_delete_frame.setEnabled(bool(self._frame_paths))
@@ -4234,11 +4252,14 @@ class EventBrowserTab(QWidget):
         # ── Overlay mode ──────────────────────────────────────────────
         if self._show_overlay and self._current_entry is not None:
             ov_pxm = self._ov_cache.get(idx)
+            sc_sel = self._overlay_scanner_combo.currentText()
             if ov_pxm is not None:
                 prev = self._event_img_view.current_pixmap()
                 needs_fit = prev is None or prev.size() != ov_pxm.size()
                 self._event_img_view.set_pixmap(ov_pxm, auto_fit=needs_fit)
-                self._events_status_lbl.setText("Overlay")
+                self._events_status_lbl.setText(
+                    f"Overlay · {sc_sel} · {self._scanner_model(sc_sel)}"
+                )
             else:
                 # Mostrar frame crudo mientras se analiza
                 raw_pxm = self._load_raw_pixmap(idx)
@@ -4246,7 +4267,9 @@ class EventBrowserTab(QWidget):
                     prev = self._event_img_view.current_pixmap()
                     needs_fit = prev is None or prev.size() != raw_pxm.size()
                     self._event_img_view.set_pixmap(raw_pxm, auto_fit=needs_fit)
-                self._events_status_lbl.setText("Analizando…")
+                self._events_status_lbl.setText(
+                    f"Analizando con {sc_sel} · {self._scanner_model(sc_sel)}…"
+                )
                 self._launch_overlay_worker(idx)
             self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
             self._frame_file_lbl.setText(self._frame_paths[idx].name)
@@ -4297,7 +4320,7 @@ class EventBrowserTab(QWidget):
         if self._overlay_worker is not None and self._overlay_worker.isRunning():
             self._overlay_worker.done.disconnect()
             self._overlay_worker.quit()
-        scanner_id = self._current_entry.scanner_id if self._current_entry else ""
+        scanner_id = self._overlay_scanner_combo.currentText()
         model = self._scanner_model(scanner_id)
         worker = _EvOverlayWorker(idx, self._frame_paths[idx], model, scanner_id)
         worker.done.connect(self._on_overlay_done)
@@ -4310,11 +4333,19 @@ class EventBrowserTab(QWidget):
             prev = self._event_img_view.current_pixmap()
             needs_fit = prev is None or prev.size() != pxm.size()
             self._event_img_view.set_pixmap(pxm, auto_fit=needs_fit)
-            self._events_status_lbl.setText("Overlay")
+            scanner_id = self._overlay_scanner_combo.currentText()
+            model = self._scanner_model(scanner_id)
+            self._events_status_lbl.setText(f"Overlay · {scanner_id} · {model}")
 
     def _on_overlay_toggled(self) -> None:
         self._show_overlay = self._btn_event_overlay.isChecked()
         self._show_event_frame(self._current_idx)
+
+    def _on_overlay_scanner_changed(self, _scanner_id: str) -> None:
+        """Al cambiar el scanner para análisis: invalidar cache de overlays y re-analizar."""
+        self._ov_cache.clear()
+        if self._show_overlay:
+            self._show_event_frame(self._current_idx)
 
     def _scanner_model(self, scanner_id: str) -> str:
         try:
