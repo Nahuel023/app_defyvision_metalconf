@@ -152,14 +152,16 @@ models:
     machine_stop_require_frame_nok: true
     grid_lateral_shift_max_px: 0.0   # desactivado — reactivar cuando la alineacion este corregida
     use_hungarian_matching: false
+    blur_score_min: 200.0          # frames borrosos por vibracion → LOW_QUALITY → no acumula machine stop
     verticality_quality_enabled: false
     chapa_zigzag_std_max_px: 4.0
     chapa_zigzag_abs_max_px: 10.0
     chapa_no_line_min_used_lines: 1
     chapa_no_line_abs_max_px: 4.5
-    pattern_align_enabled: false
-    pattern_align_std_max_px: 2.4
-    pattern_align_abs_max_px: 6.0
+    pattern_align_enabled: true
+    pattern_align_std_max_px: 3.0    # normal ~0.5px; desalineados 21-26 = 4.6-7.5px
+    pattern_align_abs_max_px: 12.0   # normal ~2px;   desalineados 21-26 = 16-22px
+    pattern_align_machine_stop: true # parada inmediata en un frame (sin esperar racha)
     pattern_global_offset_max_px: 10.0
     pattern_slope_delta_max_deg: 2.0
     pattern_center_align_enabled: false

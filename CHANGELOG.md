@@ -48,6 +48,106 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 159 - Un solo loop continuo para no divergir entre INICIAR y carpeta
+
+**Pedido:** dejar definitivamente unificado el analisis en vivo con el analisis por
+carpeta, manteniendo el filtro de avance de material para no re-analizar el mismo
+frame quieto.
+
+**Cambio aplicado:**
+- `src/controller/scanner_controller.py`
+  - se elimino la duplicacion interna de loops continuos
+  - `_continuous_loop()` quedo como unica implementacion viva del modo `INICIAR`
+  - ese loop usa `InspectionSession`, igual que `inspect_folder()`
+
+**Resultado esperado:** los parametros, la sesion temporal, el detector de avance y
+la decision de "inspeccionar o saltear" salen del mismo camino de ejecucion. Queda
+mucho mas dificil que vivo y carpeta vuelvan a separarse por cambios futuros.
+
+**Archivos modificados:** `src/controller/scanner_controller.py`
+
+---
+
+#### Cambio 158 - Microperforado: detectar desalineacion de patron por zigzag de borde -> machine_stop inmediato
+
+**Pedido:** detectar las desalineaciones que aparecen en los frames 21-26 de
+`05-06-2026-MICROPERFORADO_1` y DETENER LA MAQUINA cuando ocurran.
+
+**Diagnostico:**
+- se corrio analisis de `pattern_zigzag_std_px` y `pattern_zigzag_max_px` sobre toda
+  la carpeta (88 frames analizados, total 137 de la carpeta con filtro de movimiento)
+- frames 21, 22, 23, 25: zigzag PATRON std=4.6-7.5px, max=16-22px
+- todos los demas frames: zigzag std<0.5px, max<2.5px
+- el parametro `pattern_align_enabled` ya existia en el codigo pero estaba desactivado
+  (`false`) en modelo_B
+- cuando se activa, setea `pattern_alignment_warn=True` y `final_status=NOK` pero
+  NO seteaba `machine_stop=True` → la maquina NO paraba
+- ademas habia un bug: la variable local `machine_stop` se inicializaba en `False`
+  DESPUES del bloque centering donde se queria setear a `True`, reseteandola
+
+**Cambios aplicados:**
+
+- `src/inspection.py`:
+  - nuevo parametro `pattern_align_machine_stop` (default True): cuando
+    `pattern_align_enabled` y el zigzag supera los umbrales, activa parada inmediata
+  - usa variable intermedia `_desalign_stop`/`_desalign_reason` inicializada ANTES
+    del bloque centering y aplicada DESPUES del ms_detector.update() para no ser
+    reseteada por la inicializacion de `machine_stop=False`
+  - el motivo de parada incluye std y max del zigzag en px para diagnostico
+  - misma logica para los sub-triggers: zigzag borde, zigzag centro, descentrado, inclinacion
+
+- `config/tolerancias.yaml` -> `models.modelo_B`:
+  - `pattern_align_enabled: false -> true`
+  - `pattern_align_std_max_px: 3.0`  (normal ~0.5px; frames malos: 4.6-7.5px)
+  - `pattern_align_abs_max_px: 12.0` (normal ~2px;   frames malos: 16-22px)
+  - `pattern_align_machine_stop: true`
+
+**Validacion sobre `05-06-2026-MICROPERFORADO_1`:**
+- `machine_stop_frames=4`: frames 21, 22, 23, 25 → `MACHINE_STOP` correctamente
+- 84 frames sin ningun falso positivo
+- `temporal_nok=4` (cada frame desalineado dispara parada inmediata sin esperar racha)
+- 17/17 pytest passing
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 157 - Unificar sesion temporal entre INICIAR y analisis por carpeta
+
+**Pedido:** que el analisis en vivo al apretar `INICIAR` y el analisis de carpeta usen
+siempre la misma logica, pero sin re-analizar cientos de veces el mismo frame cuando
+la cinta no avanzo.
+
+**Diagnostico:**
+- el nucleo de vision ya era comun, pero habia una diferencia importante alrededor:
+  - `ScannerController` en vivo filtraba frames quietos con
+    `continuous_position_threshold`
+  - `inspect_folder()` analizaba cada imagen guardada aunque fuera practicamente la
+    misma seccion detenida
+- eso hacia divergir el estado temporal (EMA, machine_stop, streaks) entre vivo y carpeta
+
+**Cambio aplicado:**
+- `src/vision/inspector.py`
+  - nueva `InspectionSession`, que encapsula:
+    - preload de tolerancias / patron / ROI
+    - EMA de alineacion
+    - `MachineStopDetector`
+    - compuerta de movimiento para saltear frames quietos
+- `src/controller/scanner_controller.py`
+  - `INICIAR` ahora corre contra esa sesion compartida
+- `src/inspection.py`
+  - `inspect_folder()` tambien usa la misma sesion temporal y el mismo filtro de
+    avance de material
+
+**Resultado esperado:** vivo y carpeta comparten la misma nocion de "nuevo frame valido
+para inspeccionar". Si el material no avanzo, no se vuelve a analizar ni se contamina
+la logica temporal con repeticiones del mismo cuadro quieto.
+
+**Archivos modificados:** `src/vision/inspector.py`, `src/controller/scanner_controller.py`,
+`src/inspection.py`
+
+---
+
 #### Cambio 156 - Microperforado: machine_stop solo acumula evidencia en frames severos
 
 **Pedido:** seguir corrigiendo la carpeta actualizada de `scanner_1` porque, aun con
