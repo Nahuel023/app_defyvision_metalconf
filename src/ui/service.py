@@ -1539,9 +1539,6 @@ class RecordingTab(QWidget):
         self._btn_rx_left.clicked.connect(lambda: self._roi_move("rx", -1))
         self._btn_rx_right.clicked.connect(lambda: self._roi_move("rx", +1))
         self._btn_roi_save.clicked.connect(self._on_roi_save)
-        self._scanner_combo.currentTextChanged.connect(
-            lambda _: self._refresh_current_roi_label()
-        )
         self._refresh_current_roi_label()
 
         self._update_nav_state()
@@ -1837,6 +1834,18 @@ class RecordingTab(QWidget):
             "border-radius:4px;padding:2px 8px;"
         )
 
+        # ── Selector de scanner ──────────────────────────────────────
+        sc_row = QHBoxLayout()
+        sc_row.setSpacing(8)
+        sc_chip = QLabel("SCANNER")
+        sc_chip.setStyleSheet(CHIP_SS)
+        sc_row.addWidget(sc_chip)
+        self._roi_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
+        self._roi_scanner_combo.currentTextChanged.connect(self._refresh_current_roi_label)
+        sc_row.addWidget(self._roi_scanner_combo)
+        sc_row.addStretch()
+        lay.addLayout(sc_row)
+
         # ── ROI actual (cargada del archivo) ─────────────────────────
         self._roi_current_lbl = QLabel("ROI actual: —")
         self._roi_current_lbl.setStyleSheet(
@@ -1956,7 +1965,7 @@ class RecordingTab(QWidget):
     def _refresh_current_roi_label(self) -> None:
         from src.patterns.roi import load_roi
         from src.utils.model_names import to_internal as _to_int
-        scanner_id = self._scanner_combo.currentText() or None if hasattr(self, "_scanner_combo") else None
+        scanner_id = self._roi_scanner_combo.currentText() or None if hasattr(self, "_roi_scanner_combo") else None
         model      = self._model_combo.currentText() if hasattr(self, "_model_combo") else ""
         roi = load_roi(_to_int(model), scanner_id)
         if roi:
@@ -1977,7 +1986,7 @@ class RecordingTab(QWidget):
         # Inicializar bordes con ROI guardada si existe, o imagen completa
         from src.patterns.roi import load_roi
         from src.utils.model_names import to_internal as _to_int
-        scanner_id = self._scanner_combo.currentText() or None
+        scanner_id = self._roi_scanner_combo.currentText() or None
         roi = load_roi(_to_int(self._model_combo.currentText()), scanner_id)
         if roi:
             self._roi_lx = roi.x
@@ -2079,7 +2088,7 @@ class RecordingTab(QWidget):
         if rx <= lx:
             return
         H = self._roi_frame.shape[0]
-        scanner_id = self._scanner_combo.currentText() or None
+        scanner_id = self._roi_scanner_combo.currentText() or None
         model_disp = self._model_combo.currentText()
         from src.utils.model_names import to_internal as _to_int
         from src.patterns.roi import roi_path
