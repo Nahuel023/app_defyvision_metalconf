@@ -275,6 +275,9 @@ def _inspect_bgr(
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
+    # Cuando True, pattern_alignment_warn dispara machine_stop inmediato (parada en un frame).
+    # Cuando False, solo marca NOK + badge (parada por racha temporal, igual que tilt).
+    pattern_align_machine_stop = bool(tolerances.get("pattern_align_machine_stop", True))
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
@@ -670,6 +673,8 @@ def _inspect_bgr(
     pattern_alignment_warn = False
     pattern_offset_warn = False
     pattern_slope_warn = False
+    _desalign_stop   = False   # Desalineacion de patron: parada inmediata
+    _desalign_reason = ""
 
     if centering is not None:
         chapa_zigzag_std_px          = getattr(centering, "chapa_zigzag_std_px",          0.0)
@@ -698,6 +703,12 @@ def _inspect_bgr(
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - ZIGZAG BORDE "
+                        f"(std={pattern_zigzag_std_px:.1f}px, max={pattern_zigzag_max_px:.1f}px)"
+                    )
             if (
                 pattern_global_offset_max_px > 0.0
                 and abs(centering.offset_px) > pattern_global_offset_max_px
@@ -705,6 +716,12 @@ def _inspect_bgr(
                 pattern_offset_warn = True
                 pattern_alignment_warn = True
                 final_status = "NOK"
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - DESCENTRADO "
+                        f"({centering.offset_px:+.1f}px)"
+                    )
             if (
                 pattern_slope_delta_max_deg > 0.0
                 and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
@@ -713,12 +730,24 @@ def _inspect_bgr(
                 pattern_slope_warn = True
                 pattern_alignment_warn = True
                 final_status = "NOK"
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - INCLINACION "
+                        f"({getattr(centering, 'pattern_sheet_slope_delta_max_deg', 0.0):.1f} deg)"
+                    )
 
         if pattern_center_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
                     or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # zigzag interno del patrón → NOK
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - ZIGZAG CENTRO "
+                        f"(std={pattern_center_zigzag_std_px:.1f}px, max={pattern_center_zigzag_max_px:.1f}px)"
+                    )
 
     # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
     # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
@@ -779,6 +808,12 @@ def _inspect_bgr(
             if cols:
                 col_str  = ", ".join(str(c) for c in cols)
                 _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
+
+    # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada inmediata en un frame.
+    # Se aplica DESPUES del ms_detector para no ser reseteado por la inicializacion en False.
+    if _desalign_stop:
+        machine_stop = True
+        _ms_reason   = _desalign_reason
 
     # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
     # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
@@ -1034,6 +1069,8 @@ def inspect_folder(
     max_response_sec: float | None = None,
     scanner_id: str | None = None,
 ) -> FolderInspectionSummary:
+    from src.vision.inspector import InspectionSession
+
     tolerances = load_tolerances(model)
     frame_rate_hz = float(
         tolerances["frame_rate_hz"] if frame_rate_hz is None else frame_rate_hz
@@ -1048,16 +1085,7 @@ def inspect_folder(
     )
 
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))
-
-    ms_detector = MachineStopDetector(
-        enabled=bool(tolerances.get("machine_stop_enabled", False)),
-        missing_frames=int(tolerances.get("machine_stop_missing_frames", 5)),
-        min_missing=int(tolerances.get("machine_stop_min_missing", 1)),
-        same_zone_px=float(tolerances.get("machine_stop_same_zone_px", 35.0)),
-        ignore_near_miss=bool(tolerances.get("machine_stop_ignore_near_miss", True)),
-        track_by_grid=bool(tolerances.get("machine_stop_track_by_grid", True)),
-        same_column_tol_cells=int(tolerances.get("machine_stop_same_column_tol_cells", 0)),
-    )
+    movement_threshold = float(tolerances.get("continuous_position_threshold", 0.0))
 
     import os
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1066,22 +1094,20 @@ def inspect_folder(
     n = len(image_paths)
 
     # Pre-load shared read-only resources once (elimina N×3 lecturas de disco)
-    _pre: dict = {
-        "tolerances": tolerances,
-        "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
-        "roi":        load_roi(model, scanner_id),
-        "ema_state":  {},
-    }
+    session = InspectionSession(
+        model,
+        scanner_id=scanner_id,
+        save=save,
+        movement_threshold=movement_threshold,
+        min_interval_sec=0.0,
+    )
 
-    if ms_detector._enabled:
-        # Secuencial obligatorio: MachineStopDetector tiene estado y debe ver
-        # los frames en orden para acumular rachas correctamente.
-        _pre["machine_stop_detector"] = ms_detector
-        results = [
-            inspect_image(model, path, save=save, scanner_id=scanner_id,
-                          _preloaded=_pre)
-            for path in image_paths
-        ]
+    if "machine_stop_detector" in session._preloaded:
+        results = []
+        for path in image_paths:
+            result = session.inspect_path(path)
+            if result is not None:
+                results.append(result)
     else:
         # Paralelo seguro: sin detector con estado.
         # OpenCV y numpy liberan el GIL en operaciones pesadas.
@@ -1090,8 +1116,7 @@ def inspect_folder(
 
         def _worker(args):
             idx, path = args
-            return idx, inspect_image(model, path, save=save,
-                                      scanner_id=scanner_id, _preloaded=_pre)
+            return idx, inspect_image(model, path, save=save, scanner_id=scanner_id)
 
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {
