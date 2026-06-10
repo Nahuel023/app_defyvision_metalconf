@@ -48,6 +48,47 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 146 - CLI: subcomando `detect-roi` para calibracion automatica de ROI
+
+**Motivacion:** la ROI se definía manualmente con `define-roi` (mouse). Con backlight
+encendido, la transición backlight→chapa es detectable automáticamente por gradiente
+del perfil de columna → posible auto-calibrar sin intervención del usuario.
+
+**Algoritmo (en `src/patterns/roi.py`, funcion `detect_roi_from_images`):**
+1. Para cada frame (hasta `--max-frames=20` si se pasa carpeta): calcula el percentil 20
+   por columna del canal R (robusto contra agujeros brillantes en la chapa)
+2. Suaviza con Gaussiano y calcula el gradiente de columna
+3. Borde izquierdo = caída más pronunciada (bright→dark) en la mitad izquierda del frame
+4. Borde derecho = subida más pronunciada (dark→bright) en la mitad derecha del frame
+5. Calcula la mediana entre todos los frames → posición estable independiente de agujeros
+
+**Comando nuevo (`src/main.py`):**
+```
+.\.venv\Scripts\python.exe -m src.main detect-roi ^
+    --model modelo_B ^
+    --scanner scanner_1 ^
+    --img "C:\path\to\frames_con_backlight" ^
+    --channel r          # canal para detectar (r|g|b|gray, default: r)
+    --margin 0           # px a recortar hacia adentro de cada borde (default: 0)
+    --max-frames 20      # frames a usar si se da carpeta (default: 20)
+    --dry-run            # muestra resultado SIN guardar roi.json
+    --show               # abre preview interactivo
+```
+
+**Salidas:**
+- `data/patterns/{scanner}/{model}/roi.json` (o sin scanner si se omite)
+- `data/output/detect_roi_preview.png`: frame de referencia con ROI + perfil de columna
+
+**Validacion en frames 05-06-2026-MICROPERFORADO_1 (137 frames):**
+- Con `--margin 0`:  x=110, w=473 (borde bruto backlight→chapa)
+- Con `--margin 50`: x=160, w=373 (zona interior mas segura)
+- ROI actual manual: x=195, w=295 (~= margin 85 sobre la deteccion automatica)
+
+**Archivos modificados:** `src/patterns/roi.py` (funcion `detect_roi_from_images`),
+`src/main.py` (funcion `cmd_detect_roi` + parser `detect-roi`)
+
+---
+
 #### Cambio 145 - microperforado: fix línea PATRON borde izquierdo truncada (pct10 en lugar de min global)
 
 **Síntoma:** la línea PATRON izquierda en el overlay del microperforado (modelo_B) solo
