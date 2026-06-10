@@ -251,6 +251,8 @@ def _inspect_bgr(
     pattern_desalign_bottom_shift_px = float(tolerances.get("pattern_desalign_bottom_shift_px", 0.0))
     compare_top_ignore_px = float(tolerances.get("compare_top_ignore_px", 0.0))
     compare_bottom_ignore_px = float(tolerances.get("compare_bottom_ignore_px", 0.0))
+    compare_left_ignore_px = float(tolerances.get("compare_left_ignore_px", 0.0))
+    compare_right_ignore_px = float(tolerances.get("compare_right_ignore_px", 0.0))
     pattern_hull_margin_px = float(tolerances.get("pattern_hull_margin_px", 0.0))
     grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
@@ -500,23 +502,27 @@ def _inspect_bgr(
                 if y_clip_min <= y <= y_clip_max
             ]
 
-    # Ignorar bordes superior/inferior solo en la etapa de comparacion.
-    # Sirve para no penalizar filas extremas cuando la calibracion de los bordes
-    # es inestable o el patron queda parcialmente cortado arriba/abajo.
-    if compare_points and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
-        y_keep_min = compare_top_ignore_px
-        y_keep_max = img_h - compare_bottom_ignore_px
+    # Ignorar bordes superior/inferior/izquierdo/derecho en la etapa de comparacion.
+    # Sirve para no penalizar filas/columnas extremas cuando la calibracion de los bordes
+    # es inestable o el patron queda parcialmente cortado en algun borde.
+    _y_keep_min = compare_top_ignore_px
+    _y_keep_max = img_h - compare_bottom_ignore_px
+    _x_keep_min = compare_left_ignore_px
+    _x_keep_max = img_w - compare_right_ignore_px
+    _has_ignore = (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0
+                   or compare_left_ignore_px > 0.0 or compare_right_ignore_px > 0.0)
+    if compare_points and _has_ignore:
         if compare_cells:
             _filtered = [
                 (p, c) for p, c in zip(compare_points, compare_cells)
-                if y_keep_min <= p[1] <= y_keep_max
+                if _y_keep_min <= p[1] <= _y_keep_max and _x_keep_min <= p[0] <= _x_keep_max
             ]
             compare_points = [p for p, _ in _filtered]
             compare_cells = [c for _, c in _filtered]
         else:
             compare_points = [
                 (x, y) for x, y in compare_points
-                if y_keep_min <= y <= y_keep_max
+                if _y_keep_min <= y <= _y_keep_max and _x_keep_min <= x <= _x_keep_max
             ]
 
     # Derive expected hole types from pattern radii (when type classification is active).
@@ -583,24 +589,27 @@ def _inspect_bgr(
         detected_in_bbox = detected_points
         detected_types   = _det_types_full
 
-    if detected_in_bbox and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
-        y_keep_min = compare_top_ignore_px
-        y_keep_max = img_h - compare_bottom_ignore_px
+    # Filtrar detecciones solo por top/bottom (no por left/right).
+    # El filtro X se aplica solo a compare_points (no a detected) porque los agujeros
+    # detectados cerca del borde lateral siguen siendo validos para matchear con expected
+    # points que estan dentro de la zona de comparacion pero cerca del margen.
+    _has_tb_ignore = compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0
+    if detected_in_bbox and _has_tb_ignore:
         detected_holes_in_bbox = [
             hh for hh in detected_holes_in_bbox
-            if y_keep_min <= hh.y <= y_keep_max
+            if _y_keep_min <= hh.y <= _y_keep_max
         ]
         if detected_types is not None:
             _filtered = [
                 (pt, dt) for pt, dt in zip(detected_in_bbox, detected_types)
-                if y_keep_min <= pt[1] <= y_keep_max
+                if _y_keep_min <= pt[1] <= _y_keep_max
             ]
             detected_in_bbox = [p for p, _ in _filtered]
             detected_types = [t for _, t in _filtered]
         else:
             detected_in_bbox = [
                 (x, y) for x, y in detected_in_bbox
-                if y_keep_min <= y <= y_keep_max
+                if _y_keep_min <= y <= _y_keep_max
             ]
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
