@@ -3834,12 +3834,15 @@ class EventBrowserTab(QWidget):
         self._btn_latest_event = self._mk_btn("Ir al último", "#0f766e", h=36, fs=11)
         self._btn_open_folder = self._mk_btn("Abrir carpeta", "#374151", h=36, fs=11)
         self._btn_delete_event = self._mk_btn("Borrar evento", "#991b1b", h=36, fs=11)
+        self._btn_delete_frame = self._mk_btn("Borrar frame", "#7f1d1d", h=36, fs=11)
         self._btn_open_folder.setEnabled(False)
         self._btn_delete_event.setEnabled(False)
+        self._btn_delete_frame.setEnabled(False)
         row1.addWidget(self._btn_refresh_events)
         row1.addWidget(self._btn_latest_event)
         row1.addWidget(self._btn_open_folder)
         row1.addWidget(self._btn_delete_event)
+        row1.addWidget(self._btn_delete_frame)
         row1.addSpacing(12)
 
         self._storage_lbl = self._metric_badge("Uso: 0 B / 10.0 GB", _TEXT, _DARK, _BORDER)
@@ -3882,6 +3885,7 @@ class EventBrowserTab(QWidget):
         self._btn_latest_event.clicked.connect(self._go_to_latest)
         self._btn_open_folder.clicked.connect(self._open_current_folder)
         self._btn_delete_event.clicked.connect(self._delete_current_event)
+        self._btn_delete_frame.clicked.connect(self._delete_current_frame)
         self._scanner_filter.currentTextChanged.connect(self._apply_filters)
         self._type_filter.currentTextChanged.connect(self._apply_filters)
         self._search_edit.textChanged.connect(self._apply_filters)
@@ -4201,6 +4205,7 @@ class EventBrowserTab(QWidget):
         )
         self._btn_open_folder.setEnabled(True)
         self._btn_delete_event.setEnabled(True)
+        self._btn_delete_frame.setEnabled(bool(self._frame_paths))
 
         if self._frame_paths:
             self._frame_slider.blockSignals(True)
@@ -4367,6 +4372,48 @@ class EventBrowserTab(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Borrar evidencia", f"No se pudo borrar:\n{exc}")
 
+    def _delete_current_frame(self) -> None:
+        if not self._frame_paths or self._current_idx >= len(self._frame_paths):
+            return
+        path = self._frame_paths[self._current_idx]
+        answer = QMessageBox.question(
+            self, "Borrar frame",
+            f"¿Borrar '{path.name}'?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            path.unlink(missing_ok=True)
+            logger.info(f"[Evidencias] frame eliminado: {path.name}")
+            self._frame_paths.pop(self._current_idx)
+            self._px_cache.pop(self._current_idx, None)
+            self._ov_cache.pop(self._current_idx, None)
+            # Re-indexar caches
+            self._px_cache = {(k if k < self._current_idx else k - 1): v
+                              for k, v in self._px_cache.items()}
+            self._ov_cache = {(k if k < self._current_idx else k - 1): v
+                              for k, v in self._ov_cache.items()}
+            if not self._frame_paths:
+                self._event_img_view.clear("No hay más frames en este evento")
+                self._event_nav_lbl.setText("0 / 0")
+                self._frame_file_lbl.setText("-")
+                self._frame_slider.blockSignals(True)
+                self._frame_slider.setEnabled(False)
+                self._frame_slider.setRange(0, 0)
+                self._frame_slider.blockSignals(False)
+                self._btn_delete_frame.setEnabled(False)
+                self._update_event_nav_state()
+                return
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setRange(0, len(self._frame_paths) - 1)
+            self._frame_slider.blockSignals(False)
+            next_idx = min(self._current_idx, len(self._frame_paths) - 1)
+            self._show_event_frame(next_idx)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
     def _clear_event_selection(self, placeholder: str) -> None:
         self._current_entry = None
         self._frame_paths = []
@@ -4374,6 +4421,7 @@ class EventBrowserTab(QWidget):
         self._px_cache.clear()
         self._btn_open_folder.setEnabled(False)
         self._btn_delete_event.setEnabled(False)
+        self._btn_delete_frame.setEnabled(False)
         self._event_title_lbl.setText("Seleccione una evidencia")
         self._event_meta_lbl.setText("Sin datos")
         self._event_nav_lbl.setText("0 / 0")

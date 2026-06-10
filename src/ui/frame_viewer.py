@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -365,6 +366,18 @@ class _EventNavPanel(QWidget):
         self._fit_btn.clicked.connect(lambda: self._view.fit())
         nav.addWidget(self._fit_btn)
 
+        self._del_frame_btn = QPushButton("✕  Borrar frame")
+        self._del_frame_btn.setMinimumHeight(36)
+        self._del_frame_btn.setEnabled(False)
+        self._del_frame_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:#f87171; border:1px solid #7f1d1d;"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ background:#7f1d1d; color:#ffffff; border-color:#dc2626; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_frame_btn.clicked.connect(self._delete_current_frame)
+        nav.addWidget(self._del_frame_btn)
+
         root.addLayout(nav)
 
         # ── Tira de miniaturas ────────────────────────────────────────
@@ -486,7 +499,9 @@ class _EventNavPanel(QWidget):
             self._pos_lbl.setText("Sin frames")
             self._prev_btn.setEnabled(False)
             self._next_btn.setEnabled(False)
+            self._del_frame_btn.setEnabled(False)
             return
+        self._del_frame_btn.setEnabled(True)
         idx = max(0, min(idx, len(self._frames) - 1))
         self._current = idx
         path = self._frames[idx]
@@ -569,6 +584,42 @@ class _EventNavPanel(QWidget):
             raw = parent / (stem + "_raw.jpg")
             return raw if raw.exists() else path
 
+    def _delete_current_frame(self) -> None:
+        if not self._frames or self._current >= len(self._frames):
+            return
+        path = self._frames[self._current]
+        answer = QMessageBox.question(
+            self, "Borrar frame",
+            f"¿Borrar '{path.name}'?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            path.unlink(missing_ok=True)
+            # También borrar archivos asociados (_raw, _overlay)
+            for suffix in ("_raw.jpg", "_overlay.jpg", "_overlay.png"):
+                assoc = path.parent / (path.stem + suffix)
+                assoc.unlink(missing_ok=True)
+            self._frames.pop(self._current)
+            # Limpiar thumbnail
+            if self._current < len(self._thumb_widgets):
+                w = self._thumb_widgets.pop(self._current)
+                self._thumb_lay.removeWidget(w)
+                w.deleteLater()
+            if not self._frames:
+                self._view.clear_image()
+                self._pos_lbl.setText("Sin frames")
+                self._prev_btn.setEnabled(False)
+                self._next_btn.setEnabled(False)
+                self._del_frame_btn.setEnabled(False)
+                return
+            next_idx = min(self._current, len(self._frames) - 1)
+            self._show_frame(next_idx)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
     def _go_prev(self) -> None:
         self._show_frame(self._current - 1)
 
@@ -595,6 +646,7 @@ class OperatorFrameViewer(QMainWindow):
         self._system = system
         self._mode = "events"   # "events" | "ok" | "nok"
         self._summaries: list[dict] = []
+        self._current_summary: Optional[dict] = None
 
         self.setWindowTitle("Visor de Frames — DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
@@ -696,6 +748,26 @@ class OperatorFrameViewer(QMainWindow):
         )
         reload_btn.clicked.connect(self.reload)
         lay.addWidget(reload_btn)
+
+        _del_ss = (
+            "QPushButton {{ background:transparent; color:#f87171; "
+            "border:1px solid #7f1d1d; border-radius:6px; font-size:11px; "
+            "font-weight:600; padding:0 10px; }}"
+            "QPushButton:hover {{ background:#7f1d1d; color:#ffffff; border-color:#dc2626; }}"
+            "QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_sel_btn = QPushButton("✕  Borrar selección")
+        self._del_sel_btn.setFixedHeight(30)
+        self._del_sel_btn.setEnabled(False)
+        self._del_sel_btn.setStyleSheet(_del_ss)
+        self._del_sel_btn.clicked.connect(self._delete_selected)
+        lay.addWidget(self._del_sel_btn)
+
+        self._del_all_btn = QPushButton("✕✕  Borrar todo")
+        self._del_all_btn.setFixedHeight(30)
+        self._del_all_btn.setStyleSheet(_del_ss)
+        self._del_all_btn.clicked.connect(self._delete_all)
+        lay.addWidget(self._del_all_btn)
 
         self._disk_lbl = QLabel("")
         self._disk_lbl.setStyleSheet(
@@ -954,8 +1026,12 @@ class OperatorFrameViewer(QMainWindow):
 
     def _on_list_select(self, row: int) -> None:
         if row < 0 or row >= len(self._summaries):
+            self._current_summary = None
+            self._del_sel_btn.setEnabled(False)
             return
         s = self._summaries[row]
+        self._current_summary = s
+        self._del_sel_btn.setEnabled(True)
         if self._mode == "events":
             self._nav_panel.load_event(s)
         elif self._mode == "nok":
@@ -964,6 +1040,104 @@ class OperatorFrameViewer(QMainWindow):
         else:
             scanner_label = _scanner_display(s["scanner_id"])
             self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+
+    # ── Borrado ───────────────────────────────────────────────────────
+
+    def _delete_selected(self) -> None:
+        s = self._current_summary
+        if s is None:
+            return
+        if self._mode == "events":
+            name = s.get("name", str(s.get("dir", "")))
+            answer = QMessageBox.question(
+                self, "Borrar evidencia",
+                f"¿Borrar la carpeta completa '{name}'?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                shutil.rmtree(s["dir"])
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        elif self._mode == "ok":
+            scanner = _scanner_display(s["scanner_id"])
+            answer = QMessageBox.question(
+                self, "Borrar frames OK",
+                f"¿Borrar todos los frames OK de {scanner}?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                for f in s["frames"]:
+                    f.unlink(missing_ok=True)
+                for suffix in ("_raw.jpg",):
+                    for f in s["dir"].glob(f"ok_*{suffix}"):
+                        f.unlink(missing_ok=True)
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        elif self._mode == "nok":
+            scanner = _scanner_display(s["scanner_id"])
+            answer = QMessageBox.question(
+                self, "Borrar frames NOK",
+                f"¿Borrar todos los frames NOK de {scanner}?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                for f in s["frames"]:
+                    f.unlink(missing_ok=True)
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        self._current_summary = None
+        self._del_sel_btn.setEnabled(False)
+        self._populate_list()
+
+    def _delete_all(self) -> None:
+        if self._mode == "events":
+            label = "todas las evidencias de parada"
+        elif self._mode == "ok":
+            label = "todos los frames OK guardados"
+        else:
+            label = "todos los frames NOK guardados"
+        answer = QMessageBox.question(
+            self, "Borrar todo",
+            f"¿Borrar {label}?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if self._mode == "events":
+                if _EVENTS_DIR.exists():
+                    for d in _EVENTS_DIR.iterdir():
+                        if d.is_dir():
+                            shutil.rmtree(d)
+            elif self._mode == "ok":
+                if _OK_BUF_BASE.exists():
+                    for d in _OK_BUF_BASE.iterdir():
+                        if d.is_dir():
+                            for f in d.glob("ok_*.jpg"):
+                                f.unlink(missing_ok=True)
+            elif self._mode == "nok":
+                if _NOK_DIR.exists():
+                    for f in _NOK_DIR.glob("*.png"):
+                        f.unlink(missing_ok=True)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar todo:\n{exc}")
+            return
+        self._current_summary = None
+        self._del_sel_btn.setEnabled(False)
+        self._populate_list()
 
     # ── showEvent: activar modo eventos por defecto ───────────────────
 
