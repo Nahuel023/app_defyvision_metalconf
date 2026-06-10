@@ -883,14 +883,16 @@ def _inspect_bgr(
 
     badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn)) + int(bool(_lateral_shift_warn))
 
-    # The green overlay must reflect the ACTUAL pattern matches, not a separately
-    # filtered visual subset. Otherwise a hole can match the pattern but still be
-    # drawn as cyan only because the overlay applied an extra hull/bbox filter.
-    overlay_holes = [
-        detected_holes_in_bbox[idx]
-        for idx in report.matched_detected_idx
-        if 0 <= idx < len(detected_holes_in_bbox)
-    ]
+    # Visual semantics for operators:
+    # green = detected hole inside the active pattern comparison window
+    # cyan  = raw detection outside that active window
+    #
+    # Using only report.matched_detected_idx made the overlay too strict: a hole
+    # could be valid and relevant to the pattern region, but remain cyan simply
+    # because the 1-to-1 matcher assigned a nearby neighbor to the expected point.
+    # For operator feedback we want "participates in pattern analysis", not
+    # "won the exact assignment slot".
+    overlay_holes = list(detected_holes_in_bbox)
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, overlay_holes, report.missing_points, final_status,

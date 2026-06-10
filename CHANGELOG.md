@@ -48,6 +48,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 150 - Esterilla: verde del overlay vuelve a representar deteccion valida en ventana de patron
+
+**Sintoma:** despues del Cambio 149 el overlay paso a mostrar menos agujeros verdes, aun
+cuando la deteccion seguia encontrando los agujeros. Visualmente "se veia peor" porque el
+verde quedo demasiado estricto para el uso operativo.
+
+**Causa raiz:**
+- en Cambio 149 se definio `verde = match exacto 1-a-1`
+- eso reduce la cantidad de verdes cuando hay dos detectados muy cercanos y solo uno gana
+  la asignacion del matcher, aunque ambos pertenezcan claramente a la zona del patron
+- para inspeccion operativa, lo que el usuario necesita ver es:
+  - verde = agujero detectado dentro de la ventana activa del patron
+  - cian = deteccion cruda fuera de esa ventana
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - `overlay_holes` vuelve a salir de `detected_holes_in_bbox`
+  - se mantiene la separacion visual entre:
+    - verde: deteccion valida dentro de la ventana de comparacion
+    - cian: deteccion cruda fuera de la ventana activa
+
+**Resultado:** el overlay recupera una lectura visual util para calibracion y servicio:
+si el agujero forma parte de la zona analizada del patron, vuelve a verse en verde aunque
+el matcher interno haya elegido otro detectado cercano para la asignacion final.
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
 #### Cambio 149 - Esterilla: overlay verde ahora representa matches reales del patron
 
 **Sintoma:** seguian apareciendo agujeros azules/cian en los bordes de la esterilla aun
