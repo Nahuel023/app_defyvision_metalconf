@@ -1507,6 +1507,7 @@ class RecordingTab(QWidget):
         # que ServiceWindow monta dentro del tab "Cámara".
         self._grab_page = self._build_grab_page()
         self._ana_page  = self._build_ana_page()
+        self._cal_page  = self._build_cal_page()
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1557,28 +1558,12 @@ class RecordingTab(QWidget):
         lay.setSpacing(14)
 
         ctrl = QWidget()
-        ctrl.setStyleSheet(f"background:{_DARK};")
         ctrl_lay = QVBoxLayout(ctrl)
         ctrl_lay.setContentsMargins(0, 0, 0, 0)
         ctrl_lay.setSpacing(10)
         ctrl_lay.addWidget(self._build_recording_section())
-        ctrl_lay.addWidget(self._build_roi_section())
         ctrl_lay.addStretch()
-
-        ctrl_scroll = QScrollArea()
-        ctrl_scroll.setWidgetResizable(True)
-        ctrl_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        ctrl_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        ctrl_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        ctrl_scroll.setStyleSheet(
-            f"QScrollArea {{ background:{_DARK};border:none; }}"
-            f"QScrollBar:vertical {{ background:{_DARK};width:8px;border-radius:4px; }}"
-            f"QScrollBar::handle:vertical {{ background:#334155;border-radius:4px;min-height:24px; }}"
-            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
-        )
-        ctrl_scroll.setWidget(ctrl)
-        ctrl_scroll.setFixedWidth(340)
-        lay.addWidget(ctrl_scroll)
+        lay.addWidget(ctrl)
 
         self._cam_panel = self._build_ip_camera_section()
         lay.addWidget(self._cam_panel, stretch=1)
@@ -1620,6 +1605,37 @@ class RecordingTab(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setStyleSheet(_scroll_style)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+        return page
+
+    def _build_cal_page(self) -> QWidget:
+        """Página CALIBRACIÓN: sección de ajuste manual de ROI con scroll."""
+        page = QWidget()
+        page.setStyleSheet(f"background:{_DARK};")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(14, 14, 14, 14)
+        content_lay.setSpacing(10)
+        content_lay.addWidget(self._build_roi_section())
+        content_lay.addStretch()
+
+        _scroll_style = (
+            f"QScrollArea {{ background:{_DARK};border:none; }}"
+            f"QScrollBar:vertical {{ background:{_DARK};width:8px;border-radius:4px; }}"
+            f"QScrollBar::handle:vertical {{ background:#334155;border-radius:4px;min-height:24px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
+        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet(_scroll_style)
         scroll.setWidget(content)
         outer.addWidget(scroll)
@@ -6037,6 +6053,7 @@ class ServiceWindow(QMainWindow):
         cam_tabs.setStyleSheet(_sub_style)
         cam_tabs.addTab(self._rec_tab._grab_page, "  GRABACIÓN  ")
         cam_tabs.addTab(self._rec_tab._ana_page,  "  ANÁLISIS  ")
+        cam_tabs.addTab(self._rec_tab._cal_page,  "  CALIBRACIÓN  ")
         cam_tabs.addTab(self._cam_tab,             "  CONEXIÓN  ")
 
         self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
