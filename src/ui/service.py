@@ -1958,10 +1958,19 @@ class RecordingTab(QWidget):
         self._btn_roi_save.setEnabled(True)
         self._roi_redraw()
 
+    _ROI_DEFAULT_DIR = Path(r"C:\DEFYVISION - Metalconf\app_defyvision_metalconf\data\recordings")
+
+    def _roi_start_dir(self) -> str:
+        if self._rec_dir and self._rec_dir.exists():
+            return str(self._rec_dir)
+        if self._ROI_DEFAULT_DIR.exists():
+            return str(self._ROI_DEFAULT_DIR)
+        return ""
+
     def _on_roi_pick_image(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self, "Seleccionar imagen",
-            str(self._rec_dir) if self._rec_dir else "",
+            self._roi_start_dir(),
             "Imágenes (*.png *.jpg *.jpeg *.bmp)"
         )
         if path:
@@ -1970,7 +1979,7 @@ class RecordingTab(QWidget):
     def _on_roi_pick_folder(self) -> None:
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar carpeta de frames",
-            str(self._rec_dir) if self._rec_dir else ""
+            self._roi_start_dir()
         )
         if not folder:
             return
