@@ -46,6 +46,57 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-10 — Tadeo + Claude
+
+#### Cambio 144 - Microperforado scanner_1: recalibración ROI y patrón por reposicionamiento de chapa
+
+**Pedido:** Las chapas se desplazaron levemente de posición. Recalibrar ROI y patrón de
+`scanner_1/modelo_B` usando la nueva grabación `10-06-2026-MICROPERFORADO_1` (35 frames).
+
+**Diagnóstico:** El ROI previo (Cambio 140: x=200, w=230) ya no coincidía con la nueva
+posición de la chapa. Análisis de perfil de columna en los nuevos frames indicó zona de
+agujeros en x=225-432 del frame completo; con borde izquierdo de imagen en ~x=0 y ROI
+anterior iniciando en x=200, la zona izquierda se solapaba con metal sólido.
+
+**Cambios aplicados:**
+
+- `data/patterns/scanner_1/modelo_B/roi.json`:
+  - `x=200, w=230` → `x=236, w=216` (zona x=236 a x=452 del frame completo)
+  - ROI restaurado al valor calibrado históricamente (pre-Cambio 140) que corresponde
+    a la nueva posición real de la chapa
+
+- `data/patterns/modelo_B/roi.json`:
+  - ídem `x=200, w=230` → `x=236, w=216`
+  - Mantiene sincronía entre live mode y análisis por carpetas (regla de Cambio 141)
+
+- `data/patterns/scanner_1/modelo_B/holes.json`:
+  - Reconstruido desde `frame_0003.png` de `10-06-2026-MICROPERFORADO_1`
+  - **Antes** (Cambio 140): 78 holes, image_size=[230,480], phase=(34,8)
+  - **Después:** 122 holes, image_size=[216,480], dx=36.0, dy=14.0, stagger=-18.0, phase=(6.0, 2.0)
+  - Comando: `build-pattern --model modelo_B --scanner scanner_1 --img frame_0003.png`
+
+- `config/tolerancias.yaml` — modelo_B:
+  - `pattern_edge_margin_px: 50.0 → 22.0`
+    - Valor 50 era demasiado grande: dejaba sólo 79px de los 216px del ROI cubiertos por patrón
+    - Con 22px los 6 márgenes excluyen correctamente las columnas/filas inestables del borde
+
+**Validación sobre `10-06-2026-MICROPERFORADO_1` (35 frames):**
+- `raw_ok=15 raw_nok=20 temporal_ok=20 temporal_nok=15 machine_stop_frames=15`
+- Frames 0-12: 100% OK (missing=0, ratio=153-157%)
+- Frame 0002: NOK aislado streak=1 → resuelto temporalmente como OK (correcto)
+- Frames 13-17: burst NOK (missing=5-8), luego vuelve a OK en frames 18-20
+- Frames 21-34: NOK sostenido (missing=4-8, ratio=139-143%) — **defectos reales en material**
+- Los 15 `machine_stop` confirmados como defectos físicos: caída consistente del detection_ratio
+  y celdas faltantes distribuidas en zona central del patrón (no en bordes)
+
+**Archivos modificados:**
+- `data/patterns/scanner_1/modelo_B/roi.json`
+- `data/patterns/modelo_B/roi.json`
+- `data/patterns/scanner_1/modelo_B/holes.json`
+- `config/tolerancias.yaml`
+
+---
+
 ### Sesión 2026-06-09 — Tadeo + Claude
 
 #### Cambio 143 - Microperforado: parada inmediata por corrimiento lateral + parada por agujero único
