@@ -40,7 +40,7 @@ from src.plc.io_map import IOMap
 from src.utils.config import load_tolerances
 from src.utils.state import OperationMode, ScannerState
 from src.vision.camera import Camera
-from src.vision.inspector import Inspector
+from src.vision.inspector import Inspector, InspectionSession
 
 logger = logging.getLogger(__name__)
 
@@ -592,18 +592,26 @@ class ScannerController:
         return True
 
     def _continuous_loop(self) -> None:
+        return self._continuous_loop_shared()
+
+    def _continuous_loop_unified(self) -> None:
         """Modo continuo AUTO: inspecciona cuando el material avanzó lo suficiente.
 
         Compara cada frame con el ÚLTIMO FRAME INSPECCIONADO (no con el anterior).
         Si la diferencia media supera continuous_position_threshold → nueva sección
         → inspeccionar → actualizar referencia.
         """
-        last_gray: Optional[np.ndarray] = None
         frame_counter = 0
-        last_insp_time: float = 0.0
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
+        session = InspectionSession(
+            model_init,
+            scanner_id=self._id,
+            movement_threshold=self._cont_pos_thr,
+            min_interval_sec=self._min_insp_interval,
+            resource_owner=self._inspector,
+        )
         if not self._run_startup_selftest(model_init):
             self._io.write(f"{self._id}.solenoid", False)
             # backlight permanece encendido siempre
@@ -617,6 +625,14 @@ class ScannerController:
                     self._stop_event.wait(timeout=0.05)
                     continue
                 model = self._io.scanner_config(self._id)["model"]
+            if model != session._model:
+                session = InspectionSession(
+                    model,
+                    scanner_id=self._id,
+                    movement_threshold=self._cont_pos_thr,
+                    min_interval_sec=self._min_insp_interval,
+                    resource_owner=self._inspector,
+                )
 
             frame = self._camera.get_frame()
             if frame is None:
@@ -685,11 +701,6 @@ class ScannerController:
                 except Exception as _e:
                     logger.warning(f"[{self._id}] no se pudo guardar diagnóstico ROI: {_e}")
 
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            pos_thr = self._cont_pos_thr
-            min_interval = self._min_insp_interval
-
             forced = self._force_inspect.is_set()
             if forced:
                 self._force_inspect.clear()
@@ -712,13 +723,113 @@ class ScannerController:
             frame_counter += 1
             fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
                    f"_{frame_counter:04d}")
-            res = self._inspector.inspect(model, frame, frame_id=fid,
-                                          scanner_id=self._id)
+            res = session.inspect_frame(frame, frame_id=fid, force=forced)
+            with self._lock:
+                self._last_position_diff = session.last_position_diff
             if res is not None:
-                last_gray = gray
-                last_insp_time = time.monotonic()
+                if session.last_position_diff > 0.0:
+                    logger.debug(
+                        f"[{self._id}] nueva seccion detectada "
+                        f"(diff={session.last_position_diff:.1f})"
+                    )
                 self._handle_result(res, model)
+            else:
+                self._stop_event.wait(timeout=0.033)
+                continue
 
+            self._stop_event.wait(timeout=0.005)
+
+    def _continuous_loop_shared(self) -> None:
+        """Shared live-session loop used by production and folder-equivalent flows."""
+        frame_counter = 0
+
+        with self._lock:
+            model_init = self._io.scanner_config(self._id)["model"]
+        session = InspectionSession(
+            model_init,
+            scanner_id=self._id,
+            movement_threshold=self._cont_pos_thr,
+            min_interval_sec=self._min_insp_interval,
+            resource_owner=self._inspector,
+        )
+        if not self._run_startup_selftest(model_init):
+            self._io.write(f"{self._id}.solenoid", False)
+            self._set_lights(red=True)
+            self._transition(ScannerState.ERROR)
+            return
+
+        while not self._stop_event.is_set():
+            with self._lock:
+                if self._state != ScannerState.RUNNING:
+                    self._stop_event.wait(timeout=0.05)
+                    continue
+                model = self._io.scanner_config(self._id)["model"]
+            if model != session._model:
+                session = InspectionSession(
+                    model,
+                    scanner_id=self._id,
+                    movement_threshold=self._cont_pos_thr,
+                    min_interval_sec=self._min_insp_interval,
+                    resource_owner=self._inspector,
+                )
+
+            frame = self._camera.get_frame()
+            if frame is None:
+                now = time.monotonic()
+                escalate = False
+                with self._lock:
+                    if self._camera_missing_since is None:
+                        self._camera_missing_since = now
+                        self._camera_missing_events += 1
+                    missing_sec = now - self._camera_missing_since
+                    if not self._camera_missing_warned:
+                        self._camera_missing_warned = True
+                        logger.warning(
+                            f"[{self._id}] CAMARA DESCONECTADA - reconectando "
+                            f"(timeout error {self._camera_missing_timeout_s:.1f}s)"
+                        )
+                    if missing_sec >= self._camera_missing_timeout_s:
+                        escalate = (self._state == ScannerState.RUNNING)
+                if escalate:
+                    logger.error(
+                        f"[{self._id}] ERROR por perdida de camara - "
+                        f"sin frames durante {missing_sec:.1f}s"
+                    )
+                    self._io.write(f"{self._id}.solenoid", False)
+                    self._set_lights(red=True)
+                    self._transition(ScannerState.ERROR)
+                    return
+                self._stop_event.wait(timeout=0.033)
+                continue
+
+            with self._lock:
+                if self._camera_missing_since is not None:
+                    self._camera_missing_total_s += max(
+                        0.0, time.monotonic() - self._camera_missing_since
+                    )
+                    logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
+                self._camera_missing_since = None
+                self._camera_missing_warned = False
+
+            if self._recorder is not None:
+                self._recorder.add_frame(frame)
+
+            forced = self._force_inspect.is_set()
+            if forced:
+                self._force_inspect.clear()
+
+            frame_counter += 1
+            fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
+                   f"_{frame_counter:04d}")
+            res = session.inspect_frame(frame, frame_id=fid, force=forced)
+            with self._lock:
+                self._last_position_diff = session.last_position_diff
+
+            if res is None:
+                self._stop_event.wait(timeout=0.033)
+                continue
+
+            self._handle_result(res, model)
             self._stop_event.wait(timeout=0.005)
 
     def _handle_result(self, result: InspectionResult, model: str = "") -> None:
