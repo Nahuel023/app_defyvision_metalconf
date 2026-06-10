@@ -357,11 +357,15 @@ def _pattern_bounds_by_band(
         return {}, {}
 
     all_holes = list(holes)
-    # Use hole CENTERS (not outer edges) as the reference for boundary selection.
-    # This ensures the drawn PATRON line passes through the centre of the outermost
-    # hole circle rather than between two adjacent columns when the grid is staggered.
-    global_left  = float(min(hh.x for hh in all_holes))
-    global_right = float(max(hh.x for hh in all_holes))
+    # Use robust percentile instead of global min/max as the boundary reference so that
+    # a small number of outlier holes near one end of the pattern (e.g. the staggered
+    # outer column present only in part of the image) do not pull the gate too far and
+    # exclude the main boundary column from the other bands.
+    # boundary_tol_px=8 with pct10/pct90 is equivalent to btol≈20 with the raw min/max
+    # for a pattern where the outer-outlier column is ~4% of all holes.
+    xs_all = np.array([hh.x for hh in all_holes], dtype=np.float64)
+    global_left  = float(np.percentile(xs_all, 10))
+    global_right = float(np.percentile(xs_all, 90))
     band_h = img_h / n_bands
     row_tol_px = max(
         3.0,
