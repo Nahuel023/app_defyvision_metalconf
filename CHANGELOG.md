@@ -48,6 +48,36 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 152 - Microperforado: borde PATRON por columna exterior dominante, sin mezclar columnas vecinas
+
+**Pedido:** recuperar la deteccion correcta del borde PATRON en microperforado, porque la
+linea estaba haciendo zigzag y ya no servia para leer bien desviacion/bordes.
+
+**Diagnostico:**
+- con el fix del Cambio 145, `_pattern_bounds_by_band()` usaba `percentile(10/90)` como
+  referencia global del borde
+- en `scanner_1/modelo_B` eso cae en la **segunda** columna extrema, no en la exterior:
+  - clusters X detectados: `16, 35, 53, ..., 183, 201`
+  - `p10 ≈ 33.8`, `p90 ≈ 184.2`
+- con `boundary_tol_px=8`, el gate derecho/izquierdo terminaba mezclando dos columnas
+  vecinas del patron y la linea PATRON hacia serrucho/zigzag entre ellas
+
+**Cambio aplicado (`src/pipeline/edge_centering.py`):**
+- nueva helper `_robust_outer_column_centers()`
+  - agrupa agujeros por clusters de X
+  - elige la columna exterior **dominante**
+  - si la columna extrema es muy rala respecto de la siguiente (`count < 60%`), la trata
+    como outlier y usa la siguiente hacia adentro
+- `_pattern_bounds_by_band()` ahora usa esa referencia robusta en vez de `percentile(10/90)`
+
+**Resultado:** se conserva la ventaja del fix de outliers del Cambio 145, pero sin mezclar
+las dos columnas exteriores reales del microperforado. La linea PATRON vuelve a seguir una
+columna limpia y deja de zigzaguear.
+
+**Archivos modificados:** `src/pipeline/edge_centering.py`
+
+---
+
 #### Cambio 151 - Microperforado: revertir agresividad de parada inmediata y volver al comportamiento estable
 
 **Pedido:** revisar si se habia roto el patron de microperforado respecto de ayer, porque
