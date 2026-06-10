@@ -48,6 +48,38 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 154 - Microperforado: recuperar estabilidad de matching en scanner_1 sin tocar el patron
+
+**Pedido:** revisar por que `scanner_1` con microperforado volvio a marcar muchos
+`missing` falsos y comparar contra commits anteriores donde casi no habia faltantes falsos.
+
+**Diagnostico:**
+- se hizo `git pull --rebase origin master` antes de analizar y no habia cambios nuevos
+- se comparo el folder
+  `C:\\Users\\DefyC\\Downloads\\05-06-2026-PATRONES EDITADOS\\05-06-2026-MICROPERFORADO_1`
+  entre el estado actual y commits viejos estables
+- el patron/ROI de `data/patterns/scanner_1/modelo_B` no se desvio respecto del commit
+  bueno `8f83cab`; el problema estaba en como se estaba calificando y matcheando
+- evidencia sobre esa carpeta:
+  - `8f83cab`: `137/137 raw OK`
+  - HEAD antes del fix: `134/137 raw OK`
+  - en pruebas sobre la carpeta, subir `tol_xy_px` de `20 -> 22` baja los `missing`
+    totales (`54 -> 43`) y reduce `raw_nok` (`3 -> 1`)
+  - ademas, `frame_missing_nok_threshold` habia quedado mas agresivo (`10 -> 3`)
+    que en el baseline validado
+
+**Cambio aplicado (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `tol_xy_px: 20.0 -> 22.0`
+- `frame_missing_nok_threshold: 3 -> 5`
+
+**Resultado esperado:** microperforado vuelve a tolerar mejor pequenos corrimientos de
+matching en `scanner_1`, baja los `missing` falsos en los frames de borde y deja de
+castigar como NOK varios frames que antes estaban dentro del comportamiento estable.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 153 - Revert parcial del overlay cian compartido para no penalizar scanner_1
 
 **Pedido:** volver hacia atras el cambio de los redondos cian porque, desde que entro esa
