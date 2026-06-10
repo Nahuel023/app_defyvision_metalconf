@@ -48,6 +48,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 153 - Revert parcial del overlay cian compartido para no penalizar scanner_1
+
+**Pedido:** volver hacia atras el cambio de los redondos cian porque, desde que entro esa
+logica compartida, `scanner_1` con microperforado dejo de comportarse como ayer y parecia
+escanear peor / mas pesado.
+
+**Diagnostico:**
+- los circulos cian no afectaban el patron, pero si agregaban trabajo extra en cada frame
+  dentro de `draw_compare_overlay()` y tambien arrastraban estado adicional en
+  `src/inspection.py`
+- como `scanner_1` estaba estable y el pedido prioritario fue recuperar ese flujo en vivo,
+  conviene volver al overlay liviano compartido que usaba antes microperforado
+
+**Cambio aplicado:**
+- `src/pipeline/annotate.py`
+  - se elimina el dibujo de `raw_detected` en cian
+- `src/inspection.py`
+  - se elimina la ruta auxiliar `detected_holes_in_bbox`
+  - `overlay_holes` vuelve a la logica visual filtrada por bbox/top-bottom/hull
+  - se deja intacta la logica de comparacion/decision
+
+**Resultado:** microperforado vuelve a usar un overlay mas liviano y cercano al flujo con
+el que estaba funcionando correctamente, sin tocar el patron ni la decision de analisis.
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
+
 #### Cambio 152 - Microperforado: borde PATRON por columna exterior dominante, sin mezclar columnas vecinas
 
 **Pedido:** recuperar la deteccion correcta del borde PATRON en microperforado, porque la
