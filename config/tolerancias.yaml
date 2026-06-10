@@ -85,7 +85,7 @@ models:
     grid_max_missing: 80
     bbox_filter_margin_px: 60.0
     pattern_hull_margin_px: 10.0
-    grid_affine_refinement: false
+    grid_affine_refinement: true
     extra_min_dist_factor: 2.0
     compare_top_ignore_px: 0.0
     compare_bottom_ignore_px: 0.0
@@ -149,6 +149,7 @@ models:
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
+    machine_stop_require_frame_nok: true
     grid_lateral_shift_max_px: 0.0   # desactivado — reactivar cuando la alineacion este corregida
     use_hungarian_matching: false
     verticality_quality_enabled: false
@@ -170,5 +171,5 @@ models:
     pattern_edge_boundary_tol_px: 8.0
     compare_top_ignore_px: 46.0
     compare_bottom_ignore_px: 42.0
-    frame_missing_nok_threshold: 5
+    frame_missing_nok_threshold: 6
     tilt_warn_deg: 0.0
