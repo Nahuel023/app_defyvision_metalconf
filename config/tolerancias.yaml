@@ -152,6 +152,7 @@ models:
     machine_stop_require_frame_nok: true
     grid_lateral_shift_max_px: 0.0   # desactivado — reactivar cuando la alineacion este corregida
     use_hungarian_matching: false
+    blur_score_min: 200.0          # frames borrosos por vibracion → LOW_QUALITY → no acumula machine stop
     verticality_quality_enabled: false
     chapa_zigzag_std_max_px: 4.0
     chapa_zigzag_abs_max_px: 10.0
