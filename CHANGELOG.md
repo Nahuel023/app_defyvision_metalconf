@@ -48,33 +48,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
-#### Cambio 148 - Service UI: sección "Calibración ROI" en página Grabación
+#### Cambio 148 - Service UI: sección "Calibración ROI" manual en página Grabación
 
-**Pedido:** agregar una sección en la pestaña Grabación de la UI de servicio para poder
-calibrar el ROI automáticamente desde la interfaz, sin ejecutar comandos CLI.
+**Pedido:** agregar una sección en la pestaña Grabación para calibrar el ROI visualmente,
+con ajuste manual (sin detección automática).
 
 **Implementación:**
 
-- **`_RoiDetectWorker(QThread)`** — nuevo worker que corre `detect_roi_from_images(margin=0)`
-  en un hilo de fondo. Emite `finished(raw_left, raw_right, ref_img_bgr)` y `error(str)`.
-  Muestrea hasta 20 frames del origen seleccionado.
-
 - **`_build_roi_section()`** — nueva sección `QGroupBox` en la columna izquierda de
   `_build_grab_page()`, entre la sección de Grabación y el stretch. Contiene:
-  - Etiqueta "ROI actual" (cargada desde `roi.json` al abrir)
-  - Botones "Usar grabación" (toma `self._rec_dir` post-stop) y "Seleccionar carpeta..."
-  - Selector de canal (r/g/b/gray) + spinbox de margen en px
-  - Botón "DETECTAR ROI" (lanza el worker)
-  - Thumbnail preview (280px ancho) con rectángulo cyan y líneas verdes sobre el frame de referencia
-  - Resultado "Detectada: x= y= w= h=" + botón "GUARDAR"
-  - Etiqueta de estado/error
+  - Etiqueta "ROI actual" (cargada desde `roi.json` al abrir, actualiza al cambiar scanner)
+  - "Abrir imagen" / "Abrir carpeta" — carga un frame de referencia
+  - Preview live (160px alto): zona fuera del ROI oscurecida, líneas verde (izq) y cyan (der)
+  - BORDE IZQ [◄] [►] / BORDE DER [◄] [►] — mueven cada borde N px por click
+  - Spinbox PASO px (1–100, default 5)
+  - "GUARDAR ROI" — escribe `roi.json` para el scanner y modelo activos
 
-- **Flujo de margen en tiempo real:** el worker emite los bordes RAW (sin margen). Al cambiar
-  el spinbox, `_on_roi_margin_changed()` aplica `lx = raw_left + margin`, `rx = raw_right - margin`
-  al instante, actualiza preview y resultado sin re-detectar.
+- **Al cargar un frame:** inicializa los bordes con la ROI guardada existente (si hay),
+  o con la imagen completa (x=0, rx=W).
 
-- **Guardar:** `_on_roi_save()` escribe `roi.json` en
-  `data/patterns/{scanner_id}/{model}/roi.json` y refresca la etiqueta "ROI actual".
+- **La ROI guardada** se aplica automáticamente en análisis de carpeta y modo producción
+  a través de `load_roi(model, scanner_id)` existente — no requiere ningún cambio adicional.
+
+- **Eliminado:** detección automática por backlight (`_RoiDetectWorker`, canal, margen).
 
 **Archivos modificados:** `src/ui/service.py`
 
