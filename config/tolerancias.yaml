@@ -144,9 +144,9 @@ models:
     continuous_position_threshold: 4.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 3
-    machine_stop_min_missing: 1
+    machine_stop_min_missing: 2
     machine_stop_same_zone_px: 35.0
-    machine_stop_ignore_near_miss: false
+    machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
     grid_lateral_shift_max_px: 25.0
