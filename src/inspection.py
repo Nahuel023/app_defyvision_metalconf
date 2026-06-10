@@ -174,6 +174,10 @@ def _inspect_bgr(
         _machine_stop_detector or pre.get("machine_stop_detector")
     )
 
+    # Estado de racha de desalineacion del patron (persiste entre frames igual que ema_state).
+    # Formato: {"streak": int, "reason": str}
+    desalign_state: dict = pre.get("desalign_state") or {"streak": 0, "reason": ""}
+
     tolerances = pre.get("tolerances") or load_tolerances(model)
     pattern: Pattern = pre.get("pattern") or load_pattern(find_pattern_path(model, scanner_id))
     roi: Optional[ROI] = pre.get("roi", _SENTINEL)
@@ -275,9 +279,12 @@ def _inspect_bgr(
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
-    # Cuando True, pattern_alignment_warn dispara machine_stop inmediato (parada en un frame).
-    # Cuando False, solo marca NOK + badge (parada por racha temporal, igual que tilt).
+    # Cuando True, pattern_alignment_warn acumula una racha de frames desalineados antes de parar.
+    # Cuando False, solo marca NOK + badge sin parar la maquina nunca.
     pattern_align_machine_stop = bool(tolerances.get("pattern_align_machine_stop", True))
+    # Frames consecutivos con desalineacion de patron necesarios para disparar machine_stop.
+    # 1 = parada inmediata en el primer frame; 3 = requiere 3 frames seguidos (mas robusto al ruido).
+    pattern_align_stop_frames  = int(tolerances.get("pattern_align_stop_frames", 3))
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
@@ -809,11 +816,31 @@ def _inspect_bgr(
                 col_str  = ", ".join(str(c) for c in cols)
                 _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
 
-    # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada inmediata en un frame.
-    # Se aplica DESPUES del ms_detector para no ser reseteado por la inicializacion en False.
-    if _desalign_stop:
-        machine_stop = True
-        _ms_reason   = _desalign_reason
+    # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada por RACHA de N frames.
+    # _desalign_stop = True en este frame → incrementar racha.
+    # _desalign_stop = False → resetear racha (ya no hay desalineacion).
+    # Solo se para cuando racha >= pattern_align_stop_frames.
+    # Se aplica DESPUES del ms_detector para no ser reseteado por machine_stop=False.
+    # IMPORTANTE: guardar desalign_state de vuelta en pre[] para que persista al proximo frame
+    # (mismo patron que ema_state: el dict mutado queda en _preloaded entre llamadas).
+    if pattern_align_machine_stop:
+        if _desalign_stop:
+            desalign_state["streak"] += 1
+            desalign_state["reason"]  = _desalign_reason
+        else:
+            desalign_state["streak"] = 0
+            desalign_state["reason"] = ""
+        if desalign_state["streak"] >= pattern_align_stop_frames:
+            machine_stop = True
+            _ms_reason   = (
+                f"{desalign_state['reason']} "
+                f"[{desalign_state['streak']}/{pattern_align_stop_frames} frames]"
+            )
+    else:
+        desalign_state["streak"] = 0
+        desalign_state["reason"] = ""
+    # Persistir estado al siguiente frame (si _preloaded es un dict mutable compartido)
+    pre["desalign_state"] = desalign_state
 
     # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
     # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
