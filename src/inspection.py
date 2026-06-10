@@ -550,6 +550,7 @@ def _inspect_bgr(
     # fuera del area del patrón desplacen global_left/global_right.
     detected_types: list[str] | None = None
     holes_in_bbox: list = holes  # default: all holes (updated below when bbox is applied)
+    detected_holes_in_bbox: list = holes
     if compare_points and bbox_filter_margin_px >= 0:
         xs = [p[0] for p in compare_points]
         ys = [p[1] for p in compare_points]
@@ -567,6 +568,7 @@ def _inspect_bgr(
             detected_in_bbox = [(x, y) for x, y in detected_points
                                 if bx1 <= x <= bx2 and by1 <= y <= by2]
         holes_in_bbox = [hh for hh in holes if bx1 <= hh.x <= bx2 and by1 <= hh.y <= by2]
+        detected_holes_in_bbox = holes_in_bbox
     else:
         detected_in_bbox = detected_points
         detected_types   = _det_types_full
@@ -574,6 +576,10 @@ def _inspect_bgr(
     if detected_in_bbox and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
         y_keep_min = compare_top_ignore_px
         y_keep_max = img_h - compare_bottom_ignore_px
+        detected_holes_in_bbox = [
+            hh for hh in detected_holes_in_bbox
+            if y_keep_min <= hh.y <= y_keep_max
+        ]
         if detected_types is not None:
             _filtered = [
                 (pt, dt) for pt, dt in zip(detected_in_bbox, detected_types)
@@ -877,31 +883,14 @@ def _inspect_bgr(
 
     badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn)) + int(bool(_lateral_shift_warn))
 
-    overlay_holes = holes
-    if compare_points:
-        if bbox_filter_margin_px >= 0:
-            xs = [p[0] for p in compare_points]
-            ys = [p[1] for p in compare_points]
-            m = bbox_filter_margin_px
-            bx1, bx2 = min(xs) - m, max(xs) + m
-            by1, by2 = min(ys) - m, max(ys) + m
-            overlay_holes = [
-                h for h in overlay_holes
-                if bx1 <= h.x <= bx2 and by1 <= h.y <= by2
-            ]
-        if compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0:
-            y_keep_min = compare_top_ignore_px
-            y_keep_max = img_h - compare_bottom_ignore_px
-            overlay_holes = [
-                h for h in overlay_holes
-                if y_keep_min <= h.y <= y_keep_max
-            ]
-        if pattern_hull_margin_px > 0.0 and len(compare_points) >= 3:
-            hull = cv2.convexHull(np.array(compare_points, dtype=np.float32).reshape(-1, 1, 2))
-            overlay_holes = [
-                h for h in overlay_holes
-                if cv2.pointPolygonTest(hull, (float(h.x), float(h.y)), True) >= -pattern_hull_margin_px
-            ]
+    # The green overlay must reflect the ACTUAL pattern matches, not a separately
+    # filtered visual subset. Otherwise a hole can match the pattern but still be
+    # drawn as cyan only because the overlay applied an extra hull/bbox filter.
+    overlay_holes = [
+        detected_holes_in_bbox[idx]
+        for idx in report.matched_detected_idx
+        if 0 <= idx < len(detected_holes_in_bbox)
+    ]
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, overlay_holes, report.missing_points, final_status,
