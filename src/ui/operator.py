@@ -846,7 +846,7 @@ class OperatorWindow(QMainWindow):
             return b
 
         metrics_btn   = _hbtn("Métricas",    "#1e40af", "#ffffff", self._open_metrics)
-        errors_btn    = _hbtn("Errores",     "#7f1d1d", "#fca5a5", self._open_errors)
+        errors_btn    = _hbtn("GRABACIONES", "#7f1d1d", "#fca5a5", self._open_errors)
         tolerance_btn = _hbtn("Tolerancias", "#065f46", "#6ee7b7", self._open_tolerances)
         service_btn   = _hbtn("Servicio",    "#334155", "#94a3b8", self._open_service)
 
