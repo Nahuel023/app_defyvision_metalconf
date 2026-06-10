@@ -278,6 +278,8 @@ class _InspectWorker(QThread):
 class _EventNavPanel(QWidget):
     """Visor de frames de un evento: imagen grande + tira de miniaturas + navegación."""
 
+    folder_deleted = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._frames: list[Path] = []
@@ -289,6 +291,7 @@ class _EventNavPanel(QWidget):
         self._model: str = ""
         self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
         self._inspect_worker: Optional[_InspectWorker] = None
+        self._current_dir: Optional[Path] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -378,6 +381,18 @@ class _EventNavPanel(QWidget):
         self._del_frame_btn.clicked.connect(self._delete_current_frame)
         nav.addWidget(self._del_frame_btn)
 
+        self._del_folder_btn = QPushButton("✕✕  Borrar carpeta")
+        self._del_folder_btn.setMinimumHeight(36)
+        self._del_folder_btn.setEnabled(False)
+        self._del_folder_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:#fca5a5; border:1px solid #991b1b;"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ background:#991b1b; color:#ffffff; border-color:#ef4444; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_folder_btn.clicked.connect(self._delete_current_folder)
+        nav.addWidget(self._del_folder_btn)
+
         root.addLayout(nav)
 
         # ── Tira de miniaturas ────────────────────────────────────────
@@ -408,6 +423,7 @@ class _EventNavPanel(QWidget):
         self._scanner_id = summary.get("scanner_id", "")
         self._model = _get_model_for_scanner(self._scanner_id)
         self._is_event_mode = True
+        self._current_dir = summary.get("dir")
 
         # Separar pre/post para colorear la tira
         n_pre = summary["pre_count"]
@@ -450,10 +466,12 @@ class _EventNavPanel(QWidget):
 
         self._show_frame(0)
 
-    def load_ok_buffer(self, frames: list[Path], scanner_label: str) -> None:
+    def load_ok_buffer(self, frames: list[Path], scanner_label: str,
+                       folder_dir: Optional[Path] = None) -> None:
         self._frames = frames
         self._current = 0
         self._is_event_mode = False
+        self._current_dir = folder_dir
         self._info_lbl.setText(
             f"{scanner_label}   ·   Buffer OK — últimas {len(frames)} inspecciones correctas"
         )
@@ -500,8 +518,10 @@ class _EventNavPanel(QWidget):
             self._prev_btn.setEnabled(False)
             self._next_btn.setEnabled(False)
             self._del_frame_btn.setEnabled(False)
+            self._del_folder_btn.setEnabled(False)
             return
         self._del_frame_btn.setEnabled(True)
+        self._del_folder_btn.setEnabled(self._current_dir is not None)
         idx = max(0, min(idx, len(self._frames) - 1))
         self._current = idx
         path = self._frames[idx]
@@ -620,6 +640,35 @@ class _EventNavPanel(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
 
+    def _delete_current_folder(self) -> None:
+        if self._current_dir is None:
+            return
+        name = self._current_dir.name
+        answer = QMessageBox.question(
+            self, "Borrar carpeta completa",
+            f"¿Borrar la carpeta completa '{name}' con todos sus frames?\n"
+            f"Esta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            shutil.rmtree(self._current_dir)
+            self._frames.clear()
+            self._current_dir = None
+            self._clear_thumbs()
+            self._view.clear_image()
+            self._pos_lbl.setText("Sin frames")
+            self._prev_btn.setEnabled(False)
+            self._next_btn.setEnabled(False)
+            self._del_frame_btn.setEnabled(False)
+            self._del_folder_btn.setEnabled(False)
+            self._info_lbl.setText("Carpeta eliminada")
+            self.folder_deleted.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
     def _go_prev(self) -> None:
         self._show_frame(self._current - 1)
 
@@ -692,6 +741,7 @@ class OperatorFrameViewer(QMainWindow):
 
         # Panel de visor derecho
         self._nav_panel = _EventNavPanel()
+        self._nav_panel.folder_deleted.connect(self.reload)
         splitter.addWidget(self._nav_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -1036,10 +1086,11 @@ class OperatorFrameViewer(QMainWindow):
             self._nav_panel.load_event(s)
         elif self._mode == "nok":
             scanner_label = _scanner_display(s["scanner_id"])
-            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label, folder_dir=None)
         else:
             scanner_label = _scanner_display(s["scanner_id"])
-            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label,
+                                            folder_dir=s.get("dir"))
 
     # ── Borrado ───────────────────────────────────────────────────────
 
