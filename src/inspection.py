@@ -905,6 +905,7 @@ def _inspect_bgr(
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, overlay_holes, report.missing_points, final_status,
+                                       raw_detected=holes,
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs,
                                        nok_reasons=nok_reasons,
