@@ -48,6 +48,26 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 159 - Un solo loop continuo para no divergir entre INICIAR y carpeta
+
+**Pedido:** dejar definitivamente unificado el analisis en vivo con el analisis por
+carpeta, manteniendo el filtro de avance de material para no re-analizar el mismo
+frame quieto.
+
+**Cambio aplicado:**
+- `src/controller/scanner_controller.py`
+  - se elimino la duplicacion interna de loops continuos
+  - `_continuous_loop()` quedo como unica implementacion viva del modo `INICIAR`
+  - ese loop usa `InspectionSession`, igual que `inspect_folder()`
+
+**Resultado esperado:** los parametros, la sesion temporal, el detector de avance y
+la decision de "inspeccionar o saltear" salen del mismo camino de ejecucion. Queda
+mucho mas dificil que vivo y carpeta vuelvan a separarse por cambios futuros.
+
+**Archivos modificados:** `src/controller/scanner_controller.py`
+
+---
+
 #### Cambio 158 - Microperforado: detectar desalineacion de patron por zigzag de borde -> machine_stop inmediato
 
 **Pedido:** detectar las desalineaciones que aparecen en los frames 21-26 de
