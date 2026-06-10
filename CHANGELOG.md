@@ -48,6 +48,73 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 148 - Service UI: sección "Calibración ROI" en página Grabación
+
+**Pedido:** agregar una sección en la pestaña Grabación de la UI de servicio para poder
+calibrar el ROI automáticamente desde la interfaz, sin ejecutar comandos CLI.
+
+**Implementación:**
+
+- **`_RoiDetectWorker(QThread)`** — nuevo worker que corre `detect_roi_from_images(margin=0)`
+  en un hilo de fondo. Emite `finished(raw_left, raw_right, ref_img_bgr)` y `error(str)`.
+  Muestrea hasta 20 frames del origen seleccionado.
+
+- **`_build_roi_section()`** — nueva sección `QGroupBox` en la columna izquierda de
+  `_build_grab_page()`, entre la sección de Grabación y el stretch. Contiene:
+  - Etiqueta "ROI actual" (cargada desde `roi.json` al abrir)
+  - Botones "Usar grabación" (toma `self._rec_dir` post-stop) y "Seleccionar carpeta..."
+  - Selector de canal (r/g/b/gray) + spinbox de margen en px
+  - Botón "DETECTAR ROI" (lanza el worker)
+  - Thumbnail preview (280px ancho) con rectángulo cyan y líneas verdes sobre el frame de referencia
+  - Resultado "Detectada: x= y= w= h=" + botón "GUARDAR"
+  - Etiqueta de estado/error
+
+- **Flujo de margen en tiempo real:** el worker emite los bordes RAW (sin margen). Al cambiar
+  el spinbox, `_on_roi_margin_changed()` aplica `lx = raw_left + margin`, `rx = raw_right - margin`
+  al instante, actualiza preview y resultado sin re-detectar.
+
+- **Guardar:** `_on_roi_save()` escribe `roi.json` en
+  `data/patterns/{scanner_id}/{model}/roi.json` y refresca la etiqueta "ROI actual".
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 147 - Esterilla: incluir filas superior/inferior del patron en matching visual y comparacion
+
+**Pedido:** en inspeccion de esterilla algunos agujeros aparecian en azul/cian pero no en
+verde, aun estando claramente dentro del patron real. El usuario pidio que esos agujeros
+se detecten como parte del patron.
+
+**Diagnostico:**
+- el detector crudo si los encontraba
+- el problema no estaba en `grid_compare_margin_x_px`
+- la exclusion venia de `grid_compare_margin_y_px=40.0`, que recortaba demasiado la
+  comparacion arriba y abajo del ROI
+- en `frame_0113`:
+  - con `margin_y=40`: `expected=81`
+  - con `margin_y=10`: `expected=94` (entran todos los puntos del patron)
+  - `missing` se mantiene en `2`, o sea no mete falsos faltantes extra en ese frame
+
+**Cambio aplicado:**
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `grid_compare_margin_y_px: 40.0 -> 10.0`
+
+**Validacion:**
+- `run-image` sobre `frame_0113.png`:
+  - `status=OK`, `expected=94`, `detected=97`, `missing=2`, `extra=0`
+- `run-folder` sobre `05-06-2026-ESTERILLA_1`:
+  - `raw_ok=79`, `raw_nok=54`
+  - `temporal_ok=133`, `temporal_nok=0`
+  - `machine_stop_frames=0`
+
+**Resultado:** los agujeros de las filas superior/inferior ahora entran al patron activo
+y pasan a verse/matchear en verde en lugar de quedar como deteccion cruda descartada.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 146 - CLI: subcomando `detect-roi` para calibracion automatica de ROI
 
 **Motivacion:** la ROI se definía manualmente con `define-roi` (mouse). Con backlight
