@@ -1110,47 +1110,6 @@ class _AnalysisWorker(QThread):
             self.error.emit(str(exc))
 
 
-class _RoiDetectWorker(QThread):
-    """Detecta bordes del backlight en un set de frames. Emite los bordes RAW (sin margen)."""
-
-    finished = pyqtSignal(int, int, object)   # (raw_left_px, raw_right_px, ref_img_bgr)
-    error    = pyqtSignal(str)
-
-    def __init__(self, img_paths: list, channel: str = "r",
-                 max_frames: int = 20, parent=None) -> None:
-        super().__init__(parent)
-        self._paths      = img_paths
-        self._channel    = channel
-        self._max_frames = max_frames
-
-    def run(self) -> None:
-        try:
-            import cv2
-            from src.patterns.roi import detect_roi_from_images
-
-            step  = max(1, len(self._paths) // self._max_frames)
-            paths = self._paths[::step][: self._max_frames]
-
-            imgs = []
-            for p in paths:
-                img = cv2.imread(str(p))
-                if img is not None:
-                    imgs.append(img)
-
-            if not imgs:
-                self.error.emit("No se pudieron leer imágenes")
-                return
-
-            roi = detect_roi_from_images(imgs, channel=self._channel, margin_px=0)
-            if roi is None:
-                self.error.emit("No se detectaron transiciones backlight — verificar canal y backlight encendido")
-                return
-
-            ref = imgs[len(imgs) // 2]
-            self.finished.emit(roi.x, roi.x + roi.w, ref)
-        except Exception as exc:
-            self.error.emit(str(exc))
-
 
 class ZoomableImageView(QWidget):
     """Widget de imagen con zoom (rueda) y pan (drag). API: set_pixmap / clear / fit."""
@@ -1491,12 +1450,10 @@ class RecordingTab(QWidget):
         self._live_ms_detector = None
         self._live_pre: dict | None = None
 
-        # ROI detection state
-        self._roi_worker: Optional[_RoiDetectWorker] = None
-        self._roi_raw_left:  int                   = 0
-        self._roi_raw_right: int                   = 0
-        self._roi_ref_img                          = None   # BGR ndarray
-        self._roi_source:    Optional[Path]        = None
+        # ROI manual calibration state
+        self._roi_frame                     = None   # BGR ndarray del frame de referencia
+        self._roi_lx:        int            = 0      # borde izquierdo actual
+        self._roi_rx:        int            = 0      # borde derecho actual
 
         # Timer-based analysis state (runs in main thread, no cross-thread signal issues)
         self._ana_running:    bool          = False
@@ -1574,11 +1531,16 @@ class RecordingTab(QWidget):
         self._model_combo.currentTextChanged.connect(self._update_model_chip)
 
         # ROI section
-        self._btn_roi_use_rec.clicked.connect(self._on_roi_use_recording)
-        self._btn_roi_pick.clicked.connect(self._on_roi_pick_folder)
-        self._btn_roi_detect.clicked.connect(self._on_roi_detect)
+        self._btn_roi_pick_img.clicked.connect(self._on_roi_pick_image)
+        self._btn_roi_pick_dir.clicked.connect(self._on_roi_pick_folder)
+        self._btn_lx_left.clicked.connect(lambda: self._roi_move("lx", -1))
+        self._btn_lx_right.clicked.connect(lambda: self._roi_move("lx", +1))
+        self._btn_rx_left.clicked.connect(lambda: self._roi_move("rx", -1))
+        self._btn_rx_right.clicked.connect(lambda: self._roi_move("rx", +1))
         self._btn_roi_save.clicked.connect(self._on_roi_save)
-        self._spin_roi_margin.valueChanged.connect(self._on_roi_margin_changed)
+        self._scanner_combo.currentTextChanged.connect(
+            lambda _: self._refresh_current_roi_label()
+        )
         self._refresh_current_roi_label()
 
         self._update_nav_state()
@@ -1827,25 +1789,24 @@ class RecordingTab(QWidget):
         lay.setContentsMargins(14, 20, 14, 14)
         lay.setSpacing(8)
 
-        SPIN_SS = (
-            f"QSpinBox {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:5px;padding:4px 22px 4px 6px;font-size:12px;max-width:72px; }"
-            f"QSpinBox::up-button {{ subcontrol-origin:border;subcontrol-position:top right;"
-            f"width:18px;border-left:1px solid {_BORDER};border-bottom:1px solid {_BORDER};"
-            f"border-top-right-radius:5px;background:{_DARK}; }}"
-            f"QSpinBox::down-button {{ subcontrol-origin:border;subcontrol-position:bottom right;"
-            f"width:18px;border-left:1px solid {_BORDER};border-top:1px solid {_BORDER};"
-            f"border-bottom-right-radius:5px;background:{_DARK}; }}"
-            f"QSpinBox::up-arrow {{ width:8px;height:8px; }}"
-            f"QSpinBox::down-arrow {{ width:8px;height:8px; }}"
+        BTN_SS = (
+            f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+            f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
+        )
+        ARROW_SS = (
+            f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:14px;font-weight:700;min-width:32px;min-height:32px; }}"
+            f"QPushButton:hover {{ border-color:{_ACCENT};color:{_ACCENT}; }}"
+            "QPushButton:pressed { background:#0f172a; }"
         )
         CHIP_SS = (
             f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
             f"background:{_DARK};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 8px;margin-right:4px;"
+            "border-radius:4px;padding:2px 8px;"
         )
 
-        # ── ROI actual ───────────────────────────────────────────────
+        # ── ROI actual (cargada del archivo) ─────────────────────────
         self._roi_current_lbl = QLabel("ROI actual: —")
         self._roi_current_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;"
@@ -1855,88 +1816,106 @@ class RecordingTab(QWidget):
         # ── Fuente ───────────────────────────────────────────────────
         src_row = QHBoxLayout()
         src_row.setSpacing(6)
-        self._btn_roi_use_rec = QPushButton("Usar grabación")
-        self._btn_roi_use_rec.setFixedHeight(30)
-        self._btn_roi_use_rec.setStyleSheet(
-            f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:5px;font-size:11px;padding:0 10px; }}"
-            f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
-        )
-        self._btn_roi_pick = QPushButton("Seleccionar carpeta...")
-        self._btn_roi_pick.setFixedHeight(30)
-        self._btn_roi_pick.setStyleSheet(self._btn_roi_use_rec.styleSheet())
-        src_row.addWidget(self._btn_roi_use_rec)
-        src_row.addWidget(self._btn_roi_pick)
+        self._btn_roi_pick_img = QPushButton("Abrir imagen")
+        self._btn_roi_pick_img.setStyleSheet(BTN_SS)
+        self._btn_roi_pick_dir = QPushButton("Abrir carpeta")
+        self._btn_roi_pick_dir.setStyleSheet(BTN_SS)
+        src_row.addWidget(self._btn_roi_pick_img)
+        src_row.addWidget(self._btn_roi_pick_dir)
         src_row.addStretch()
         lay.addLayout(src_row)
 
-        self._roi_src_lbl = QLabel("Fuente: —")
-        self._roi_src_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
-        )
-        self._roi_src_lbl.setWordWrap(True)
-        lay.addWidget(self._roi_src_lbl)
-
-        # ── Canal + margen ───────────────────────────────────────────
-        opt_row = QHBoxLayout()
-        opt_row.setSpacing(8)
-
-        ch_lbl = QLabel("CANAL")
-        ch_lbl.setStyleSheet(CHIP_SS)
-        opt_row.addWidget(ch_lbl)
-        self._roi_ch_combo = self._make_combo(["r", "g", "b", "gray"], min_w=60)
-        opt_row.addWidget(self._roi_ch_combo)
-
-        opt_row.addSpacing(12)
-        mg_lbl = QLabel("MARGEN px")
-        mg_lbl.setStyleSheet(CHIP_SS)
-        opt_row.addWidget(mg_lbl)
-        self._spin_roi_margin = QSpinBox()
-        self._spin_roi_margin.setRange(0, 200)
-        self._spin_roi_margin.setValue(0)
-        self._spin_roi_margin.setStyleSheet(SPIN_SS)
-        opt_row.addWidget(self._spin_roi_margin)
-        opt_row.addStretch()
-        lay.addLayout(opt_row)
-
-        # ── Botón detectar ───────────────────────────────────────────
-        self._btn_roi_detect = self._mk_btn("DETECTAR ROI", _ACCENT, h=38, fs=12)
-        self._btn_roi_detect.setStyleSheet(
-            f"QPushButton {{ background:{_ACCENT};color:#0f172a;border:none;"
-            "border-radius:6px;font-size:12px;font-weight:700; }}"
-            f"QPushButton:hover {{ background:#7dd3fc; }}"
-            f"QPushButton:disabled {{ background:#1e293b;color:{_MUTED}; }}"
-        )
-        lay.addWidget(self._btn_roi_detect)
-
-        # ── Preview thumbnail ────────────────────────────────────────
-        self._roi_preview_lbl = QLabel("Sin previsualización")
+        # ── Preview ───────────────────────────────────────────────────
+        self._roi_preview_lbl = QLabel("Cargar una imagen para comenzar")
         self._roi_preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._roi_preview_lbl.setFixedHeight(140)
+        self._roi_preview_lbl.setFixedHeight(160)
         self._roi_preview_lbl.setStyleSheet(
             f"background:#0a0f1a;border-radius:6px;border:1px solid {_BORDER};"
             f"color:{_MUTED};font-size:11px;"
         )
         lay.addWidget(self._roi_preview_lbl)
 
-        # ── Resultado + guardar ──────────────────────────────────────
-        res_row = QHBoxLayout()
-        res_row.setSpacing(10)
-        self._roi_result_lbl = QLabel("Detectada: —")
-        self._roi_result_lbl.setStyleSheet(
+        # ── Controles borde izquierdo ────────────────────────────────
+        lx_row = QHBoxLayout()
+        lx_row.setSpacing(6)
+        lx_chip = QLabel("BORDE IZQ")
+        lx_chip.setStyleSheet(CHIP_SS)
+        lx_row.addWidget(lx_chip)
+        self._btn_lx_left  = QPushButton("◄")
+        self._btn_lx_right = QPushButton("►")
+        self._btn_lx_left.setStyleSheet(ARROW_SS)
+        self._btn_lx_right.setStyleSheet(ARROW_SS)
+        lx_row.addWidget(self._btn_lx_left)
+        lx_row.addWidget(self._btn_lx_right)
+        lx_row.addStretch()
+        self._roi_lx_lbl = QLabel("x=—")
+        self._roi_lx_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;"
         )
-        res_row.addWidget(self._roi_result_lbl, stretch=1)
-        self._btn_roi_save = self._mk_btn("GUARDAR", "#15803d", h=34, fs=11)
-        self._btn_roi_save.setEnabled(False)
-        res_row.addWidget(self._btn_roi_save)
-        lay.addLayout(res_row)
+        lx_row.addWidget(self._roi_lx_lbl)
+        lay.addLayout(lx_row)
 
-        # ── Estado ───────────────────────────────────────────────────
+        # ── Controles borde derecho ──────────────────────────────────
+        rx_row = QHBoxLayout()
+        rx_row.setSpacing(6)
+        rx_chip = QLabel("BORDE DER")
+        rx_chip.setStyleSheet(CHIP_SS)
+        rx_row.addWidget(rx_chip)
+        self._btn_rx_left  = QPushButton("◄")
+        self._btn_rx_right = QPushButton("►")
+        self._btn_rx_left.setStyleSheet(ARROW_SS)
+        self._btn_rx_right.setStyleSheet(ARROW_SS)
+        rx_row.addWidget(self._btn_rx_left)
+        rx_row.addWidget(self._btn_rx_right)
+        rx_row.addStretch()
+        self._roi_rx_lbl = QLabel("x=—")
+        self._roi_rx_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;"
+        )
+        rx_row.addWidget(self._roi_rx_lbl)
+        lay.addLayout(rx_row)
+
+        # ── Paso + resultado ─────────────────────────────────────────
+        bot_row = QHBoxLayout()
+        bot_row.setSpacing(8)
+        paso_chip = QLabel("PASO px")
+        paso_chip.setStyleSheet(CHIP_SS)
+        bot_row.addWidget(paso_chip)
+        self._spin_roi_step = QSpinBox()
+        self._spin_roi_step.setRange(1, 100)
+        self._spin_roi_step.setValue(5)
+        self._spin_roi_step.setStyleSheet(
+            f"QSpinBox {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 22px 4px 6px;font-size:12px;max-width:66px; }"
+            f"QSpinBox::up-button {{ subcontrol-origin:border;subcontrol-position:top right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-bottom:1px solid {_BORDER};"
+            f"border-top-right-radius:5px;background:{_DARK}; }}"
+            f"QSpinBox::down-button {{ subcontrol-origin:border;subcontrol-position:bottom right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-top:1px solid {_BORDER};"
+            f"border-bottom-right-radius:5px;background:{_DARK}; }}"
+        )
+        bot_row.addWidget(self._spin_roi_step)
+        bot_row.addStretch()
+        self._roi_result_lbl = QLabel("w=—")
+        self._roi_result_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:11px;font-family:Consolas,monospace;"
+        )
+        bot_row.addWidget(self._roi_result_lbl)
+        lay.addLayout(bot_row)
+
+        # ── Guardar + estado ─────────────────────────────────────────
+        save_row = QHBoxLayout()
+        save_row.setSpacing(10)
+        self._btn_roi_save = self._mk_btn("GUARDAR ROI", "#15803d", h=36, fs=12)
+        self._btn_roi_save.setEnabled(False)
+        save_row.addWidget(self._btn_roi_save, stretch=1)
+        lay.addLayout(save_row)
+
         self._roi_status_lbl = QLabel("")
         self._roi_status_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
         )
+        self._roi_status_lbl.setWordWrap(True)
         lay.addWidget(self._roi_status_lbl)
 
         return grp
@@ -1945,13 +1924,10 @@ class RecordingTab(QWidget):
 
     def _refresh_current_roi_label(self) -> None:
         from src.patterns.roi import load_roi
-        scanner_id = None
-        if hasattr(self, "_scanner_combo"):
-            scanner_id = self._scanner_combo.currentText() or None
-        model = self._model_combo.currentText() if hasattr(self, "_model_combo") else ""
         from src.utils.model_names import to_internal as _to_int
-        internal = _to_int(model)
-        roi = load_roi(internal, scanner_id)
+        scanner_id = self._scanner_combo.currentText() or None if hasattr(self, "_scanner_combo") else None
+        model      = self._model_combo.currentText() if hasattr(self, "_model_combo") else ""
+        roi = load_roi(_to_int(model), scanner_id)
         if roi:
             self._roi_current_lbl.setText(
                 f"ROI actual:  x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}"
@@ -1959,96 +1935,94 @@ class RecordingTab(QWidget):
         else:
             self._roi_current_lbl.setText("ROI actual: — (sin ROI guardada)")
 
-    def _on_roi_use_recording(self) -> None:
-        if self._rec_dir and self._rec_dir.exists():
-            self._roi_source = self._rec_dir
-            self._roi_src_lbl.setText(f"Fuente: {self._rec_dir.name}")
+    def _roi_load_frame(self, path: Path) -> None:
+        import cv2
+        img = cv2.imread(str(path))
+        if img is None:
+            self._roi_status_lbl.setText(f"No se pudo leer: {path.name}")
+            return
+        self._roi_frame = img
+        H, W = img.shape[:2]
+        # Inicializar bordes con ROI guardada si existe, o imagen completa
+        from src.patterns.roi import load_roi
+        from src.utils.model_names import to_internal as _to_int
+        scanner_id = self._scanner_combo.currentText() or None
+        roi = load_roi(_to_int(self._model_combo.currentText()), scanner_id)
+        if roi:
+            self._roi_lx = roi.x
+            self._roi_rx = roi.x + roi.w
         else:
-            self._roi_status_lbl.setText("No hay grabación activa o carpeta no existe")
+            self._roi_lx = 0
+            self._roi_rx = W
+        self._roi_status_lbl.setText(f"Frame: {path.name}  ({W}x{H})")
+        self._btn_roi_save.setEnabled(True)
+        self._roi_redraw()
+
+    def _on_roi_pick_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar imagen",
+            str(self._rec_dir) if self._rec_dir else "",
+            "Imágenes (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if path:
+            self._roi_load_frame(Path(path))
 
     def _on_roi_pick_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar carpeta de frames")
-        if folder:
-            self._roi_source = Path(folder)
-            self._roi_src_lbl.setText(f"Fuente: {Path(folder).name}")
-
-    def _on_roi_detect(self) -> None:
-        if self._roi_worker and self._roi_worker.isRunning():
-            return
-
-        # Collect frames
-        if self._roi_source and self._roi_source.is_dir():
-            exts = {".png", ".jpg", ".jpeg", ".bmp"}
-            paths = sorted(p for p in self._roi_source.iterdir() if p.suffix.lower() in exts)
-        else:
-            paths = []
-
-        if not paths:
-            self._roi_status_lbl.setText("Seleccionar una carpeta con frames primero")
-            return
-
-        channel = self._roi_ch_combo.currentText()
-        self._btn_roi_detect.setEnabled(False)
-        self._roi_status_lbl.setText(f"Detectando... ({len(paths)} frames)")
-        self._roi_result_lbl.setText("Detectada: —")
-        self._btn_roi_save.setEnabled(False)
-
-        self._roi_worker = _RoiDetectWorker(paths, channel=channel, max_frames=20, parent=self)
-        self._roi_worker.finished.connect(self._on_roi_detected)
-        self._roi_worker.error.connect(self._on_roi_error)
-        self._roi_worker.start()
-
-    def _on_roi_detected(self, raw_left: int, raw_right: int, ref_img) -> None:
-        self._roi_raw_left  = raw_left
-        self._roi_raw_right = raw_right
-        self._roi_ref_img   = ref_img
-        self._btn_roi_detect.setEnabled(True)
-        self._on_roi_margin_changed()   # applies margin + updates preview + enables save
-
-    def _on_roi_error(self, msg: str) -> None:
-        self._btn_roi_detect.setEnabled(True)
-        self._roi_status_lbl.setText(f"Error: {msg}")
-
-    def _on_roi_margin_changed(self) -> None:
-        if self._roi_ref_img is None:
-            return
-
-        margin = self._spin_roi_margin.value()
-        lx = max(0, self._roi_raw_left  + margin)
-        rx = min(self._roi_ref_img.shape[1], self._roi_raw_right - margin)
-
-        if rx <= lx:
-            self._roi_status_lbl.setText("Margen demasiado grande — sin ROI válida")
-            self._btn_roi_save.setEnabled(False)
-            return
-
-        H = self._roi_ref_img.shape[0]
-        self._roi_result_lbl.setText(
-            f"Detectada:  x={lx}  y=0  w={rx - lx}  h={H}"
+        folder = QFileDialog.getExistingDirectory(
+            self, "Seleccionar carpeta de frames",
+            str(self._rec_dir) if self._rec_dir else ""
         )
-        self._roi_status_lbl.setText(f"Bordes raw: left={self._roi_raw_left}  right={self._roi_raw_right}")
-        self._btn_roi_save.setEnabled(True)
-        self._update_roi_preview(lx, rx)
+        if not folder:
+            return
+        exts = {".png", ".jpg", ".jpeg", ".bmp"}
+        frames = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in exts)
+        if not frames:
+            self._roi_status_lbl.setText("La carpeta no tiene imágenes")
+            return
+        # Mostrar el primer frame
+        self._roi_load_frame(frames[0])
 
-    def _update_roi_preview(self, lx: int, rx: int) -> None:
-        if self._roi_ref_img is None:
+    def _roi_move(self, edge: str, direction: int) -> None:
+        if self._roi_frame is None:
+            return
+        step = self._spin_roi_step.value() * direction
+        W = self._roi_frame.shape[1]
+        if edge == "lx":
+            self._roi_lx = max(0, min(self._roi_rx - 1, self._roi_lx + step))
+        else:
+            self._roi_rx = max(self._roi_lx + 1, min(W, self._roi_rx + step))
+        self._roi_redraw()
+
+    def _roi_redraw(self) -> None:
+        if self._roi_frame is None:
             return
         import cv2
-        vis = self._roi_ref_img.copy()
-        H, W = vis.shape[:2]
-        cv2.rectangle(vis, (lx, 0), (rx, H - 1), (0, 200, 255), 3)
-        cv2.line(vis, (lx, 0), (lx, H - 1), (0, 255, 100), 2)
-        cv2.line(vis, (rx, 0), (rx, H - 1), (0, 255, 100), 2)
+        lx, rx = self._roi_lx, self._roi_rx
+        H, W   = self._roi_frame.shape[:2]
 
-        # Scale to thumbnail
-        thumb_w = 280
+        # Etiquetas de posición
+        self._roi_lx_lbl.setText(f"x={lx}")
+        self._roi_rx_lbl.setText(f"x={rx}")
+        self._roi_result_lbl.setText(f"w={rx - lx}")
+
+        # Preview con líneas de borde
+        vis = self._roi_frame.copy()
+        # Área fuera del ROI oscurecida
+        mask = vis.copy()
+        mask[:, :lx]  = (mask[:, :lx]  * 0.3).astype("uint8")
+        mask[:, rx:]  = (mask[:, rx:]  * 0.3).astype("uint8")
+        vis = mask
+        cv2.line(vis, (lx, 0), (lx, H - 1), (0, 255, 100), 2)
+        cv2.line(vis, (rx, 0), (rx, H - 1), (0, 200, 255), 2)
+        cv2.rectangle(vis, (lx, 2), (rx, H - 3), (255, 255, 255), 1)
+
+        thumb_w = max(self._roi_preview_lbl.width(), 280)
         scale   = thumb_w / W
         thumb   = cv2.resize(vis, (thumb_w, int(H * scale)), interpolation=cv2.INTER_AREA)
-        thumb_h, thumb_w2 = thumb.shape[:2]
-
-        rgb   = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        qimg  = QImage(rgb.data, thumb_w2, thumb_h, rgb.strides[0], QImage.Format.Format_RGB888)
-        pix   = QPixmap.fromImage(qimg)
+        th, tw  = thumb.shape[:2]
+        rgb     = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
+        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888)
+        pix     = QPixmap.fromImage(qimg)
         self._roi_preview_lbl.setPixmap(
             pix.scaled(
                 self._roi_preview_lbl.width(),
@@ -2059,26 +2033,22 @@ class RecordingTab(QWidget):
         )
 
     def _on_roi_save(self) -> None:
-        if self._roi_ref_img is None:
+        if self._roi_frame is None:
             return
-        margin = self._spin_roi_margin.value()
-        lx = max(0, self._roi_raw_left  + margin)
-        rx = min(self._roi_ref_img.shape[1], self._roi_raw_right - margin)
+        lx, rx = self._roi_lx, self._roi_rx
         if rx <= lx:
             return
-
-        H = self._roi_ref_img.shape[0]
+        H = self._roi_frame.shape[0]
         scanner_id = self._scanner_combo.currentText() or None
         model_disp = self._model_combo.currentText()
         from src.utils.model_names import to_internal as _to_int
-        from src.patterns.roi import roi_path, ROI
+        from src.patterns.roi import roi_path
         import json
         internal = _to_int(model_disp)
         path = roi_path(internal, scanner_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"x": lx, "y": 0, "w": rx - lx, "h": H}
-        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        self._roi_status_lbl.setText(f"ROI guardada en {path}")
+        path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
+        self._roi_status_lbl.setText(f"Guardado: {path}")
         self._refresh_current_roi_label()
 
     # ------------------------------------------------------------------
