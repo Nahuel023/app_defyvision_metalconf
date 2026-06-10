@@ -46,7 +46,92 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-10 — Tadeo + Claude
+
+#### Cambio 145 - microperforado: fix línea PATRON borde izquierdo truncada (pct10 en lugar de min global)
+
+**Síntoma:** la línea PATRON izquierda en el overlay del microperforado (modelo_B) solo
+aparecía en la parte inferior de la imagen (5/24 bandas) y estaba completamente ausente
+de los 2/3 superiores. El usuario lo describía como "zigzag entre los agujeros del borde".
+
+**Diagnóstico:**
+- `_pattern_bounds_by_band` usa `global_left = min(hh.x for hh in all_holes)` como referencia
+- El patrón modelo_B tiene 5 agujeros en la columna exterior escalonada de la zona inferior:
+  x≈58–60 (y=305–415), y el resto de los agujeros exteriores en x≈76 (y=65–291)
+- Con `global_left=58.3` y `boundary_tol_px=8`: gate = 58.3+8 = 66.3
+- Los agujeros principales del borde izquierdo (x≈76) son excluidos: 76 > 66.3
+- Resultado: solo 5/24 bandas (zona inferior) tienen punto de borde izquierdo
+- La línea PATRON no aparece en la parte superior del frame → parece un "zigzag" o corte
+
+**Causa raíz del commit `16a10b6`:** ese commit redujo `boundary_tol_px` de 22→8 para
+evitar que ambas columnas del stagger (x≈58 y x≈76) contribuyeran a la misma banda
+y la línea cayera entre ellas. Con global_left=76 (cuando no existía la columna x=58)
+funcionaba bien. Pero si el patrón tiene la columna x=58 como mínimo global,
+btol=8 excluye la columna principal x=76.
+
+**Fix aplicado (`src/pipeline/edge_centering.py`, función `_pattern_bounds_by_band`):**
+- Reemplazado `global_left = min(xs)` / `global_right = max(xs)` por:
+  `global_left = np.percentile(xs, 10)` / `global_right = np.percentile(xs, 90)`
+- El percentil 10 con 121 agujeros vale ≈75.9 (ignora los 5 agujeros extremos x=58
+  que son solo el 4% del total) → gate = 75.9+8 = 83.9
+- x=76 ≤ 83.9 → incluido ✓  |  x=94 > 83.9 → excluido ✓  |  x=58 ≤ 83.9 → incluido ✓
+- Resultado: 15/24 bandas con borde izquierdo (antes: 5/24), sin zigzag entre columnas
+
+**Validación:**
+- Frames `05-06-2026-MICROPERFORADO_1`: 137/137 OK (igual que antes)
+- Visualización `data/dbg_borde_antes_despues.png`: línea verde cubre toda la altura
+
+---
+
 ### Sesión 2026-06-09 — Tadeo + Claude
+
+#### Cambio 144 - Esterilla: patron de scanner_2 reconstruido desde frame_0118 + matching mas robusto + overlay honesto
+
+**Sintoma:** la esterilla seguia mostrando muchos agujeros "faltantes" aun cuando la
+mascara detectaba casi toda la chapa. Ademas, el overlay verde ocultaba parte de los
+agujeros detectados porque primero los filtraba por `bbox` y `pattern_hull`.
+
+**Diagnostico rapido sobre `frame_0113`:**
+- deteccion cruda: `97 agujeros`
+- overlay comparativo visible: `85 agujeros`
+- patron esperado activo: `84 posiciones`
+- varios "missing" quedaban a solo `21-28 px` del agujero real mas cercano
+
+Eso confirmo dos problemas mezclados:
+- el patron reconstruido desde `frame_0113` no representaba bien la grilla real
+- el overlay estaba tapando detecciones crudas validas, lo que hacia parecer que el
+  detector fallaba mas de lo real
+
+**Cambio aplicado:**
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - reconstruido desde `05-06-2026-ESTERILLA_1/frame_0118.png`
+  - patron final: `94 puntos` unicos sobre ROI `415x480`
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `tol_xy_px: 18.0 -> 24.0`
+  - `grid_affine_refinement: false -> true`
+- `src/pipeline/annotate.py`
+  - el overlay ahora dibuja en cian tenue los agujeros detectados crudos que fueron
+    descartados por filtros de comparacion, y mantiene en verde los que realmente
+    entran al matching
+- `src/inspection.py`
+  - pasa la deteccion cruda al overlay para que ANALISIS e INSPECCION muestren el mismo
+    contexto visual del matching real
+
+**Validacion sobre `05-06-2026-ESTERILLA_1`:**
+- con patron `frame_0118` y config base:
+  - `raw_ok=24`, `raw_nok=109`, `temporal_ok=116`, `temporal_nok=17`
+- con patron `frame_0118` + `tol_xy_px=24` + `grid_affine_refinement=true`:
+  - `raw_ok=99`, `raw_nok=34`, `temporal_ok=133`, `temporal_nok=0`
+  - `machine_stop_frames=0`
+
+**Resultado:** el patron de esterilla vuelve a comportarse de forma consistente en toda
+la carpeta probada, desaparecen las paradas falsas y el overlay deja claro cuando un
+agujero fue detectado pero excluido por la ventana de comparacion.
+
+**Archivos modificados:** `data/patterns/scanner_2/modelo_A/holes.json`,
+`config/tolerancias.yaml`, `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
 
 #### Cambio 143 - Microperforado: parada inmediata por corrimiento lateral + parada por agujero único
 

@@ -58,7 +58,7 @@ models:
     max_area_small: 2000.0
     min_area_large: 20.0
     max_area_large: 8000.0
-    tol_xy_px: 18.0
+    tol_xy_px: 24.0
     align_match_tol_px: 280.0
     min_match_count: 3
     edge_margin_px: 5.0
@@ -85,7 +85,7 @@ models:
     grid_max_missing: 80
     bbox_filter_margin_px: 60.0
     pattern_hull_margin_px: 10.0
-    grid_affine_refinement: false
+    grid_affine_refinement: true
     extra_min_dist_factor: 2.0
     compare_top_ignore_px: 0.0
     compare_bottom_ignore_px: 0.0

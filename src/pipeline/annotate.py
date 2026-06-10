@@ -117,6 +117,7 @@ def draw_compare_overlay(
     detected: Sequence[Hole],
     missing_points: Sequence[Tuple[float, float]],
     status: str,
+    raw_detected: Sequence[Hole] = (),
     extra_points: Sequence[Tuple[float, float]] = (),
     near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
     nok_reasons: List[str] = (),
@@ -142,7 +143,20 @@ def draw_compare_overlay(
         cv2.line(out, (int(ex), int(ey)), (int(dx), int(dy)),
                  (255, 220, 0), 1, cv2.LINE_AA)
 
-    # Detectados: verde
+    # Detectados crudos fuera del overlay comparativo: cian tenue.
+    # Esto permite distinguir "no detectado" de "detectado pero descartado por
+    # filtros del patron/bbox/hull", evitando diagnosticos engañosos.
+    detected_keys = {
+        (round(float(h.x), 2), round(float(h.y), 2), round(float(h.r), 2))
+        for h in detected
+    }
+    for h in raw_detected:
+        key = (round(float(h.x), 2), round(float(h.y), 2), round(float(h.r), 2))
+        if key in detected_keys:
+            continue
+        cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (255, 255, 0), 1)
+
+    # Detectados usados en la comparación: verde
     for h in detected:
         cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (0, 255, 0), 2)
 
