@@ -48,6 +48,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-10 — Tadeo + Claude
 
+#### Cambio 151 - Microperforado: revertir agresividad de parada inmediata y volver al comportamiento estable
+
+**Pedido:** revisar si se habia roto el patron de microperforado respecto de ayer, porque
+la maquina volvio a detenerse demasiado facil ("con 3 frames se rompe todo").
+
+**Diagnostico:**
+- el patron/ROI de microperforado NO cambio respecto del baseline bueno
+  (`data/patterns/modelo_B/holes.json` y ROI actuales coinciden con el estado validado)
+- lo que si cambio fue la logica del **Cambio 143**
+- en particular:
+  - `DESVIACION LATERAL` paso de warning/NOK temporal a `machine_stop` inmediato
+  - `machine_stop_min_missing` bajo de `2` a `1`
+  - `machine_stop_ignore_near_miss` paso de `true` a `false`
+- eso endurecio demasiado `modelo_B` en vivo y explica una parada como
+  `DESVIACION LATERAL (+25.6px)` en solo pocos frames
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - la desviacion lateral vuelve a marcar warning/NOK, pero **no** parada inmediata
+- `config/tolerancias.yaml` -> `models.modelo_B`
+  - `machine_stop_min_missing: 1 -> 2`
+  - `machine_stop_ignore_near_miss: false -> true`
+
+**Resultado esperado:** microperforado vuelve al comportamiento estable de ayer:
+detecta desviaciones y faltantes como advertencia/NOK, pero no detiene la maquina con la
+agresividad introducida por el Cambio 143.
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
 #### Cambio 150 - Esterilla: verde del overlay vuelve a representar deteccion valida en ventana de patron
 
 **Sintoma:** despues del Cambio 149 el overlay paso a mostrar menos agujeros verdes, aun
