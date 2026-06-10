@@ -3479,11 +3479,17 @@ class RecordingTab(QWidget):
         self._model_combo.blockSignals(False)
         self._sync_model_buttons()
         self._update_model_chip(name)
+        # Forzar recarga del patrón/ROI en el próximo frame de análisis en vivo
+        self._live_pre = None
+        self._live_ms_detector = None
 
     def _on_scanner_changed(self, sid: str) -> None:
         # El modelo NO cambia automáticamente al cambiar de scanner.
         # El operador puede elegir cualquier combinación de scanner + modelo,
         # por ejemplo analizar Esterilla grabada desde scanner_1.
+        # Forzar recarga del patrón/ROI del nuevo scanner en el próximo frame
+        self._live_pre = None
+        self._live_ms_detector = None
         self._auto_connect_scanner_camera(sid)
         self._update_fps_cap()
 
