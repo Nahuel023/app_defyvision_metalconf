@@ -25,11 +25,14 @@ def roi_path(model: str, scanner_id: str | None = None) -> Path:
 
 
 def load_roi(model: str, scanner_id: str | None = None) -> Optional[ROI]:
-    """Load ROI with fallback: scanner-specific → model-only."""
+    """Load ROI for the given scanner. Each scanner has its own ROI — no cross-scanner fallback.
+    Falls back to the model-level roi.json only when scanner_id is not specified (e.g. CLI tools)."""
     candidates = []
     if scanner_id:
+        # Scanner-specific only — never fall back to another scanner's ROI
         candidates.append(Path("data") / "patterns" / scanner_id / model / "roi.json")
-    candidates.append(Path("data") / "patterns" / model / "roi.json")
+    else:
+        candidates.append(Path("data") / "patterns" / model / "roi.json")
 
     for p in candidates:
         if not p.exists():
