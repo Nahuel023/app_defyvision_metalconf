@@ -27,6 +27,10 @@ data/recordings/
 data/metrics/
 data/ok_buffer/
 
+# PyInstaller output
+dist/
+build/
+
 # Setup / provisioning (binarios grandes de Visual Studio y similares)
 setup_prov_pc/
 
