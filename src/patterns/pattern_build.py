@@ -18,7 +18,7 @@ def build_pattern_from_image(
     min_area: float | None = None,
     circularity_min: float | None = None,
 ) -> Path:
-    tolerances = load_tolerances(model)
+    tolerances = load_tolerances(model, scanner_id=scanner_id)
     threshold = int(tolerances["threshold"] if threshold is None else threshold)
     min_area = float(tolerances["min_area"] if min_area is None else min_area)
     circularity_min = float(

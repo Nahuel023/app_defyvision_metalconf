@@ -108,6 +108,7 @@ class ScannerPanel(QWidget):
         self._overlay_until_ms: int = 0
         self._nok_threshold: int = 5
         self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
+        self._run_start_time: float | None = None
 
         self._build_ui()
         self._populate_models()
@@ -176,12 +177,12 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
-        # ── Tres métricas operativas: OK / ALARMAS / TOTAL ────────────
+        # ── Tres métricas operativas: OK / TIEMPO / TOTAL ────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
-        self._ok_val    = self._metric_card("OK",      "0",  _OK_CLR)
-        self._nok_val   = self._metric_card("ALARMAS", "0",  _MUTED)
-        self._total_val = self._metric_card("TOTAL",   "0",  _MUTED)
+        self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
+        self._nok_val   = self._metric_card("TIEMPO",  "00:00",  _MUTED)
+        self._total_val = self._metric_card("TOTAL",   "0",      _MUTED)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
         self._result_val = self._metric_card("ÚLTIMO",    "—",    _MUTED)
@@ -373,7 +374,7 @@ class ScannerPanel(QWidget):
 
         from src.utils.config import load_tolerances
         _model = self._system.io.scanner_config(self._id).get("model", "")
-        _tols  = load_tolerances(_model) if _model else load_tolerances()
+        _tols  = load_tolerances(_model, scanner_id=self._id) if _model else load_tolerances()
         _threshold = int(_tols.get("consecutive_nok_frames", 5))
         self._nok_threshold = _threshold
 
@@ -409,9 +410,15 @@ class ScannerPanel(QWidget):
         self._ok_val[1].setText(str(ok_cnt))
         self._ok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{ok_c};background:transparent;")
 
-        fault_c = _NOK_CLR if fault_cnt > 0 else _MUTED
-        self._nok_val[1].setText(str(fault_cnt))
-        self._nok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{fault_c};background:transparent;")
+        if self._run_start_time is not None and state == ScannerState.RUNNING:
+            elapsed = int(time.monotonic() - self._run_start_time)
+            h, rem = divmod(elapsed, 3600)
+            m, sec = divmod(rem, 60)
+            time_txt = f"{h:02d}:{m:02d}:{sec:02d}" if h > 0 else f"{m:02d}:{sec:02d}"
+        else:
+            time_txt = "00:00"
+        self._nok_val[1].setText(time_txt)
+        self._nok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{_MUTED};background:transparent;")
 
         # ÚLTIMO: salud temporal del sistema
         if state == ScannerState.STOPPED:
@@ -462,12 +469,15 @@ class ScannerPanel(QWidget):
 
     def _on_start(self) -> None:
         self._feedback(self.start_btn, "▶  INICIAR", "#1a6b3a", "● Iniciando...")
-        if not self._scanner.start():
+        if self._scanner.start():
+            self._run_start_time = time.monotonic()
+        else:
             QMessageBox.warning(self, "Iniciar", f"No se pudo iniciar {self._id}.")
 
     def _on_stop(self) -> None:
         self._feedback(self.stop_btn, "■  DETENER", "#7f1d1d", "● Deteniendo...")
         self._scanner.stop()
+        self._run_start_time = None
 
     def _on_reset(self) -> None:
         if self._scanner.reset():

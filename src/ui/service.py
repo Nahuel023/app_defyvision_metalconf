@@ -1066,7 +1066,7 @@ class _AnalysisWorker(QThread):
                 self.finished.emit([])
                 return
 
-            tols = load_tolerances(self._model)
+            tols = load_tolerances(self._model, scanner_id=self._scanner_id)
             movement_threshold = float(tols.get("continuous_position_threshold", 0.0))
             session = InspectionSession(
                 self._model,
@@ -2788,7 +2788,7 @@ class RecordingTab(QWidget):
                 scanner_id = self._scanner_combo.currentText() or None
 
                 if self._live_session is None:
-                    tols = load_tolerances(model)
+                    tols = load_tolerances(model, scanner_id=scanner_id)
                     self._live_session = InspectionSession(
                         model,
                         scanner_id=scanner_id,
@@ -2883,7 +2883,7 @@ class RecordingTab(QWidget):
             from src.patterns.roi import load_roi
             from src.utils.config import load_tolerances
             from src.pipeline.machine_stop import MachineStopDetector
-            tols = load_tolerances(model)
+            tols = load_tolerances(model, scanner_id=scanner_id)
             self._ana_pre = {
                 "tolerances": tols,
                 "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
@@ -3065,7 +3065,7 @@ class RecordingTab(QWidget):
         from src.inspection import _apply_temporal_rule
         from src.utils.config import load_tolerances
         model  = self._active_model()
-        tols   = load_tolerances(model)
+        tols   = load_tolerances(model, scanner_id=self._ana_scanner_id)
         consec = int(tols.get("consecutive_nok_frames", 5))
         temporal = _apply_temporal_rule(results, consec)
         t_ok  = sum(1 for t in temporal if t.decision_status == "OK")
@@ -3503,7 +3503,7 @@ class RecordingTab(QWidget):
         self._update_fps_cap()
 
     def _sync_service_scanner_defaults(self, sid: str) -> None:
-        """Alinea modelo/scanner de servicio con la configuraciÃ³n del scanner activo."""
+        """Align service model/scanner defaults with the active scanner config."""
         try:
             model_internal = str(self._system.io.scanner_config(sid).get("model", "")).strip()
             if model_internal:
