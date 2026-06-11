@@ -116,7 +116,7 @@ def tolerances_path() -> Path:
     return Path("config/tolerancias.yaml")
 
 
-def load_tolerances(model: str | None = None) -> dict[str, Any]:
+def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> dict[str, Any]:
     """Load tolerances, optionally merging per-model overrides.
 
     tolerancias.yaml structure:
@@ -149,6 +149,19 @@ def load_tolerances(model: str | None = None) -> dict[str, Any]:
     if model:
         model_overrides = (data.get("models") or {}).get(model) or {}
         cfg.update({k: v for k, v in model_overrides.items() if v is not None})
+
+    # Apply per-scanner inspection overrides from io_map.yaml.
+    if scanner_id:
+        io_map_path = Path("config") / "io_map.yaml"
+        if io_map_path.exists():
+            try:
+                with io_map_path.open("r", encoding="utf-8") as f:
+                    io_data = yaml.safe_load(f) or {}
+                scanner_cfg = (io_data.get(scanner_id) or {})
+                insp_cfg = scanner_cfg.get("inspection") or {}
+                cfg.update({k: v for k, v in insp_cfg.items() if v is not None})
+            except Exception:
+                pass
 
     return cfg
 

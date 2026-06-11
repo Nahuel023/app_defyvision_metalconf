@@ -50,7 +50,7 @@ class InspectionSession:
 
         if resource_owner is not None:
             self._preloaded = {
-                "tolerances": resource_owner._get_tols(model),
+                "tolerances": resource_owner._get_tols(model, scanner_id),
                 "pattern": resource_owner._get_pattern(model, scanner_id),
                 "roi": resource_owner._get_roi(model, scanner_id),
                 "ema_state": resource_owner._get_ema(scanner_id),
@@ -58,7 +58,7 @@ class InspectionSession:
                 "desalign_state": {"streak": 0, "reason": ""},
             }
         else:
-            tols = load_tolerances(model)
+            tols = load_tolerances(model, scanner_id=scanner_id)
             self._preloaded = {
                 "tolerances": tols,
                 "pattern": load_pattern(find_pattern_path(model, scanner_id)),
@@ -125,7 +125,7 @@ class InspectionSession:
 
 class Inspector:
     def __init__(self) -> None:
-        self._tols:      dict[str, dict]           = {}   # model → tolerances dict
+        self._tols:      dict[tuple, dict]         = {}   # (model, scanner_id) → tolerances dict
         self._pattern:   dict[tuple, object]       = {}   # (model, scanner_id) → Pattern
         self._roi:       dict[tuple, object]       = {}   # (model, scanner_id) → ROI | None
         self._ema:       dict[str | None, dict]    = {}   # scanner_id → {'angle': float}
@@ -174,7 +174,8 @@ class Inspector:
             self._roi.clear()
             self._detectors.clear()
         else:
-            self._tols.pop(model, None)
+            for k in [k for k in self._tols if k[0] == model]:
+                del self._tols[k]
             for k in [k for k in self._pattern if k[0] == model]:
                 del self._pattern[k]
             for k in [k for k in self._roi if k[0] == model]:
@@ -191,10 +192,11 @@ class Inspector:
     # Cache interno
     # ------------------------------------------------------------------
 
-    def _get_tols(self, model: str) -> dict:
-        if model not in self._tols:
-            self._tols[model] = load_tolerances(model)
-        return self._tols[model]
+    def _get_tols(self, model: str, scanner_id: str | None) -> dict:
+        key = (model, scanner_id)
+        if key not in self._tols:
+            self._tols[key] = load_tolerances(model, scanner_id=scanner_id)
+        return self._tols[key]
 
     def _get_pattern(self, model: str, scanner_id: str | None):
         key = (model, scanner_id)
@@ -216,7 +218,7 @@ class Inspector:
     def _get_detector(self, model: str, scanner_id: str | None) -> MachineStopDetector:
         key = (model, scanner_id)
         if key not in self._detectors:
-            tols = self._get_tols(model)
+            tols = self._get_tols(model, scanner_id)
             self._detectors[key] = MachineStopDetector(
                 enabled=bool(tols.get("machine_stop_enabled", False)),
                 missing_frames=int(tols.get("machine_stop_missing_frames", 5)),

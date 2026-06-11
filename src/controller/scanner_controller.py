@@ -55,7 +55,7 @@ class ScannerController:
         cfg      = io.scanner_config(scanner_id)
         insp_cfg = cfg.get("inspection", {})
         model    = cfg.get("model", "")
-        tols     = load_tolerances(model)
+        tols     = load_tolerances(model, scanner_id=scanner_id)
 
         self._consecutive_nok = int(
             insp_cfg.get("consecutive_nok_frames",
@@ -421,7 +421,7 @@ class ScannerController:
         cfg      = self._io.scanner_config(self._id)
         cfg["model"] = model
         insp_cfg = cfg.get("inspection", {})
-        tols     = load_tolerances(model)
+        tols     = load_tolerances(model, scanner_id=self._id)
         self._consecutive_nok = int(
             insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
         )
@@ -560,7 +560,7 @@ class ScannerController:
         IMPORTANTE: llamar solo después de escribir el backlight al PLC, y esperar
         al menos 2 ciclos de cámara para que el primer frame sea con luz.
         """
-        tols = load_tolerances(model)
+        tols = load_tolerances(model, scanner_id=self._id)
         if not tols.get("startup_selftest_enabled", False):
             return True
         timeout_s   = float(tols.get("selftest_timeout_s", 10.0))

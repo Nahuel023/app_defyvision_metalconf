@@ -373,7 +373,7 @@ class ScannerPanel(QWidget):
 
         from src.utils.config import load_tolerances
         _model = self._system.io.scanner_config(self._id).get("model", "")
-        _tols  = load_tolerances(_model) if _model else load_tolerances()
+        _tols  = load_tolerances(_model, scanner_id=self._id) if _model else load_tolerances()
         _threshold = int(_tols.get("consecutive_nok_frames", 5))
         self._nok_threshold = _threshold
 
