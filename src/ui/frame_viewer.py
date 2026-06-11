@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -481,8 +482,16 @@ class _EventNavPanel(QWidget):
         self._current = 0
         self._is_event_mode = False
         self._current_dir = folder_dir
+        newest_ts = ""
+        if frames:
+            try:
+                newest_ts = "  ·  último: " + datetime.fromtimestamp(
+                    frames[-1].stat().st_mtime).strftime("%H:%M:%S")
+            except Exception:
+                pass
         self._info_lbl.setText(
-            f"{scanner_label}   ·   Buffer OK — últimas {len(frames)} inspecciones correctas"
+            f"{scanner_label}   ·   {len(frames)} frames OK"
+            f"   ◀ antiguo — reciente ▶{newest_ts}"
         )
         self._clear_thumbs()
         for i in range(len(frames)):
@@ -502,7 +511,7 @@ class _EventNavPanel(QWidget):
         self._loader = _ThumbLoader(frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
-        self._show_frame(0)
+        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
 
     def load_timeline(self, frames: list[Path], scanner_label: str) -> None:
         """Carga el buffer cronológico completo con colores por status."""
@@ -516,9 +525,16 @@ class _EventNavPanel(QWidget):
             tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
             counts[tag] = counts.get(tag, 0) + 1
         summary_parts = [f"{c} {t}" for t, c in sorted(counts.items())]
+        newest_ts = ""
+        if frames:
+            try:
+                newest_ts = "  ·  último: " + datetime.fromtimestamp(
+                    frames[-1].stat().st_mtime).strftime("%H:%M:%S")
+            except Exception:
+                pass
         self._info_lbl.setText(
-            f"{scanner_label}   ·   Flujo cronológico   ·   "
-            f"{len(frames)} frames  ({', '.join(summary_parts)})"
+            f"{scanner_label}   ·   {len(frames)} frames   ({', '.join(summary_parts)})"
+            f"   ◀ antiguo — reciente ▶{newest_ts}"
         )
 
         self._clear_thumbs()
@@ -542,7 +558,7 @@ class _EventNavPanel(QWidget):
         self._loader = _ThumbLoader(frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
-        self._show_frame(0)
+        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
 
     # ── Internos ──────────────────────────────────────────────────────
 
@@ -595,7 +611,13 @@ class _EventNavPanel(QWidget):
                 _tag = _stem.split("_", 1)[1]
                 if _tag in _TL_COLORS:
                     _tag_suffix = f"  ·  {_tag}"
-            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}")
+            try:
+                _ts = datetime.fromtimestamp(path.stat().st_mtime).strftime("%H:%M:%S")
+                _tag_suffix += f"  ·  {_ts}"
+            except Exception:
+                pass
+            _newest = "  ★" if idx == n - 1 else ""
+            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}{_newest}")
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
@@ -1034,7 +1056,10 @@ class OperatorFrameViewer(QMainWindow):
             return
 
         for sdir in scanner_dirs:
-            frames = sorted(f for f in sdir.glob("ok_*.jpg") if "_raw" not in f.name)
+            frames = sorted(
+                (f for f in sdir.glob("ok_*.jpg") if "_raw" not in f.name),
+                key=lambda f: f.stat().st_mtime,
+            )
             if not frames:
                 continue
             summary = {
@@ -1153,7 +1178,7 @@ class OperatorFrameViewer(QMainWindow):
         for sd in scanner_dirs:
             files = sorted(
                 (f for f in sd.iterdir() if f.suffix.lower() == ".jpg"),
-                key=lambda f: f.name
+                key=lambda f: f.stat().st_mtime,
             )
             if not files:
                 continue
