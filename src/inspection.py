@@ -186,6 +186,9 @@ def _inspect_bgr(
     roi: Optional[ROI] = pre.get("roi", _SENTINEL)
     if roi is _SENTINEL:
         roi = load_roi(model, scanner_id)
+    saved_roi: Optional[ROI] = pre.get("saved_roi", roi)
+    roi_runtime_state: dict = pre.get("roi_runtime_state") or {}
+    pre["roi_runtime_state"] = roi_runtime_state
     ema_state: Optional[dict] = pre.get("ema_state")
 
     threshold        = int(tolerances["threshold"])
@@ -307,6 +310,14 @@ def _inspect_bgr(
     )
     roi_detect_margin_px = int(tolerances.get("roi_detect_margin_px", 0))
     roi_detect_min_contrast = float(tolerances.get("roi_detect_min_contrast", 30.0))
+    roi_recenter_enabled = bool(tolerances.get("roi_recenter_enabled", False))
+    roi_recenter_warmup_frames = int(tolerances.get("roi_recenter_warmup_frames", 20))
+    roi_recenter_trigger_delta_px = float(tolerances.get("roi_recenter_trigger_delta_px", 6.0))
+    roi_recenter_edge_missing_min = int(tolerances.get("roi_recenter_edge_missing_min", 3))
+    roi_recenter_edge_band_px = float(tolerances.get("roi_recenter_edge_band_px", 28.0))
+    roi_recenter_streak_frames = int(tolerances.get("roi_recenter_streak_frames", 6))
+    roi_recenter_step_px = float(tolerances.get("roi_recenter_step_px", 1.0))
+    roi_recenter_max_total_shift_px = float(tolerances.get("roi_recenter_max_total_shift_px", 40.0))
 
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
@@ -971,6 +982,21 @@ def _inspect_bgr(
     if machine_stop:
         final_status = "NOK"
 
+    roi_info = _update_runtime_roi_drift(
+        pre,
+        roi,
+        roi_info,
+        report,
+        enabled=roi_recenter_enabled,
+        warmup_frames=roi_recenter_warmup_frames,
+        trigger_delta_px=roi_recenter_trigger_delta_px,
+        edge_missing_min=roi_recenter_edge_missing_min,
+        edge_band_px=roi_recenter_edge_band_px,
+        streak_frames=roi_recenter_streak_frames,
+        step_px=roi_recenter_step_px,
+        max_total_shift_px=roi_recenter_max_total_shift_px,
+    )
+
     # Build NOK cause list for the overlay panel (shown whenever final_status == "NOK")
     nok_reasons: list[str] = []
     if report.missing > 0:
@@ -1095,6 +1121,133 @@ def _inspect_bgr(
         image=img_full,
         active_roi=roi,
         roi_info=roi_info,
+    )
+
+
+def _edge_missing_counts(
+    missing_points: list[tuple[float, float]],
+    roi_w: int,
+    band_px: float,
+) -> tuple[int, int]:
+    if not missing_points or band_px <= 0.0 or roi_w <= 0:
+        return 0, 0
+    left = 0
+    right = 0
+    right_x0 = max(0.0, float(roi_w) - band_px)
+    for x, _ in missing_points:
+        if x <= band_px:
+            left += 1
+        if x >= right_x0:
+            right += 1
+    return left, right
+
+
+def _update_runtime_roi_drift(
+    pre: dict,
+    active_roi: ROI | None,
+    roi_info: RuntimeROIInfo | None,
+    report: CompareReport,
+    *,
+    enabled: bool,
+    warmup_frames: int,
+    trigger_delta_px: float,
+    edge_missing_min: int,
+    edge_band_px: float,
+    streak_frames: int,
+    step_px: float,
+    max_total_shift_px: float,
+) -> RuntimeROIInfo | None:
+    if not enabled or active_roi is None or roi_info is None or roi_info.detected_roi is None:
+        return roi_info
+
+    state = pre.get("roi_runtime_state") or {}
+    pre["roi_runtime_state"] = state
+    saved_roi = pre.get("saved_roi") or active_roi
+    state.setdefault("baseline_shift_x", None)
+    state.setdefault("baseline_samples", 0)
+    state.setdefault("drift_streak", 0)
+    state.setdefault("drift_dir", 0)
+    state.setdefault("applied_total_shift_px", float(active_roi.x - saved_roi.x))
+    state.setdefault("last_step_px", 0.0)
+    state.setdefault("baseline_ready", False)
+
+    shift_x = float(roi_info.shift_x)
+    baseline_shift_x = state.get("baseline_shift_x")
+    baseline_samples = int(state.get("baseline_samples", 0))
+
+    left_missing, right_missing = _edge_missing_counts(
+        list(report.missing_points or []),
+        active_roi.w,
+        edge_band_px,
+    )
+
+    if baseline_shift_x is None:
+        baseline_shift_x = shift_x
+        baseline_samples = 1
+    elif not state.get("baseline_ready", False):
+        baseline_shift_x = ((baseline_shift_x * baseline_samples) + shift_x) / (baseline_samples + 1)
+        baseline_samples += 1
+
+    if baseline_samples >= max(1, warmup_frames):
+        state["baseline_ready"] = True
+
+    state["baseline_shift_x"] = baseline_shift_x
+    state["baseline_samples"] = baseline_samples
+
+    drift_delta = shift_x - float(baseline_shift_x)
+    evidence_dir = 0
+    if drift_delta <= -trigger_delta_px and left_missing >= edge_missing_min:
+        evidence_dir = -1
+    elif drift_delta >= trigger_delta_px and right_missing >= edge_missing_min:
+        evidence_dir = 1
+
+    if evidence_dir == 0:
+        state["drift_streak"] = 0
+        state["drift_dir"] = 0
+        state["last_step_px"] = 0.0
+        return roi_info
+
+    if int(state.get("drift_dir", 0)) == evidence_dir:
+        state["drift_streak"] = int(state.get("drift_streak", 0)) + 1
+    else:
+        state["drift_dir"] = evidence_dir
+        state["drift_streak"] = 1
+
+    state["last_step_px"] = 0.0
+    if not state.get("baseline_ready", False):
+        return roi_info
+    if int(state.get("drift_streak", 0)) < max(1, streak_frames):
+        return roi_info
+
+    current_total_shift = float(active_roi.x - saved_roi.x)
+    target_total_shift = current_total_shift + (float(step_px) * evidence_dir)
+    if max_total_shift_px > 0.0:
+        target_total_shift = max(-max_total_shift_px, min(max_total_shift_px, target_total_shift))
+    applied_step = target_total_shift - current_total_shift
+    if abs(applied_step) < 0.5:
+        state["drift_streak"] = 0
+        return roi_info
+
+    new_x = int(round(saved_roi.x + target_total_shift))
+    max_x = max(0, roi_info.frame_w - active_roi.w)
+    new_x = max(0, min(new_x, max_x))
+    new_roi = ROI(x=new_x, y=active_roi.y, w=active_roi.w, h=active_roi.h)
+    pre["roi"] = new_roi
+    state["applied_total_shift_px"] = float(new_roi.x - saved_roi.x)
+    state["drift_streak"] = 0
+    state["last_step_px"] = float(new_roi.x - active_roi.x)
+
+    recenter_note = f"ROI recenter {state['last_step_px']:+.0f}px -> x={new_roi.x}"
+    return RuntimeROIInfo(
+        frame_w=roi_info.frame_w,
+        frame_h=roi_info.frame_h,
+        saved_roi=roi_info.saved_roi,
+        effective_roi=roi_info.effective_roi,
+        detected_roi=roi_info.detected_roi,
+        shift_x=roi_info.shift_x,
+        width_delta_px=roi_info.width_delta_px,
+        auto_corrected=True,
+        warning=f"{roi_info.warning} | {recenter_note}".strip(" |"),
     )
 
 

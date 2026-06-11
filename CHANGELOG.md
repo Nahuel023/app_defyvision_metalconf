@@ -46,6 +46,67 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-12 — Tadeo + Claude
+
+#### Cambio 170 - scanner_2 microperforado: correccion completa de ROI, patron y grid
+
+**Pedido:** el scanner_2 en modo MICROPERFORADO tomaba muy mal los agujeros (patron de
+55 holes vs ~200 reales, ratio=346%), ROI incorrecta, margenes mal. Corregir sin tocar scanner_1.
+
+**Diagnostico:**
+- ROI estaba en `{x:109, w:438}` (casi full-frame) en vez de `{x:225, w:205}` (banda correcta).
+- `pattern_edge_margin_px: 50.0` en ROI de 208px dejaba solo 2-3 columnas al construir patron.
+- `grid_stagger_x_odd: -18.0` (global) es OPUESTO al stagger real de scanner_2 (+18px):
+  en scanner_1 filas impares van a la IZQUIERDA; en scanner_2 van a la DERECHA.
+- `grid_dx: 36.0` y `grid_dy: 14.0` globales no matcheaban la geometria real de scanner_2
+  (dx medido=35.5, dy=13.6 de 10 frames, 1700+ mediciones).
+- `estimate_phase(xs, dx)` mezcla filas pares e impares (offset 18px entre sí) produciendo
+  distribucion bimodal; la moda elegía el pico incorrecto (phase_x=28 vs real ~24).
+- Formula de dedup en `pattern_build.py` usaba `phase_x + ci*dx + stagger` sin modulo para
+  filas impares, mientras `assign_cells` usa `(phase_x+stagger) % dx + ci*dx`. Con
+  phase_x+stagger > dx la formula incorrecta guardaba el punto equivocado en la celda.
+
+**Cambios:**
+- `config/io_map.yaml`: scanner_2 inspection overrides nuevos:
+  - `grid_stagger_x_odd: 18.0` (positivo, opuesto al -18 global de scanner_1)
+  - `grid_dx: 35.5`, `grid_dy: 13.6` (geometria real medida de scanner_2)
+  - `pattern_edge_margin_px: 5.0` ya estaba; se mantiene
+- `data/patterns/scanner_2/modelo_B/roi.json`: `{x:225, y:0, w:205, h:480}` (corregida)
+- `data/patterns/scanner_2/modelo_B/holes.json`: reconstruido con 157 agujeros (vs 55 prev)
+- `src/patterns/pattern_build.py`:
+  - `estimate_phase`: cuando `stagger_override` esta configurado, calcular `phase_x` solo
+    de filas pares (separadas via `phase_y`), no de todas las xs mezcladas
+  - formula de dedup para filas impares: usar `(phase_x+stagger)%dx + ci*dx` (consistente
+    con `assign_cells`) en vez de `phase_x + ci*dx + stagger` (sin modulo)
+
+**Resultado tras rebuild:**
+- 161 puntos detectados, 157 celdas unicas (4 duplicados residuales en zonas ambiguas deduplados)
+- `avg_detection_ratio=124%` (vs 346% antes); algunos frames aun muestran missing intermitente
+  pendiente de ajuste fino de threshold o compare-margins para scanner_2
+
+**Archivos:** `config/io_map.yaml`, `data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `src/patterns/pattern_build.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 169 - ROI recenter dinamico (feature desactivado por defecto)
+
+**Pedido:** detectar deriva lateral de ROI en produccion y corregirla paso a paso.
+
+**Cambios:**
+- `src/inspection.py`: `_update_runtime_roi_drift()` + `_edge_missing_counts()` — detecta
+  si los missing estan concentrados en un borde lateral de forma persistente y desplaza
+  la ROI un pixel por frame hasta corregir la deriva. Activar con `roi_recenter_enabled: true`.
+- `src/vision/inspector.py`: `saved_roi` y `roi_runtime_state` en preloaded para persistir
+  estado entre frames.
+- `src/utils/config.py`: nuevos defaults `roi_recenter_*` (todos conservadores, feature OFF).
+
+**Estado:** implementado y desactivado. `roi_recenter_enabled: false` por defecto.
+
+**Archivos:** `src/inspection.py`, `src/vision/inspector.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
 ### Sesión 2026-06-11 — Tadeo + Claude
 
 #### Cambio 168 - Verificacion de tamano de frame/ROI + diagnostico `roi-check`
