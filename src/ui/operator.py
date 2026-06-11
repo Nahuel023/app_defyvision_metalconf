@@ -209,6 +209,12 @@ class ScannerPanel(QWidget):
         model_row.addWidget(self.model_combo, stretch=1)
         root.addLayout(model_row)
 
+        # ── RESET FALLA — aparece encima de INICIAR/DETENER al detenerse ──
+        self.reset_btn = self._primary_btn("↺  RESET FALLA", "#b45309")
+        self.reset_btn.clicked.connect(self._on_reset)
+        self.reset_btn.setVisible(False)
+        root.addWidget(self.reset_btn)
+
         # ── Botones principales: INICIAR / DETENER ────────────────────
         main_btn_row = QHBoxLayout()
         main_btn_row.setSpacing(8)
@@ -219,18 +225,6 @@ class ScannerPanel(QWidget):
         main_btn_row.addWidget(self.start_btn)
         main_btn_row.addWidget(self.stop_btn)
         root.addLayout(main_btn_row)
-
-        # ── Reset + Simular (fila inferior secundaria) ────────────────
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
-        self.reset_btn = self._secondary_btn("↺  RESET FALLA", "#3b82f6")
-        self.reset_btn.clicked.connect(self._on_reset)
-        sim_btn = self._secondary_btn("⚡  Simular parada", "#d29922")
-        sim_btn.clicked.connect(self._on_simulate_stop)
-        bottom_row.addWidget(self.reset_btn)
-        bottom_row.addStretch()
-        bottom_row.addWidget(sim_btn)
-        root.addLayout(bottom_row)
 
         self._refresh_buttons(ScannerState.IDLE)
 
@@ -481,7 +475,7 @@ class ScannerPanel(QWidget):
 
     def _on_reset(self) -> None:
         if self._scanner.reset():
-            self._feedback(self.reset_btn, "↺  RESET FALLA", "#1e3a5f", "● Reseteando...")
+            self._feedback(self.reset_btn, "↺  RESET FALLA", "#7c2d12", "● Reseteando...")
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
 
@@ -540,22 +534,10 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_buttons(self, state: ScannerState) -> None:
+        is_stopped = (state == ScannerState.STOPPED)
+        self.reset_btn.setVisible(is_stopped)
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
-
-        can_reset = (state == ScannerState.STOPPED)
-        self.reset_btn.setEnabled(can_reset)
-        if can_reset:
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background:#b45309; color:#ffffff; font-weight:700; "
-                "border-radius:5px; font-size:12px; border:none; padding:0 14px; }"
-                "QPushButton:hover { background:#d97706; }"
-            )
-        else:
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background:transparent; color:#4b5563; font-weight:600; "
-                "border-radius:5px; font-size:11px; border:1px solid #374151; padding:0 12px; }"
-            )
 
     def _populate_models(self) -> None:
         from src.utils.model_names import DISPLAY_NAMES, to_display
