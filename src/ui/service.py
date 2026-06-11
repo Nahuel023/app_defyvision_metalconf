@@ -2104,8 +2104,55 @@ class RecordingTab(QWidget):
         path = roi_path(internal, scanner_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
-        self._roi_status_lbl.setText(f"Guardado: {path}")
+        self._roi_status_lbl.setText("ROI guardado — reconstruyendo patrón…")
         self._refresh_current_roi_label()
+
+        # Reconstruir patrón automáticamente con el frame actual de calibración
+        frame_copy = self._roi_frame.copy()
+        self._rebuild_pattern_async(frame_copy, internal, scanner_id)
+
+    def _rebuild_pattern_async(self, frame, model: str, scanner_id) -> None:
+        """Reconstruye holes.json en background usando el frame de calibración."""
+        import tempfile, os, cv2
+
+        class _RebuildWorker(QThread):
+            done   = pyqtSignal(str, bool)   # (mensaje, ok)
+
+            def __init__(self, frame, model, scanner_id):
+                super().__init__()
+                self._frame      = frame
+                self._model      = model
+                self._scanner_id = scanner_id
+
+            def run(self):
+                tmp = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                        tmp = f.name
+                    cv2.imwrite(tmp, self._frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    from src.patterns.pattern_build import build_pattern_from_image
+                    out = build_pattern_from_image(
+                        self._model,
+                        Path(tmp),
+                        scanner_id=self._scanner_id,
+                    )
+                    self.done.emit(f"ROI y patrón guardados → {out.name}", True)
+                except Exception as exc:
+                    self.done.emit(f"ROI guardado · Error reconstruyendo patrón: {exc}", False)
+                finally:
+                    if tmp and os.path.exists(tmp):
+                        os.unlink(tmp)
+
+        worker = _RebuildWorker(frame, model, scanner_id)
+        worker.done.connect(self._on_rebuild_done)
+        worker.done.connect(lambda *_: worker.deleteLater())
+        self._rebuild_worker = worker   # retener referencia
+        worker.start()
+
+    def _on_rebuild_done(self, msg: str, ok: bool) -> None:
+        color = "#22c55e" if ok else "#f87171"
+        self._roi_status_lbl.setText(msg)
+        self._roi_status_lbl.setStyleSheet(f"color:{color};font-size:11px;")
 
     # ------------------------------------------------------------------
 
