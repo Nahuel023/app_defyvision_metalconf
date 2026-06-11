@@ -2116,7 +2116,7 @@ class RecordingTab(QWidget):
         import tempfile, os, cv2
 
         class _RebuildWorker(QThread):
-            done   = pyqtSignal(str, bool)   # (mensaje, ok)
+            done = pyqtSignal(str, bool)   # (mensaje, ok)
 
             def __init__(self, frame, model, scanner_id):
                 super().__init__()
@@ -2144,7 +2144,16 @@ class RecordingTab(QWidget):
                         os.unlink(tmp)
 
         worker = _RebuildWorker(frame, model, scanner_id)
-        worker.done.connect(self._on_rebuild_done)
+        # Capturar scanner_id en closure para invalidar cache al terminar
+        _sid = scanner_id
+        def _on_done(msg: str, ok: bool) -> None:
+            self._on_rebuild_done(msg, ok)
+            if ok and _sid and hasattr(self, "_system"):
+                try:
+                    self._system.scanner(_sid).reload_cache()
+                except Exception:
+                    pass
+        worker.done.connect(_on_done)
         worker.done.connect(lambda *_: worker.deleteLater())
         self._rebuild_worker = worker   # retener referencia
         worker.start()
