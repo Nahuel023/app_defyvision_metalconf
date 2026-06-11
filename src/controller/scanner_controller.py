@@ -424,6 +424,12 @@ class ScannerController:
         elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
             self._set_lights(red=True)   # rojo = intervención requerida (estándar industrial)
 
+    def reload_cache(self) -> None:
+        """Invalida el cache del inspector (ROI, patrón, tolerancias) para el modelo activo."""
+        model = self._io.scanner_config(self._id).get("model", "")
+        self._inspector.invalidate(model=model or None, scanner_id=self._id)
+        logger.info(f"[{self._id}] cache invalidado — ROI/patrón se recargarán en el próximo frame")
+
     def set_model(self, model: str) -> None:
         cfg      = self._io.scanner_config(self._id)
         cfg["model"] = model
