@@ -29,7 +29,13 @@ scanner_2:
   model: "modelo_A"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X2 no llega al PLC
-  inspection: {}
+  inspection:
+    # Overrides especificos para microperforado en scanner_2.
+    # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
+    # la inspeccion corre con scanner_id=scanner_2.
+    pattern_align_abs_max_px: 24.0
+    pattern_global_offset_max_px: 50.0
+    pattern_slope_delta_max_deg: 26.0
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:

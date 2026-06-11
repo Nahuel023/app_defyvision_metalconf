@@ -48,6 +48,78 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 166 - ok_buffer_count 200 -> 500
+
+**Pedido:** guardar mas de 200 frames OK en el buffer circular, renovandose siempre.
+
+**Cambio:** `config/tolerancias.yaml` -> `ok_buffer_count: 200 -> 500`
+
+El buffer circular ya funcionaba (sobreescribe los mas viejos al llenarse).
+Solo se sube el tope a 500 slots (~50 MB a 100 KB/frame por scanner).
+Con `ok_buffer_every: 1` se guarda cada frame OK que llega.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 165 - Microperforado scanner_2: patrón/ROI propios + overrides separados de scanner_1
+
+**Pedido:** calibrar `scanner_2` para microperforado usando la carpeta
+`C:\Users\DefyC\Downloads\10-06-2026-MICROPERFORADO\10-06-2026-MICROPERFORADO_SCANNER_2`
+(todos los frames OK), manteniendo criterios parecidos a `scanner_1` pero con
+parámetros independientes para no mezclar tolerancias entre scanners.
+
+**Diagnóstico inicial:**
+- `scanner_2/modelo_B` no tenía patrón propio (`holes.json`), solo ROI;
+- el sistema caía al patrón global `data/patterns/modelo_B/holes.json`
+  calibrado a `295x480`, mientras los frames reales de `scanner_2` eran `640x480`;
+- resultado inicial:
+  - `71/71 raw NOK`
+  - `machine_stop_frames=69`
+  - ~`90-107 missing` por frame
+- además, la ROI de `scanner_2/modelo_B` estaba en frame completo (`640x480`),
+  mientras el microperforado real ocupa una franja bastante más angosta.
+
+**Cambios aplicados:**
+- `data/patterns/scanner_2/modelo_B/roi.json`
+  - nueva ROI específica: `x=240, y=0, w=208, h=480`
+- `data/patterns/scanner_2/modelo_B/holes.json`
+  - nuevo patrón específico de `scanner_2/modelo_B`
+  - construido desde `frame_0048.png` de la carpeta buena
+- `src/utils/config.py`
+  - `load_tolerances()` ahora acepta `scanner_id`
+  - cuando hay `scanner_id`, mezcla overrides desde
+    `config/io_map.yaml -> <scanner>.inspection`
+- `src/patterns/pattern_build.py`, `src/inspection.py`,
+  `src/vision/inspector.py`, `src/controller/scanner_controller.py`,
+  `src/ui/service.py`, `src/ui/operator.py`
+  - pasan `scanner_id` al cargar tolerancias para que cada scanner use sus
+    propios overrides cuando corresponde
+- `config/io_map.yaml`
+  - nuevos overrides solo para `scanner_2.inspection`:
+    - `pattern_align_abs_max_px: 24.0`
+    - `pattern_global_offset_max_px: 50.0`
+    - `pattern_slope_delta_max_deg: 26.0`
+
+**Resultado final sobre la carpeta buena de scanner_2:**
+- `71/71 raw OK`
+- `71/71 temporal OK`
+- `align_failures=0/71`
+- `machine_stop_frames=0`
+
+**Nota de diseño:**
+- `scanner_1` no fue tocado;
+- los overrides de `scanner_2` viven en `io_map.yaml -> scanner_2.inspection`,
+  separados de `modelo_B` compartido.
+
+**Archivos modificados:** `config/io_map.yaml`, `data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `src/utils/config.py`,
+`src/patterns/pattern_build.py`, `src/inspection.py`, `src/vision/inspector.py`,
+`src/controller/scanner_controller.py`, `src/ui/service.py`, `src/ui/operator.py`,
+`CHANGELOG.md`
+
+---
+
 #### Cambio 164 - Servicio: selector de scanner en Analisis + correcciones de flujo en vivo
 
 **Pedido:** agregar selector de scanner en la pagina de ANALISIS de RecordingTab

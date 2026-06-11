@@ -179,7 +179,7 @@ def _inspect_bgr(
     # Formato: {"streak": int, "reason": str}
     desalign_state: dict = pre.get("desalign_state") or {"streak": 0, "reason": ""}
 
-    tolerances = pre.get("tolerances") or load_tolerances(model)
+    tolerances = pre.get("tolerances") or load_tolerances(model, scanner_id=scanner_id)
     pattern: Pattern = pre.get("pattern") or load_pattern(find_pattern_path(model, scanner_id))
     roi: Optional[ROI] = pre.get("roi", _SENTINEL)
     if roi is _SENTINEL:
@@ -1110,7 +1110,7 @@ def inspect_folder(
 
     scanner_id = scanner_id or infer_scanner_id(model, input_dir)
 
-    tolerances = load_tolerances(model)
+    tolerances = load_tolerances(model, scanner_id=scanner_id)
     frame_rate_hz = float(
         tolerances["frame_rate_hz"] if frame_rate_hz is None else frame_rate_hz
     )
