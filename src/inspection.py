@@ -9,9 +9,9 @@ import numpy as np
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern, infer_scanner_id
-from src.patterns.roi import apply_roi, load_roi, ROI
+from src.patterns.roi import apply_roi, load_roi, ROI, RuntimeROIInfo, resolve_runtime_roi
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator, draw_roi_health_indicator
 from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
@@ -78,6 +78,8 @@ class InspectionResult:
     pattern_center_zigzag_max_px: float = 0.0
     sheet_tilt_deg: float = 0.0        # inclinación de la grilla (grados); NaN si no medible
     tilt_warn: bool = False            # True cuando |sheet_tilt_deg| supera tilt_warn_deg
+    active_roi: "ROI | None" = None
+    roi_info: "RuntimeROIInfo | None" = None
 
 
 @dataclass(frozen=True)
@@ -298,6 +300,13 @@ def _inspect_bgr(
     # Nota: verticality_quality_enabled y pattern_global_offset_max_px se controlan
     # desde tolerancias.yaml por modelo. Para modelo_B mantener ambos en false/0
     # a menos que se valide que el centering de bordes es confiable con la camara usada.
+    roi_autocorrect_enabled = bool(tolerances.get("roi_autocorrect_enabled", False))
+    roi_autocorrect_max_shift_px = float(tolerances.get("roi_autocorrect_max_shift_px", 0.0))
+    roi_autocorrect_max_width_delta_px = float(
+        tolerances.get("roi_autocorrect_max_width_delta_px", 0.0)
+    )
+    roi_detect_margin_px = int(tolerances.get("roi_detect_margin_px", 0))
+    roi_detect_min_contrast = float(tolerances.get("roi_detect_min_contrast", 30.0))
 
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
@@ -306,7 +315,18 @@ def _inspect_bgr(
         img_aligned = img_full
         align_res = EdgeAlignResult(angle_deg=0.0, used_lines=0)
 
+    roi_info: RuntimeROIInfo | None = None
     if roi is not None:
+        roi, roi_info = resolve_runtime_roi(
+            img_aligned,
+            roi,
+            auto_correct_enabled=roi_autocorrect_enabled,
+            max_shift_px=roi_autocorrect_max_shift_px,
+            max_width_delta_px=roi_autocorrect_max_width_delta_px,
+            channel=use_channel,
+            margin_px=roi_detect_margin_px,
+            min_contrast=roi_detect_min_contrast,
+        )
         try:
             img = apply_roi(img_aligned, roi)
         except ValueError as exc:
@@ -331,6 +351,19 @@ def _inspect_bgr(
                 "build-pattern --model %s --scanner <scanner_id> --img <ref.jpg>",
                 model, pat_w, pat_h, frame_w, frame_h, model,
             )
+            if roi_info is not None:
+                warn = f"ROI/patron {frame_w}x{frame_h} vs {pat_w}x{pat_h}"
+                roi_info = RuntimeROIInfo(
+                    frame_w=roi_info.frame_w,
+                    frame_h=roi_info.frame_h,
+                    saved_roi=roi_info.saved_roi,
+                    effective_roi=roi_info.effective_roi,
+                    detected_roi=roi_info.detected_roi,
+                    shift_x=roi_info.shift_x,
+                    width_delta_px=roi_info.width_delta_px,
+                    auto_corrected=roi_info.auto_corrected,
+                    warning=f"{roi_info.warning} | {warn}".strip(" |"),
+                )
 
     preprocess_kw = dict(
         threshold=threshold, use_channel=use_channel, polarity=polarity,
@@ -1028,6 +1061,7 @@ def _inspect_bgr(
     overlay = draw_status_indicator(overlay, final_status, nok_reasons, badge_count)
     overlay = draw_tilt_indicator(overlay, sheet_tilt_deg, warn=tilt_warn)
     overlay = draw_blur_indicator(overlay, blur_score, blur_score_min)
+    overlay = draw_roi_health_indicator(overlay, roi_info)
 
     return InspectionResult(
         model=model,
@@ -1059,6 +1093,8 @@ def _inspect_bgr(
         sheet_tilt_deg=float(sheet_tilt_deg),
         tilt_warn=tilt_warn,
         image=img_full,
+        active_roi=roi,
+        roi_info=roi_info,
     )
 
 
