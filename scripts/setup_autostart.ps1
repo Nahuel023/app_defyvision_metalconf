@@ -1,4 +1,4 @@
-# scripts/setup_autostart.ps1 — registra metalconf.exe en el Task Scheduler
+# scripts/setup_autostart.ps1 - registra metalconf.exe en el Task Scheduler
 # Requiere ejecutar como Administrador.
 # Ejecutar DESPUES de build_exe.ps1.
 #
