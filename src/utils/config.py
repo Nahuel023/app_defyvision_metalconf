@@ -99,6 +99,11 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pattern_center_align_enabled": False,
     "pattern_center_zigzag_std_max_px": 4.0,
     "pattern_center_zigzag_abs_max_px": 6.5,
+    "roi_autocorrect_enabled": False,
+    "roi_autocorrect_max_shift_px": 0.0,
+    "roi_autocorrect_max_width_delta_px": 0.0,
+    "roi_detect_margin_px": 0,
+    "roi_detect_min_contrast": 30.0,
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
     "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron
