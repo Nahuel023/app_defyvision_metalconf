@@ -48,6 +48,20 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 166 - ok_buffer_count 200 -> 500
+
+**Pedido:** guardar mas de 200 frames OK en el buffer circular, renovandose siempre.
+
+**Cambio:** `config/tolerancias.yaml` -> `ok_buffer_count: 200 -> 500`
+
+El buffer circular ya funcionaba (sobreescribe los mas viejos al llenarse).
+Solo se sube el tope a 500 slots (~50 MB a 100 KB/frame por scanner).
+Con `ok_buffer_every: 1` se guarda cada frame OK que llega.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
 #### Cambio 165 - Microperforado scanner_2: patrón/ROI propios + overrides separados de scanner_1
 
 **Pedido:** calibrar `scanner_2` para microperforado usando la carpeta
