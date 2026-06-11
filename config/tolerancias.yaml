@@ -172,6 +172,14 @@ models:
     roi_autocorrect_max_width_delta_px: 20.0
     roi_detect_margin_px: 0
     roi_detect_min_contrast: 25.0
+    roi_recenter_enabled: true
+    roi_recenter_warmup_frames: 24
+    roi_recenter_trigger_delta_px: 5.0
+    roi_recenter_edge_missing_min: 3
+    roi_recenter_edge_band_px: 30.0
+    roi_recenter_streak_frames: 8
+    roi_recenter_step_px: 1.0
+    roi_recenter_max_total_shift_px: 24.0
     pattern_center_align_enabled: false
     pattern_center_zigzag_std_max_px: 2.2
     pattern_center_zigzag_abs_max_px: 6.0
