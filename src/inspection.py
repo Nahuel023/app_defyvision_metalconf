@@ -8,7 +8,7 @@ import numpy as np
 
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
-from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
+from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern, infer_scanner_id
 from src.patterns.roi import apply_roi, load_roi, ROI
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator
@@ -126,6 +126,7 @@ def inspect_image(
     _preloaded: Optional[dict] = None,
 ) -> InspectionResult:
     """Inspect an image from disk."""
+    scanner_id = scanner_id or infer_scanner_id(model, img_path)
     img_full = load_bgr_image(img_path)
     result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id,
                           _machine_stop_detector=_machine_stop_detector,
@@ -1106,6 +1107,8 @@ def inspect_folder(
     scanner_id: str | None = None,
 ) -> FolderInspectionSummary:
     from src.vision.inspector import InspectionSession
+
+    scanner_id = scanner_id or infer_scanner_id(model, input_dir)
 
     tolerances = load_tolerances(model)
     frame_rate_hz = float(

@@ -1,8 +1,11 @@
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Tuple, Optional
+
+import yaml
 
 _log = logging.getLogger(__name__)
 
@@ -37,8 +40,35 @@ def pattern_path(model: str, scanner_id: str | None = None) -> Path:
     return Path("data") / "patterns" / model / "holes.json"
 
 
+def infer_scanner_id(model: str, source_path: str | Path | None = None) -> str | None:
+    """Infer scanner_id from a source path or the current io_map model assignment."""
+    if source_path is not None:
+        text = str(source_path).lower().replace("\\", "/")
+        match = re.search(r"scanner[_-]?(\d+)", text)
+        if match:
+            return f"scanner_{int(match.group(1))}"
+
+    cfg_path = Path("config") / "io_map.yaml"
+    if not cfg_path.exists():
+        return None
+
+    try:
+        payload = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return None
+
+    exact = [
+        sid for sid, cfg in payload.items()
+        if sid != "plc" and str((cfg or {}).get("model", "")).strip() == model
+    ]
+    if len(exact) == 1:
+        return exact[0]
+    return None
+
+
 def find_pattern_path(model: str, scanner_id: str | None = None) -> Path:
     """Resolve pattern path with fallback: scanner-specific → model-only."""
+    scanner_id = scanner_id or infer_scanner_id(model)
     if scanner_id:
         p = Path("data") / "patterns" / scanner_id / model / "holes.json"
         if p.exists():
