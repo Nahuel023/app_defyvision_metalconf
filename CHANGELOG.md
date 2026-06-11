@@ -48,6 +48,84 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 164 - Selector de scanner en pantalla de Analisis
+
+**Pedido:** agregar selector de scanner en la pagina de ANALISIS de RecordingTab
+y auto-detectar el scanner usado en la grabacion en vivo.
+
+**Diagnostico:**
+- `_scanner_combo` existe en la pagina GRAB (seccion de grabacion), no en ANALISIS
+- `_on_analyze()` leia `self._scanner_combo.currentText()` del GRAB pero el usuario
+  estaba en la pagina ANALISIS sin visibilidad ni control del scanner
+- `_on_load_recording()` leia `model_display` y `fps` del meta.json pero ignoraba
+  el campo `scanner` que si se graba al iniciar la captura
+
+**Cambios aplicados en `src/ui/service.py`:**
+
+- `_build_analysis_section()`: nuevo chip SCANNER + `_ana_scanner_combo` (QComboBox)
+  poblado con `self._system.scanner_ids()`, visible en la pagina ANALISIS
+
+- `_on_analyze()`: usa `self._ana_scanner_combo.currentText()` en lugar de
+  `self._scanner_combo` (del GRAB)
+
+- `_set_analysis_running()`: bloquea/desbloquea `_ana_scanner_combo` junto con
+  los demas controles de analisis
+
+- `_on_load_recording()`:
+  - al inferir scanner desde el nombre de carpeta: sincroniza `_ana_scanner_combo`
+  - al leer meta.json: lee campo `scanner` y lo aplica a `_ana_scanner_combo`
+  - la grabacion guarda `"scanner": scanner_id` en meta.json, por lo que al
+    cargar esa grabacion el scanner queda automaticamente seleccionado
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 163 - Blindaje contra patrón equivocado cuando falta scanner_id
+
+**Problema reportado:** aun con los últimos ajustes de microperforado, al analizar
+en vivo o por carpeta seguían apareciendo `MISSING` masivos "como si no se aplicaran
+los cambios". El síntoma era consistente con estar resolviendo el patrón global en vez
+del patrón específico de `scanner_1`.
+
+**Diagnóstico:**
+- el repo sí estaba actualizado (`HEAD=97ae674`), así que no era un problema de commit;
+- al correr `run-folder` sin `--scanner`, el sistema podía caer al patrón global
+  `data/patterns/modelo_B/holes.json`, reproduciendo exactamente los falsos `MISSING`;
+- al correr el mismo lote con `scanner_1`, volvía a `48/48 raw OK`;
+- además, si se estaba usando `dist\metalconf\metalconf.exe`, existía el riesgo de
+  estar viendo un binario viejo hasta recompilar PyInstaller.
+
+**Cambios aplicados:**
+- `src/patterns/pattern_io.py`
+  - nueva helper `infer_scanner_id(model, source_path=None)`;
+  - infiere `scanner_1` / `scanner_2` desde el nombre de carpeta/archivo
+    (`...SCANNER_1...`) o, si no alcanza, desde el `model` asignado en `config/io_map.yaml`;
+  - `find_pattern_path()` ahora usa esa inferencia antes de caer al patrón global.
+- `src/patterns/roi.py`
+  - `load_roi()` ahora usa la misma inferencia para cargar la ROI correcta.
+- `src/inspection.py`
+  - `inspect_image()` e `inspect_folder()` infieren el scanner automáticamente cuando
+    no se les pasa `scanner_id`.
+- `src/main.py`
+  - `run-image` y `run-folder` imprimen `[context] scanner=...` para dejar visible
+    qué scanner/patrón se resolvió realmente.
+- `src/ui/service.py`
+  - al cargar una carpeta grabada, la UI intenta autoseleccionar el scanner desde el
+    nombre de la carpeta antes de analizar.
+
+**Validación:**
+- comando antes problemático, ahora sin `--scanner`:
+  - `.\.venv\Scripts\python.exe -m src.main run-folder --model modelo_B --input "...10-06-2026-MICROPERFORADO_5_SCANNER_1" --fps 5`
+  - salida: `[context] scanner=scanner_1`
+  - resultado: `48/48 raw OK`, `48/48 temporal OK`, `align_failures=0/48`, `machine_stop_frames=0`
+- `pytest tests/` → `17 passed`
+
+**Archivos modificados:** `src/patterns/pattern_io.py`, `src/patterns/roi.py`,
+`src/inspection.py`, `src/main.py`, `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 162 - Microperforado scanner_1: bajar missing residuales en carpeta 10-06-2026-MICROPERFORADO_5
 
 **Pedido:** seguir afinando `MISSING` sobre
