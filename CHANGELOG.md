@@ -48,10 +48,11 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
-#### Cambio 164 - Selector de scanner en pantalla de Analisis
+#### Cambio 164 - Servicio: selector de scanner en Analisis + correcciones de flujo en vivo
 
 **Pedido:** agregar selector de scanner en la pagina de ANALISIS de RecordingTab
-y auto-detectar el scanner usado en la grabacion en vivo.
+y corregir el flujo de Servicio para que no queden combinaciones silenciosas
+scanner/modelo ni analisis en vivo leyendo PNGs a medio escribir.
 
 **Diagnostico:**
 - `_scanner_combo` existe en la pagina GRAB (seccion de grabacion), no en ANALISIS
@@ -76,6 +77,18 @@ y auto-detectar el scanner usado en la grabacion en vivo.
   - al leer meta.json: lee campo `scanner` y lo aplica a `_ana_scanner_combo`
   - la grabacion guarda `"scanner": scanner_id` en meta.json, por lo que al
     cargar esa grabacion el scanner queda automaticamente seleccionado
+
+- `currentTextChanged` de `_scanner_combo`: tambien sincroniza defaults de Servicio
+  via `_sync_service_scanner_defaults(sid)`
+  - alinea `_ana_scanner_combo` con el scanner activo
+  - selecciona por defecto el `model` configurado para ese scanner en `io_map.yaml`
+    para evitar combinaciones silenciosas que disparen `MISSING` falsos
+
+- `_grab_frame()`:
+  - el analisis en vivo ya no usa `inspect_image(path)` sobre el PNG recien lanzado
+    a escritura en background
+  - ahora inspecciona directamente `frame_copy` en memoria con `inspect_frame(...)`,
+    eliminando la carrera entre `cv2.imwrite(...)` y la lectura del archivo
 
 **Archivos modificados:** `src/ui/service.py`
 
