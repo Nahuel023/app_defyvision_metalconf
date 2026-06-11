@@ -2,7 +2,7 @@
 FSM de un scanner individual.
 
 Estados:
-  IDLE    → amarilla encendida, esperando START del operador
+  IDLE    → azul encendida, esperando START del operador
   RUNNING → verde/amarillo; electroválvula activa
              MANUAL: solo electroválvula (sin backlight ni inspección)
              AUTO:   inspección continua + electroválvula + backlight
@@ -232,7 +232,7 @@ class ScannerController:
         # backlight permanece encendido siempre
 
         if new_state == ScannerState.IDLE:
-            self._set_lights(yellow=True)
+            self._set_lights(blue=True)
         else:
             self._set_lights()   # todas apagadas en STOPPED
 
@@ -247,7 +247,7 @@ class ScannerController:
                 return False
 
         self._transition(ScannerState.IDLE)
-        self._set_lights(yellow=True)
+        self._set_lights(blue=True)
         logger.info(f"[{self._id}] reset → IDLE")
         return True
 
@@ -418,7 +418,7 @@ class ScannerController:
         # Backlight siempre ON al iniciar para que la cámara sea visible
         self._io.write(f"{self._id}.backlight", True)
         if state == ScannerState.IDLE:
-            self._set_lights(yellow=True)
+            self._set_lights(blue=True)
         elif state == ScannerState.RUNNING:
             self._set_lights(green=True)
         elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
