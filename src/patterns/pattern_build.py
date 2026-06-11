@@ -103,15 +103,23 @@ def build_pattern_from_image(
     # when the mixed large+small hole sample shifts the mode away from true spacing).
     dx = float(tolerances["grid_dx"]) if "grid_dx" in tolerances else estimate_spacing(xs, min_spacing=grid_min_sp)
     dy = float(tolerances["grid_dy"]) if "grid_dy" in tolerances else estimate_spacing(ys, min_spacing=grid_min_sp)
-    phase_x = estimate_phase(xs, dx)
+    # Compute phase_y first (no stagger in Y). Then compute phase_x from even rows
+    # only when stagger is configured: mixing even+odd rows produces a bimodal
+    # X-distribution and estimate_phase picks the wrong peak.
     phase_y = estimate_phase(ys, dy)
+    stagger_override = tolerances.get("grid_stagger_x_odd")
+    if stagger_override is not None:
+        cjs_tmp = np.array([int((y - phase_y) / dy + 0.5) for y in ys])
+        even_xs = xs[cjs_tmp % 2 == 0]
+        phase_x = estimate_phase(even_xs, dx) if len(even_xs) >= 4 else estimate_phase(xs, dx)
+    else:
+        phase_x = estimate_phase(xs, dx)
     # Determine stagger_x_odd before calling assign_cells so that odd-row holes
     # are assigned the correct CI index (accounting for the phase shift between
     # even and odd rows).  Use the config value when available; otherwise do a
     # preliminary stagger-less assignment to separate even/odd rows, estimate the
     # stagger from their X-phase difference, then re-assign with the correct stagger.
     stagger_x_odd: float | None = None
-    stagger_override = tolerances.get("grid_stagger_x_odd")
     if stagger_override is not None:
         stagger_x_odd = float(stagger_override)
         print(f"[build-pattern] Stagger (config): stagger_x_odd={stagger_x_odd:.1f}px")
@@ -162,7 +170,12 @@ def build_pattern_from_image(
                 keep_idx = idxs[0]
             else:
                 ci, cj = cell
-                exp_x = phase_x + ci * dx + ((cj % 2) * (stagger_x_odd or 0.0))
+                _stagger = stagger_x_odd or 0.0
+                # Mirror assign_cells: odd rows use (phase_x + stagger) % dx as origin
+                if cj % 2 == 1 and _stagger != 0.0:
+                    exp_x = (phase_x + _stagger) % dx + ci * dx
+                else:
+                    exp_x = phase_x + ci * dx
                 exp_y = phase_y + cj * dy
                 keep_idx = min(
                     idxs,
