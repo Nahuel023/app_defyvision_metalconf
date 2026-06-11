@@ -48,6 +48,80 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 164 - Selector de scanner en pantalla de Analisis
+
+**Pedido:** agregar selector de scanner en la pagina de ANALISIS de RecordingTab
+y auto-detectar el scanner usado en la grabacion en vivo.
+
+**Diagnostico:**
+- `_scanner_combo` existe en la pagina GRAB (seccion de grabacion), no en ANALISIS
+- `_on_analyze()` leia `self._scanner_combo.currentText()` del GRAB pero el usuario
+  estaba en la pagina ANALISIS sin visibilidad ni control del scanner
+- `_on_load_recording()` leia `model_display` y `fps` del meta.json pero ignoraba
+  el campo `scanner` que si se graba al iniciar la captura
+
+**Cambios aplicados en `src/ui/service.py`:**
+
+- `_build_analysis_section()`: nuevo chip SCANNER + `_ana_scanner_combo` (QComboBox)
+  poblado con `self._system.scanner_ids()`, visible en la pagina ANALISIS
+
+- `_on_analyze()`: usa `self._ana_scanner_combo.currentText()` en lugar de
+  `self._scanner_combo` (del GRAB)
+
+- `_set_analysis_running()`: bloquea/desbloquea `_ana_scanner_combo` junto con
+  los demas controles de analisis
+
+- `_on_load_recording()`:
+  - al inferir scanner desde el nombre de carpeta: sincroniza `_ana_scanner_combo`
+  - al leer meta.json: lee campo `scanner` y lo aplica a `_ana_scanner_combo`
+  - la grabacion guarda `"scanner": scanner_id` en meta.json, por lo que al
+    cargar esa grabacion el scanner queda automaticamente seleccionado
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 163 - Blindaje contra patrón equivocado cuando falta scanner_id
+
+**Problema reportado:** aun con los últimos ajustes de microperforado, al analizar
+en vivo o por carpeta seguían apareciendo `MISSING` masivos "como si no se aplicaran
+los cambios". El síntoma era consistente con estar resolviendo el patrón global en vez
+del patrón específico de `scanner_1`.
+
+**Diagnóstico:**
+- el repo sí estaba actualizado (`HEAD=97ae674`), así que no era un problema de commit;
+- al correr `run-folder` sin `--scanner`, el sistema podía caer al patrón global
+  `data/patterns/modelo_B/holes.json`, reproduciendo exactamente los falsos `MISSING`;
+- al correr el mismo lote con `scanner_1`, volvía a `48/48 raw OK`;
+- además, si se estaba usando `dist\metalconf\metalconf.exe`, existía el riesgo de
+  estar viendo un binario viejo hasta recompilar PyInstaller.
+
+**Cambios aplicados:**
+- `src/patterns/pattern_io.py`
+  - nueva helper `infer_scanner_id(model, source_path=None)`;
+  - infiere `scanner_1` / `scanner_2` desde el nombre de carpeta/archivo
+    (`...SCANNER_1...`) o, si no alcanza, desde el `model` asignado en `config/io_map.yaml`;
+  - `find_pattern_path()` ahora usa esa inferencia antes de caer al patrón global.
+- `src/patterns/roi.py`
+  - `load_roi()` ahora usa la misma inferencia para cargar la ROI correcta.
+- `src/inspection.py`
+  - `inspect_image()` e `inspect_folder()` infieren el scanner automáticamente cuando
+    no se les pasa `scanner_id`.
+- `src/main.py`
+  - `run-image` y `run-folder` imprimen `[context] scanner=...` para dejar visible
+    qué scanner/patrón se resolvió realmente.
+**Validación:**
+- comando antes problemático, ahora sin `--scanner`:
+  - `.\.venv\Scripts\python.exe -m src.main run-folder --model modelo_B --input "...10-06-2026-MICROPERFORADO_5_SCANNER_1" --fps 5`
+  - salida: `[context] scanner=scanner_1`
+  - resultado: `48/48 raw OK`, `48/48 temporal OK`, `align_failures=0/48`, `machine_stop_frames=0`
+- `pytest tests/` → `17 passed`
+
+**Archivos modificados:** `src/patterns/pattern_io.py`, `src/patterns/roi.py`,
+`src/inspection.py`, `src/main.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 162 - Microperforado scanner_1: bajar missing residuales en carpeta 10-06-2026-MICROPERFORADO_5
 
 **Pedido:** seguir afinando `MISSING` sobre
@@ -681,55 +755,6 @@ btol=8 excluye la columna principal x=76.
 **Validación:**
 - Frames `05-06-2026-MICROPERFORADO_1`: 137/137 OK (igual que antes)
 - Visualización `data/dbg_borde_antes_despues.png`: línea verde cubre toda la altura
-
----
-
-#### Cambio 146 - Microperforado scanner_1: recalibración ROI y patrón por reposicionamiento de chapa
-
-**Pedido:** Las chapas se desplazaron levemente de posición. Recalibrar ROI y patrón de
-`scanner_1/modelo_B` usando la nueva grabación `10-06-2026-MICROPERFORADO_1` (35 frames).
-
-**Diagnóstico:** El ROI previo (Cambio 140: x=200, w=230) ya no coincidía con la nueva
-posición de la chapa. Análisis de perfil de columna en los nuevos frames indicó zona de
-agujeros en x=225-432 del frame completo; con borde izquierdo de imagen en ~x=0 y ROI
-anterior iniciando en x=200, la zona izquierda se solapaba con metal sólido.
-
-**Cambios aplicados:**
-
-- `data/patterns/scanner_1/modelo_B/roi.json`:
-  - `x=200, w=230` → `x=236, w=216` (zona x=236 a x=452 del frame completo)
-  - ROI restaurado al valor calibrado históricamente (pre-Cambio 140) que corresponde
-    a la nueva posición real de la chapa
-
-- `data/patterns/modelo_B/roi.json`:
-  - ídem `x=200, w=230` → `x=236, w=216`
-  - Mantiene sincronía entre live mode y análisis por carpetas (regla de Cambio 141)
-
-- `data/patterns/scanner_1/modelo_B/holes.json`:
-  - Reconstruido desde `frame_0003.png` de `10-06-2026-MICROPERFORADO_1`
-  - **Antes** (Cambio 140): 78 holes, image_size=[230,480], phase=(34,8)
-  - **Después:** 122 holes, image_size=[216,480], dx=36.0, dy=14.0, stagger=-18.0, phase=(6.0, 2.0)
-  - Comando: `build-pattern --model modelo_B --scanner scanner_1 --img frame_0003.png`
-
-- `config/tolerancias.yaml` — modelo_B:
-  - `pattern_edge_margin_px: 50.0 → 22.0`
-    - Valor 50 era demasiado grande: dejaba sólo 79px de los 216px del ROI cubiertos por patrón
-    - Con 22px los 6 márgenes excluyen correctamente las columnas/filas inestables del borde
-
-**Validación sobre `10-06-2026-MICROPERFORADO_1` (35 frames):**
-- `raw_ok=15 raw_nok=20 temporal_ok=20 temporal_nok=15 machine_stop_frames=15`
-- Frames 0-12: 100% OK (missing=0, ratio=153-157%)
-- Frame 0002: NOK aislado streak=1 → resuelto temporalmente como OK (correcto)
-- Frames 13-17: burst NOK (missing=5-8), luego vuelve a OK en frames 18-20
-- Frames 21-34: NOK sostenido (missing=4-8, ratio=139-143%) — **defectos reales en material**
-- Los 15 `machine_stop` confirmados como defectos físicos: caída consistente del detection_ratio
-  y celdas faltantes distribuidas en zona central del patrón (no en bordes)
-
-**Archivos modificados:**
-- `data/patterns/scanner_1/modelo_B/roi.json`
-- `data/patterns/modelo_B/roi.json`
-- `data/patterns/scanner_1/modelo_B/holes.json`
-- `config/tolerancias.yaml`
 
 ---
 

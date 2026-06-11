@@ -2322,6 +2322,23 @@ class RecordingTab(QWidget):
         model_row.addStretch()
         lay.addLayout(model_row)
 
+        # ── Fila 0b: selector de scanner ──────────────────────────────
+        scanner_row = QHBoxLayout()
+        scanner_row.setSpacing(8)
+
+        scanner_chip = QLabel("SCANNER")
+        scanner_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;margin-right:4px;"
+        )
+        scanner_row.addWidget(scanner_chip)
+
+        self._ana_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
+        scanner_row.addWidget(self._ana_scanner_combo)
+        scanner_row.addStretch()
+        lay.addLayout(scanner_row)
+
         # ── Fila 1: botones de acción ─────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(10)
@@ -2840,6 +2857,8 @@ class RecordingTab(QWidget):
             self._btn_model_microperf_ana.setEnabled(not running)
         if hasattr(self, "_scanner_combo"):
             self._scanner_combo.setEnabled(not running)
+        if hasattr(self, "_ana_scanner_combo"):
+            self._ana_scanner_combo.setEnabled(not running)
 
     def _on_analyze(self) -> None:
         if not self._frame_paths:
@@ -2855,7 +2874,7 @@ class RecordingTab(QWidget):
         self._export_status_lbl.setText("")
 
         model      = self._active_model()
-        scanner_id = self._scanner_combo.currentText() or None
+        scanner_id = self._ana_scanner_combo.currentText() or None
         n          = len(self._frame_paths)
         if self._worker is not None and self._worker.isRunning():
             return
@@ -3562,6 +3581,8 @@ class RecordingTab(QWidget):
 
     def _on_load_recording(self) -> None:
         """Load an existing recording folder for analysis."""
+        from src.patterns.pattern_io import infer_scanner_id
+
         base = str(Path("data/recordings").resolve())
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar grabación", base,
@@ -3579,6 +3600,21 @@ class RecordingTab(QWidget):
 
         self._rec_dir      = folder_path
         self._frame_paths  = frames
+
+        inferred_scanner = infer_scanner_id(self._active_model(), folder_path)
+        if inferred_scanner:
+            if hasattr(self, "_scanner_combo"):
+                idx = self._scanner_combo.findText(inferred_scanner)
+                if idx >= 0 and self._scanner_combo.currentText() != inferred_scanner:
+                    self._scanner_combo.setCurrentIndex(idx)
+            if hasattr(self, "_ana_scanner_combo"):
+                idx = self._ana_scanner_combo.findText(inferred_scanner)
+                if idx >= 0:
+                    self._ana_scanner_combo.setCurrentIndex(idx)
+                    logger.info(
+                        f"[Grabación] scanner inferido desde carpeta: {inferred_scanner}"
+                    )
+
         self._results.clear()
         self._nok_indices  = []
         self._current_idx  = 0
@@ -3609,6 +3645,12 @@ class RecordingTab(QWidget):
                 fps_saved = meta.get("fps")
                 if fps_saved:
                     self._fps_spin.setValue(fps_saved)
+                scanner_saved = meta.get("scanner", "")
+                if scanner_saved and hasattr(self, "_ana_scanner_combo"):
+                    idx = self._ana_scanner_combo.findText(scanner_saved)
+                    if idx >= 0:
+                        self._ana_scanner_combo.setCurrentIndex(idx)
+                        logger.info(f"[Grabación] scanner desde meta.json: {scanner_saved}")
                 logger.info(f"[Grabación] meta cargada: {meta}")
             except Exception as exc:
                 logger.warning(f"[Grabación] no se pudo leer meta.json: {exc}")
