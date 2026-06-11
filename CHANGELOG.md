@@ -48,6 +48,45 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 162 - Microperforado scanner_1: bajar missing residuales en carpeta 10-06-2026-MICROPERFORADO_5
+
+**Pedido:** seguir afinando `MISSING` sobre
+`C:\Users\DefyC\Downloads\10-06-2026-MICROPERFORADO\10-06-2026-MICROPERFORADO_5_SCANNER_1`,
+asumiendo que todos los frames son OK y que no debe aparecer ningún falso
+desalineamiento para este microperforado de `scanner_1`.
+
+**Diagnóstico (estado antes del ajuste):**
+- usando el patrón específico de `scanner_1`, la carpeta ya estaba en
+  `48/48 raw OK`, `0` desalineamientos falsos y `0` machine stop;
+- aun así quedaban `missing` residuales de matching en el borde derecho:
+  `total_missing=104`, `max_missing=7`;
+- los faltantes frecuentes seguían concentrados en celdas de borde, no en el
+  centro del patrón, así que convenía tocar matching/margen y no la lógica de
+  desalineamiento del patrón.
+
+**Cambios aplicados (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `tol_xy_px: 22.0 → 24.0`
+  - da un poco más de tolerancia al matching nearest-neighbour de microperforado
+    sin irse al extremo que empezaba a apagar evidencia en lotes viejos;
+- `compare_right_ignore_px: 25.0 → 30.0`
+  - recorta un poco más la franja derecha del patrón, que en este lote sigue
+    aportando faltantes falsos residuales de borde.
+
+**Validación:**
+- carpeta `10-06-2026-MICROPERFORADO_5_SCANNER_1` con `--scanner scanner_1`:
+  - sigue en `48/48 raw OK`, `48/48 temporal OK`
+  - `align_failures=0/48`
+  - `machine_stop_frames=0`
+  - mejora de missing: `total_missing 104 → 81`
+  - pico de missing: `max_missing 7 → 5`
+- contraste sobre `05-06-2026-MICROPERFORADO_1`:
+  - se mantiene evidencia de desalineamiento (`align_warn=1`, `machine_stop=1`)
+    con un ajuste más conservador que alternativas más agresivas.
+
+**Archivos modificados:** `config/tolerancias.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 160 - Empaquetado como .exe + autoarranque con Windows
 
 **Pedido:** crear un `.exe` para correr `src.main run` al iniciar la PC sin necesidad
