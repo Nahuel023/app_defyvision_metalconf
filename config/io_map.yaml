@@ -36,6 +36,15 @@ scanner_2:
     pattern_align_abs_max_px: 24.0
     pattern_global_offset_max_px: 50.0
     pattern_slope_delta_max_deg: 26.0
+    # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo
+    # 2-3 columnas al construir el patron. Usar margen pequeño para capturar
+    # todos los agujeros; los bordes se excluyen en comparacion via compare_*_ignore_px.
+    pattern_edge_margin_px: 5.0
+    # Geometria de la grilla: scanner_2 tiene optica diferente a scanner_1.
+    # Stagger POSITIVO (+18) = filas impares desplazadas a la DERECHA (scanner_1 usa -18 = izquierda).
+    grid_stagger_x_odd: 18.0
+    grid_dx: 35.5
+    grid_dy: 13.6
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:
