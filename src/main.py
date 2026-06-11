@@ -220,9 +220,12 @@ def cmd_run_image(args: argparse.Namespace) -> int:
     import cv2
 
     from src.inspection import inspect_image
+    from src.patterns.pattern_io import infer_scanner_id
 
+    scanner_id = args.scanner or infer_scanner_id(args.model, args.img)
     result = inspect_image(args.model, args.img, save=args.save,
-                           scanner_id=args.scanner)
+                           scanner_id=scanner_id)
+    print(f"[context] scanner={scanner_id or '-'}")
     print(f"[align] angle_deg={result.angle_deg:.2f} lines={result.used_lines}")
     if result.shift_xy is None:
         print("[shift] skipped (not enough points)")
@@ -251,14 +254,18 @@ def cmd_run_image(args: argparse.Namespace) -> int:
 
 def cmd_run_folder(args: argparse.Namespace) -> int:
     from src.inspection import inspect_folder
+    from src.patterns.pattern_io import infer_scanner_id
+
+    scanner_id = args.scanner or infer_scanner_id(args.model, args.input)
 
     summary = inspect_folder(
         args.model,
         args.input,
         save=args.save,
         frame_rate_hz=args.fps,
-        scanner_id=args.scanner,
+        scanner_id=scanner_id,
     )
+    print(f"[context] scanner={scanner_id or '-'}")
     print(
         f"[run-folder] model={args.model} total={summary.total} "
         f"raw_ok={summary.ok} raw_nok={summary.nok} "

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
+from src.patterns.pattern_io import infer_scanner_id
 
 _log = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ def roi_path(model: str, scanner_id: str | None = None) -> Path:
 def load_roi(model: str, scanner_id: str | None = None) -> Optional[ROI]:
     """Load ROI for the given scanner. Each scanner has its own ROI — no cross-scanner fallback.
     Falls back to the model-level roi.json only when scanner_id is not specified (e.g. CLI tools)."""
+    scanner_id = scanner_id or infer_scanner_id(model)
     candidates = []
     if scanner_id:
         # Scanner-specific only — never fall back to another scanner's ROI
