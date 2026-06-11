@@ -110,10 +110,6 @@ del patrón específico de `scanner_1`.
 - `src/main.py`
   - `run-image` y `run-folder` imprimen `[context] scanner=...` para dejar visible
     qué scanner/patrón se resolvió realmente.
-- `src/ui/service.py`
-  - al cargar una carpeta grabada, la UI intenta autoseleccionar el scanner desde el
-    nombre de la carpeta antes de analizar.
-
 **Validación:**
 - comando antes problemático, ahora sin `--scanner`:
   - `.\.venv\Scripts\python.exe -m src.main run-folder --model modelo_B --input "...10-06-2026-MICROPERFORADO_5_SCANNER_1" --fps 5`
@@ -122,7 +118,7 @@ del patrón específico de `scanner_1`.
 - `pytest tests/` → `17 passed`
 
 **Archivos modificados:** `src/patterns/pattern_io.py`, `src/patterns/roi.py`,
-`src/inspection.py`, `src/main.py`, `src/ui/service.py`, `CHANGELOG.md`
+`src/inspection.py`, `src/main.py`, `CHANGELOG.md`
 
 ---
 
