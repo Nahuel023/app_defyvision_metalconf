@@ -26,6 +26,8 @@ ok_buffer_enabled: true
 ok_buffer_count: 500          # frames a mantener por scanner (~50 MB a 100 KB/frame)
 ok_buffer_every: 1            # guardar todos los frames OK
 ok_buffer_jpeg_quality: 75    # calidad JPEG
+timeline_buffer_enabled: true
+timeline_buffer_count: 500    # ultimos 500 frames cronologicos (OK+NOK+LQ+STOP) por scanner
 
 events_enabled: true
 events_max_disk_gb: 10.0
