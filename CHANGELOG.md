@@ -48,6 +48,65 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 168 - Verificacion de tamano de frame/ROI + diagnostico `roi-check`
+
+**Pedido:** poder verificar si el frame cambia de tamano o si la chapa se corre
+con el tiempo, para auditar si la ROI sigue siendo valida sin meter una regresion
+en la deteccion de microperforado.
+
+**Cambios aplicados:**
+- `src/patterns/roi.py`
+  - nueva `RuntimeROIInfo` para reportar frame size, ROI activa, ROI detectada y shift X;
+  - nueva `resolve_runtime_roi()`:
+    - valida la ROI guardada contra el frame actual,
+    - detecta el ancho/centro real de la chapa desde backlight,
+    - deja lista una correccion horizontal conservadora si mas adelante se decide activarla;
+  - ajuste importante: si la ROI guardada es una banda angosta dentro de la chapa
+    (caso microperforado), no compara su ancho contra el ancho total detectado de la chapa,
+    porque eso generaba warnings falsos.
+- `src/inspection.py`
+  - cada inspeccion ahora calcula `roi_info` y lo devuelve en `InspectionResult`;
+  - el overlay muestra `Frame: WxH`, `ROI x/w` y, si aparece, un warning de ROI/patron.
+- `src/pipeline/annotate.py`
+  - nuevo `draw_roi_health_indicator()` para dibujar el estado del frame/ROI en el overlay.
+- `src/main.py`
+  - nuevo comando `roi-check` para auditar una imagen o carpeta completa:
+    - distribucion de tamanos de frame,
+    - shift X mediano/min/max,
+    - CSV `roi_check.csv` con detalle por frame.
+  - `run-image` ahora imprime el contexto ROI si existe.
+- `src/utils/config.py`
+  - nuevas claves de configuracion para ROI runtime:
+    - `roi_autocorrect_enabled`
+    - `roi_autocorrect_max_shift_px`
+    - `roi_autocorrect_max_width_delta_px`
+    - `roi_detect_margin_px`
+    - `roi_detect_min_contrast`
+- `config/tolerancias.yaml`
+  - se dejaron definidos esos parametros para `modelo_B`;
+  - **`roi_autocorrect_enabled` quedo en `false` por seguridad**.
+
+**Validacion:**
+- `python -m src.main roi-check --model modelo_B --scanner scanner_2 --input "...MICROPERFORADO_SCANNER_2" --output data/output/roi_check_scanner_2`
+  - `640x480` en `96/96` frames
+  - shift horizontal estable: mediana `-16.50 px`, min `-18.00`, max `-15.00`
+  - `0/96` warnings
+- `python -m src.main run-folder --model modelo_B --scanner scanner_2 --input "...MICROPERFORADO_SCANNER_2" --fps 5`
+  - sigue en `71/71 raw OK`, `71/71 temporal OK`
+- `pytest tests/` -> `17 passed`
+
+**Nota de diseÃ±o:**
+- se probo activar el recentrado automatico horizontal en `scanner_2`, pero una
+  primera validacion bajo el raw de `71/71` a `69/71`;
+- por eso la correccion automatica quedo implementada pero desactivada por defecto,
+  y esta entrega se enfoca en auditoria/visibilidad sin tocar el comportamiento ya bueno.
+
+**Archivos modificados:** `src/patterns/roi.py`, `src/inspection.py`,
+`src/pipeline/annotate.py`, `src/main.py`, `src/utils/config.py`,
+`config/tolerancias.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 167 - Semaforo: IDLE=amarillo, RUNNING=verde, ALARMA/FAULT=rojo
 
 **Pedido:** manejar salidas del semaforo en scanner_1 y scanner_2:

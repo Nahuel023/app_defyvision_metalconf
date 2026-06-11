@@ -167,6 +167,11 @@ models:
     pattern_align_stop_frames: 3     # frames consecutivos desalineados para parar la maquina
     pattern_global_offset_max_px: 10.0
     pattern_slope_delta_max_deg: 4.0  # frames de borde de chapa miden ~3.1 deg; desalineados reales > 4 deg
+    roi_autocorrect_enabled: false
+    roi_autocorrect_max_shift_px: 18.0
+    roi_autocorrect_max_width_delta_px: 20.0
+    roi_detect_margin_px: 0
+    roi_detect_min_contrast: 25.0
     pattern_center_align_enabled: false
     pattern_center_zigzag_std_max_px: 2.2
     pattern_center_zigzag_abs_max_px: 6.0
