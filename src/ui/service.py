@@ -492,8 +492,14 @@ class PLCDiagTab(QWidget):
                 )
 
     def _toggle(self, idx: int) -> None:
-        self._plc.write_coil(idx, not self._y_vals[idx])
-        logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if not self._y_vals[idx] else 'OFF'}")
+        if self._y_name.get(idx) == "solenoid":
+            logger.warning(f"[SAFETY] Toggle bloqueado: Y{idx} es solenoide")
+            return
+        new_val = not self._y_vals[idx]
+        if self._y_name.get(idx) == "solenoid" and new_val:
+            return
+        self._plc.write_coil(idx, new_val)
+        logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if new_val else 'OFF'}")
 
 
 # ==================================================================
