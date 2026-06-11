@@ -138,7 +138,7 @@ models:
     grid_dy: 14.0
     grid_stagger_x_odd: -18.0
     grid_derotate: false
-    grid_affine_refinement: true
+    grid_affine_refinement: false   # affine desplazaba expected ~20px creando falsos missing — fase sola es precisa
     center_offset_tol_px: 0.0
     extra_min_dist_factor: 2.0
     continuous_position_threshold: 4.0
@@ -151,7 +151,7 @@ models:
     machine_stop_same_column_tol_cells: 0
     machine_stop_require_frame_nok: true
     grid_lateral_shift_max_px: 0.0   # desactivado — reactivar cuando la alineacion este corregida
-    use_hungarian_matching: false
+    use_hungarian_matching: true    # evita stealing cuando dos expected compiten por mismo detected
     blur_score_min: 200.0          # frames borrosos por vibracion → LOW_QUALITY → no acumula machine stop
     verticality_quality_enabled: false
     chapa_zigzag_std_max_px: 4.0
