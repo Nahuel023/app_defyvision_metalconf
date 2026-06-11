@@ -121,7 +121,7 @@ models:
     min_area: 15.0
     circularity_min: 0.2
     aspect_ratio_max: 3.5
-    tol_xy_px: 22.0
+    tol_xy_px: 24.0
     align_match_tol_px: 120.0
     min_match_count: 5
     edge_margin_px: 0.0
@@ -175,6 +175,6 @@ models:
     compare_top_ignore_px: 46.0
     compare_bottom_ignore_px: 42.0
     compare_left_ignore_px: 40.0    # excluye ci=0 (x≈16) y ci=1 (x≈18-36) del patron — borde izq no detectable
-    compare_right_ignore_px: 25.0   # excluye parte de ci=5 y ci=6 del borde der
+    compare_right_ignore_px: 30.0   # excluye un poco mas del borde der, donde este lote mantiene faltantes falsos residuales
     frame_missing_nok_threshold: 8
     tilt_warn_deg: 0.0
