@@ -1,11 +1,11 @@
-# scripts/build_exe.ps1 — compila metalconf.exe con PyInstaller
+# scripts/build_exe.ps1 - compila metalconf.exe con PyInstaller
 # Ejecutar desde el directorio raiz del proyecto:
 #   powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1
 
 $ROOT = Split-Path $PSScriptRoot -Parent
 Set-Location $ROOT
 
-Write-Host "=== MetalConf — Build EXE ===" -ForegroundColor Cyan
+Write-Host "=== MetalConf - Build EXE ===" -ForegroundColor Cyan
 Write-Host "Directorio: $ROOT"
 
 # Verificar que existe el venv
