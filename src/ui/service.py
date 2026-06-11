@@ -1661,6 +1661,7 @@ class RecordingTab(QWidget):
         row1.addWidget(_chip("SCANNER"))
         self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=100)
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+        self._scanner_combo.currentTextChanged.connect(self._sync_service_scanner_defaults)
         row1.addWidget(self._scanner_combo)
         row1.addSpacing(12)
 
@@ -2335,6 +2336,8 @@ class RecordingTab(QWidget):
         scanner_row.addWidget(scanner_chip)
 
         self._ana_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
+        if hasattr(self, "_scanner_combo"):
+            self._ana_scanner_combo.setCurrentText(self._scanner_combo.currentText())
         scanner_row.addWidget(self._ana_scanner_combo)
         scanner_row.addStretch()
         lay.addLayout(scanner_row)
@@ -2795,7 +2798,7 @@ class RecordingTab(QWidget):
 
         if self._live_chk.isChecked():
             try:
-                from src.inspection import inspect_image
+                from src.inspection import inspect_frame
                 from src.patterns.pattern_io import load_pattern, find_pattern_path
                 from src.patterns.roi import load_roi
                 from src.utils.config import load_tolerances
@@ -2831,8 +2834,13 @@ class RecordingTab(QWidget):
                 if self._live_ms_detector is not None:
                     _pre_live["machine_stop_detector"] = self._live_ms_detector
 
-                result = inspect_image(model, path, scanner_id=scanner_id,
-                                       _preloaded=_pre_live if _pre_live else None)
+                result = inspect_frame(
+                    model,
+                    frame_copy,
+                    frame_id=path.stem,
+                    scanner_id=scanner_id,
+                    _preloaded=_pre_live if _pre_live else None,
+                )
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -3530,6 +3538,25 @@ class RecordingTab(QWidget):
         self._auto_connect_scanner_camera(sid)
         self._update_fps_cap()
 
+    def _sync_service_scanner_defaults(self, sid: str) -> None:
+        """Alinea modelo/scanner de servicio con la configuraciÃ³n del scanner activo."""
+        try:
+            model_internal = str(self._system.io.scanner_config(sid).get("model", "")).strip()
+            if model_internal:
+                display = to_display(model_internal)
+                if self._model_combo.currentText() != display:
+                    self._model_combo.blockSignals(True)
+                    self._model_combo.setCurrentText(display)
+                    self._model_combo.blockSignals(False)
+                    self._sync_model_buttons()
+                    self._update_model_chip(display)
+        except Exception:
+            pass
+        if hasattr(self, "_ana_scanner_combo") and self._ana_scanner_combo.currentText() != sid:
+            self._ana_scanner_combo.blockSignals(True)
+            self._ana_scanner_combo.setCurrentText(sid)
+            self._ana_scanner_combo.blockSignals(False)
+
     def _update_fps_cap(self) -> None:
         """Limita el máximo del spinbox de FPS al FPS real medido de la cámara."""
         try:
@@ -3603,17 +3630,11 @@ class RecordingTab(QWidget):
 
         inferred_scanner = infer_scanner_id(self._active_model(), folder_path)
         if inferred_scanner:
-            if hasattr(self, "_scanner_combo"):
-                idx = self._scanner_combo.findText(inferred_scanner)
-                if idx >= 0 and self._scanner_combo.currentText() != inferred_scanner:
-                    self._scanner_combo.setCurrentIndex(idx)
-            if hasattr(self, "_ana_scanner_combo"):
-                idx = self._ana_scanner_combo.findText(inferred_scanner)
-                if idx >= 0:
-                    self._ana_scanner_combo.setCurrentIndex(idx)
-                    logger.info(
-                        f"[Grabación] scanner inferido desde carpeta: {inferred_scanner}"
-                    )
+            if hasattr(self, "_scanner_combo") and self._scanner_combo.currentText() != inferred_scanner:
+                self._scanner_combo.setCurrentText(inferred_scanner)
+            if hasattr(self, "_ana_scanner_combo") and self._ana_scanner_combo.currentText() != inferred_scanner:
+                self._ana_scanner_combo.setCurrentText(inferred_scanner)
+            logger.info(f"[Grabación] scanner inferido desde carpeta: {inferred_scanner}")
 
         self._results.clear()
         self._nok_indices  = []
