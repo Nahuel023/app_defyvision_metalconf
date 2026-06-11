@@ -1057,11 +1057,8 @@ class _AnalysisWorker(QThread):
         self._cancel = True
 
     def run(self) -> None:
-        from src.inspection import inspect_image
-        from src.patterns.pattern_io import load_pattern, find_pattern_path
-        from src.patterns.roi import load_roi
         from src.utils.config import load_tolerances
-        from src.pipeline.machine_stop import MachineStopDetector
+        from src.vision.inspector import InspectionSession
 
         try:
             n = len(self._paths)
@@ -1070,38 +1067,22 @@ class _AnalysisWorker(QThread):
                 return
 
             tols = load_tolerances(self._model)
-
-            # Pre-cargar recursos estáticos una sola vez para evitar N lecturas de disco.
-            # ema_state se inicializa por worker (no se comparte entre frames).
-            _pre: dict = {
-                "tolerances": tols,
-                "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
-                "roi":        load_roi(self._model, self._scanner_id),
-                "ema_state":  {},   # estado de suavizado de ángulo, se actualiza por frame
-            }
-
-            machine_stop_enabled = bool(tols.get("machine_stop_enabled", False))
-            if machine_stop_enabled:
-                _pre["machine_stop_detector"] = MachineStopDetector(
-                    enabled=True,
-                    missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
-                    min_missing=int(tols.get("machine_stop_min_missing", 1)),
-                    same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
-                    ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
-                    track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
-                    same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
-                )
+            movement_threshold = float(tols.get("continuous_position_threshold", 0.0))
+            session = InspectionSession(
+                self._model,
+                scanner_id=self._scanner_id,
+                movement_threshold=movement_threshold,
+                min_interval_sec=0.0,
+            )
 
             results: list = []
             for i, path in enumerate(self._paths):
                 if self._cancel:
                     self.cancelled.emit(i)
                     return
-                results.append(inspect_image(
-                    self._model, path,
-                    scanner_id=self._scanner_id,
-                    _preloaded=_pre,
-                ))
+                result = session.inspect_path(path)
+                if result is not None:
+                    results.append(result)
                 # Emitir progreso en cada frame para que la UI muestre avance en vivo.
                 self.progress.emit(i + 1, n)
 
@@ -1449,6 +1430,7 @@ class RecordingTab(QWidget):
         self._worker: Optional[_AnalysisWorker] = None
         self._live_ms_detector = None
         self._live_pre: dict | None = None
+        self._live_session = None
 
         # ROI manual calibration state
         self._roi_frame                     = None   # BGR ndarray del frame de referencia
@@ -2753,6 +2735,7 @@ class RecordingTab(QWidget):
         self._recording = False
         self._live_ms_detector = None
         self._live_pre = None
+        self._live_session = None
         if self._write_executor is not None:
             self._write_executor.shutdown(wait=True)   # flush pending PNG writes
             self._write_executor = None
@@ -2798,49 +2781,28 @@ class RecordingTab(QWidget):
 
         if self._live_chk.isChecked():
             try:
-                from src.inspection import inspect_frame
-                from src.patterns.pattern_io import load_pattern, find_pattern_path
-                from src.patterns.roi import load_roi
+                from src.vision.inspector import InspectionSession
                 from src.utils.config import load_tolerances
-                from src.pipeline.machine_stop import MachineStopDetector
 
                 model      = self._active_model()
                 scanner_id = self._scanner_combo.currentText() or None
 
-                # Create a persistent detector once per recording session.
-                if self._live_ms_detector is None:
+                if self._live_session is None:
                     tols = load_tolerances(model)
-                    if bool(tols.get("machine_stop_enabled", False)):
-                        self._live_ms_detector = MachineStopDetector(
-                            enabled=True,
-                            missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
-                            min_missing=int(tols.get("machine_stop_min_missing", 1)),
-                            same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
-                            ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
-                            track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
-                            same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
-                        )
+                    self._live_session = InspectionSession(
+                        model,
+                        scanner_id=scanner_id,
+                        movement_threshold=float(tols.get("continuous_position_threshold", 0.0)),
+                        min_interval_sec=0.0,
+                    )
 
-                if self._live_pre is None:
-                    tols = load_tolerances(model)
-                    self._live_pre = {
-                        "tolerances": tols,
-                        "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
-                        "roi":        load_roi(model, scanner_id),
-                        "ema_state":  {},
-                    }
-
-                _pre_live = dict(self._live_pre)
-                if self._live_ms_detector is not None:
-                    _pre_live["machine_stop_detector"] = self._live_ms_detector
-
-                result = inspect_frame(
-                    model,
+                result = self._live_session.inspect_frame(
                     frame_copy,
                     frame_id=path.stem,
-                    scanner_id=scanner_id,
-                    _preloaded=_pre_live if _pre_live else None,
+                    force=False,
                 )
+                if result is None:
+                    return
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -3527,6 +3489,7 @@ class RecordingTab(QWidget):
         # Forzar recarga del patrón/ROI en el próximo frame de análisis en vivo
         self._live_pre = None
         self._live_ms_detector = None
+        self._live_session = None
 
     def _on_scanner_changed(self, sid: str) -> None:
         # El modelo NO cambia automáticamente al cambiar de scanner.
@@ -3535,6 +3498,7 @@ class RecordingTab(QWidget):
         # Forzar recarga del patrón/ROI del nuevo scanner en el próximo frame
         self._live_pre = None
         self._live_ms_detector = None
+        self._live_session = None
         self._auto_connect_scanner_camera(sid)
         self._update_fps_cap()
 

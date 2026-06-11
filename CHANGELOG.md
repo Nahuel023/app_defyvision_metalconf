@@ -87,8 +87,15 @@ scanner/modelo ni analisis en vivo leyendo PNGs a medio escribir.
 - `_grab_frame()`:
   - el analisis en vivo ya no usa `inspect_image(path)` sobre el PNG recien lanzado
     a escritura en background
-  - ahora inspecciona directamente `frame_copy` en memoria con `inspect_frame(...)`,
-    eliminando la carrera entre `cv2.imwrite(...)` y la lectura del archivo
+  - ahora inspecciona directamente `frame_copy` en memoria
+
+- `_AnalysisWorker.run()` y el vivo de Servicio:
+  - ahora usan `InspectionSession` igual que `run-folder` y el loop continuo
+  - con eso tambien respetan `continuous_position_threshold` y saltean frames
+    quietos / repetidos de la misma manera que el motor real
+  - esto corrige el caso donde Servicio analizaba 107 archivos como 107 inspecciones
+    validas, mientras `run-folder` sobre el mismo lote solo considera 48 avances reales
+    del material
 
 **Archivos modificados:** `src/ui/service.py`
 
