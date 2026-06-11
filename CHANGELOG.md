@@ -48,6 +48,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-11 — Tadeo + Claude
 
+#### Cambio 167 - Semaforo: IDLE=amarillo, RUNNING=verde, ALARMA/FAULT=rojo
+
+**Pedido:** manejar salidas del semaforo en scanner_1 y scanner_2:
+- IDLE → luz AMARILLA
+- RUNNING (inspeccion en vivo OK) → luz VERDE
+- ALARMA DETENCION DE MAQUINA / FAULT → luz ROJA
+- RESET → vuelve a AMARILLA (IDLE)
+
+**Diagnostico:** la logica anterior usaba `blue=True` para IDLE. La luz azul
+no es parte de un semaforo industrial estandar; el usuario quiere amarillo=listo,
+verde=corriendo, rojo=alarma.
+
+**Cambios en `src/controller/scanner_controller.py`:**
+- `stop()`: cuando new_state == IDLE → `yellow=True` (antes `blue=True`)
+- `reset()`: STOPPED→IDLE → `yellow=True` (antes `blue=True`)
+- `initialize_lights()`: IDLE → `yellow=True` (antes `blue=True`)
+- docstring del modulo: actualizado "azul" → "amarilla" para IDLE
+
+**Lo que NO cambia:**
+- RUNNING normal → `green=True`
+- RUNNING con racha de aviso → `green=True` + `yellow` parpadeando
+- FAULT → `red=True` + `yellow` parpadeando (poll_loop)
+- machine_stop → STOPPED con `red=True`
+- STOPPED (esperando RESET) → todas apagadas
+
+**Archivos modificados:** `src/controller/scanner_controller.py`
+
+---
+
 #### Cambio 166 - ok_buffer_count 200 -> 500
 
 **Pedido:** guardar mas de 200 frames OK en el buffer circular, renovandose siempre.
