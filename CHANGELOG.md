@@ -46,6 +46,50 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-11 — Tadeo + Claude
+
+#### Cambio 160 - Empaquetado como .exe + autoarranque con Windows
+
+**Pedido:** crear un `.exe` para correr `src.main run` al iniciar la PC sin necesidad
+de tener Python instalado.
+
+**Cambios aplicados:**
+
+- `run_production.py` (nuevo): launcher mínimo que hardcodea `sys.argv = ["metalconf", "run"]`
+  e importa `src.main.main`. Es el entry point de PyInstaller.
+
+- `metalconf.spec` (nuevo): spec de PyInstaller en modo `--onedir` (carpeta con exe + libs).
+  - Entry point: `run_production.py`
+  - `console=False`: sin ventana de terminal, solo la UI PyQt6
+  - Hidden imports para pymodbus, PyQt6, cv2, numpy, yaml, pymcprotocol, matplotlib
+  - No bundlea `config/` ni `data/` — se leen desde el directorio raiz del proyecto
+    (el Task Scheduler setea `WorkingDirectory` al raiz)
+
+- `scripts/build_exe.ps1` (nuevo): script PowerShell que instala PyInstaller si no está,
+  limpia builds anteriores y ejecuta `pyinstaller --clean metalconf.spec`.
+
+- `scripts/setup_autostart.ps1` (nuevo): registra la tarea en el Task Scheduler de Windows.
+  - Trigger: `AtLogOn` del usuario actual
+  - `WorkingDirectory`: directorio raiz del proyecto (para que config/ y data/ sean accesibles)
+  - 3 reintentos automáticos si falla
+  - `RunLevel Highest` para acceso a cámara/PLC/red
+
+**Decisiones de diseño:**
+- `--onedir` (no `--onefile`): startup más rápido, sin extracción a temp en cada arranque
+- `config/` y `data/patterns/` NO se bundlean: deben seguir siendo editables desde el proyecto
+- `console=False`: producción sin terminal visible
+- Task Scheduler `AtLogOn` (no `AtStartup`): necesario porque PyQt6 requiere sesión gráfica
+
+**Flujo de uso:**
+1. `powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1`
+2. `powershell -ExecutionPolicy Bypass -File .\scripts\setup_autostart.ps1` (como Admin)
+3. Reiniciar → la app arranca sola al login
+
+**Archivos creados:** `run_production.py`, `metalconf.spec`, `scripts/build_exe.ps1`,
+`scripts/setup_autostart.ps1`
+
+---
+
 ### Sesión 2026-06-10 — Tadeo + Claude
 
 #### Cambio 159 - Un solo loop continuo para no divergir entre INICIAR y carpeta
