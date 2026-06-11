@@ -67,6 +67,8 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "ok_buffer_count": 200,            # cuántos frames OK mantener por scanner
     "ok_buffer_every": 3,              # guardar 1 de cada N frames OK (throttle)
     "ok_buffer_jpeg_quality": 75,      # calidad JPEG (75 = buen balance tamaño/calidad)
+    "timeline_buffer_enabled": True,   # buffer cronológico de todos los frames (OK+NOK+LQ+STOP)
+    "timeline_buffer_count": 500,      # últimos N frames a mantener por scanner
     # ─────────────────────────────────────────────────────────────────────
     "events_enabled": False,           # activar en producción
     "events_max_disk_gb": 10.0,        # presupuesto total de data/events

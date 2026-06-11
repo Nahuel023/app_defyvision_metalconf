@@ -51,9 +51,18 @@ _OK_CLR  = "#3fb950"
 _NOK_CLR = "#f85149"
 _WARN    = "#d29922"
 
-_EVENTS_DIR   = _ROOT / "data" / "events"
-_OK_BUF_BASE  = _ROOT / "data" / "output" / "ok_buffer"
-_NOK_DIR      = _ROOT / "data" / "output" / "nok"
+_EVENTS_DIR     = _ROOT / "data" / "events"
+_OK_BUF_BASE    = _ROOT / "data" / "output" / "ok_buffer"
+_NOK_DIR        = _ROOT / "data" / "output" / "nok"
+_TIMELINE_BASE  = _ROOT / "data" / "output" / "timeline"
+
+# Colores por tag de timeline
+_TL_COLORS = {
+    "OK":   _OK_CLR,
+    "NOK":  _NOK_CLR,
+    "STOP": "#f97316",   # naranja — parada de máquina
+    "LQ":   "#64748b",   # gris — baja calidad / borroso
+}
 
 _THUMB_W = 90
 _THUMB_H = 60
@@ -495,6 +504,46 @@ class _EventNavPanel(QWidget):
         self._loader.start()
         self._show_frame(0)
 
+    def load_timeline(self, frames: list[Path], scanner_label: str) -> None:
+        """Carga el buffer cronológico completo con colores por status."""
+        self._frames = frames
+        self._current = 0
+        self._is_event_mode = False
+        self._current_dir = frames[0].parent if frames else None
+
+        counts = {}
+        for f in frames:
+            tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
+            counts[tag] = counts.get(tag, 0) + 1
+        summary_parts = [f"{c} {t}" for t, c in sorted(counts.items())]
+        self._info_lbl.setText(
+            f"{scanner_label}   ·   Flujo cronológico   ·   "
+            f"{len(frames)} frames  ({', '.join(summary_parts)})"
+        )
+
+        self._clear_thumbs()
+        for i, path in enumerate(frames):
+            tag = path.stem.split("_", 1)[1] if "_" in path.stem else "OK"
+            color = _TL_COLORS.get(tag, _MUTED)
+            lbl = QLabel()
+            lbl.setFixedSize(_THUMB_W, _THUMB_H)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                f"background:#000;border:2px solid {color};border-radius:3px;"
+            )
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.mousePressEvent = lambda e, idx=i: self._go_to(idx)
+            self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
+            self._thumb_widgets.append(lbl)
+
+        if self._loader is not None:
+            self._loader.quit()
+            self._loader.wait(200)
+        self._loader = _ThumbLoader(frames)
+        self._loader.thumb_ready.connect(self._on_thumb_ready)
+        self._loader.start()
+        self._show_frame(0)
+
     # ── Internos ──────────────────────────────────────────────────────
 
     def _clear_thumbs(self) -> None:
@@ -540,7 +589,13 @@ class _EventNavPanel(QWidget):
 
         n = len(self._frames)
         if not (self._is_event_mode and self._show_overlay):
-            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}")
+            _tag_suffix = ""
+            _stem = path.stem
+            if "_" in _stem and not _stem.startswith("ok_"):
+                _tag = _stem.split("_", 1)[1]
+                if _tag in _TL_COLORS:
+                    _tag_suffix = f"  ·  {_tag}"
+            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}")
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
@@ -693,7 +748,7 @@ class OperatorFrameViewer(QMainWindow):
     def __init__(self, system, parent=None):
         super().__init__(parent)
         self._system = system
-        self._mode = "events"   # "events" | "ok" | "nok"
+        self._mode = "events"   # "events" | "ok" | "nok" | "timeline"
         self._summaries: list[dict] = []
         self._current_summary: Optional[dict] = None
 
@@ -781,13 +836,15 @@ class OperatorFrameViewer(QMainWindow):
             b.clicked.connect(lambda: self._switch_mode(mode))
             return b
 
-        self._events_btn = _tab_btn("⚠  Paradas de línea", "events", _NOK_CLR)
-        self._ok_btn     = _tab_btn("✓  Frames OK recientes", "ok", _OK_CLR)
-        self._nok_btn    = _tab_btn("✗  Frames NOK recientes", "nok", _WARN)
+        self._events_btn   = _tab_btn("⚠  Paradas de línea",    "events",   _NOK_CLR)
+        self._ok_btn       = _tab_btn("✓  Frames OK recientes",  "ok",       _OK_CLR)
+        self._nok_btn      = _tab_btn("✗  Frames NOK recientes", "nok",      _WARN)
+        self._timeline_btn = _tab_btn("≡  Flujo cronológico",    "timeline", _ACCENT)
 
         lay.addWidget(self._events_btn)
         lay.addWidget(self._ok_btn)
         lay.addWidget(self._nok_btn)
+        lay.addWidget(self._timeline_btn)
 
         reload_btn = QPushButton("↺  Recargar")
         reload_btn.setFixedHeight(30)
@@ -834,6 +891,7 @@ class OperatorFrameViewer(QMainWindow):
         self._events_btn.setChecked(mode == "events")
         self._ok_btn.setChecked(mode == "ok")
         self._nok_btn.setChecked(mode == "nok")
+        self._timeline_btn.setChecked(mode == "timeline")
         self._populate_list()
 
     def reload(self) -> None:
@@ -878,6 +936,8 @@ class OperatorFrameViewer(QMainWindow):
             self._populate_events()
         elif self._mode == "nok":
             self._populate_nok()
+        elif self._mode == "timeline":
+            self._populate_timeline()
         else:
             self._populate_ok()
 
@@ -1072,6 +1132,94 @@ class OperatorFrameViewer(QMainWindow):
 
         return w
 
+    def _populate_timeline(self) -> None:
+        """Lee data/output/timeline/ y muestra el flujo cronológico por scanner."""
+        self._summaries = []
+        if not _TIMELINE_BASE.exists():
+            item = QListWidgetItem("Sin flujo grabado aún")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        scanner_dirs = sorted(d for d in _TIMELINE_BASE.iterdir() if d.is_dir())
+        if not scanner_dirs:
+            item = QListWidgetItem("Sin flujo grabado aún")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        for sd in scanner_dirs:
+            files = sorted(
+                (f for f in sd.iterdir() if f.suffix.lower() == ".jpg"),
+                key=lambda f: f.name
+            )
+            if not files:
+                continue
+            counts: dict[str, int] = {}
+            for f in files:
+                tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
+                counts[tag] = counts.get(tag, 0) + 1
+            summary = {
+                "type": "timeline",
+                "scanner_id": sd.name,
+                "frames": files,
+                "counts": counts,
+                "dir": sd,
+            }
+            self._summaries.append(summary)
+            widget = self._make_timeline_card(summary)
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+        # Auto-seleccionar el primero
+        if self._summaries:
+            self._list_widget.setCurrentRow(0)
+
+    def _make_timeline_card(self, s: dict) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(3)
+
+        scanner = _scanner_display(s["scanner_id"])
+        title = QLabel(scanner)
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:12px;font-weight:700;background:transparent;"
+        )
+        lay.addWidget(title)
+
+        total = len(s["frames"])
+        counts = s.get("counts", {})
+        ok_n    = counts.get("OK",   0)
+        nok_n   = counts.get("NOK",  0)
+        stop_n  = counts.get("STOP", 0)
+        lq_n    = counts.get("LQ",   0)
+
+        total_lbl = QLabel(f"{total} frames en orden cronológico")
+        total_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:10px;font-weight:600;background:transparent;"
+        )
+        lay.addWidget(total_lbl)
+
+        detail_parts = []
+        if ok_n:   detail_parts.append(f"{ok_n} OK")
+        if nok_n:  detail_parts.append(f"{nok_n} NOK")
+        if stop_n: detail_parts.append(f"{stop_n} STOP")
+        if lq_n:   detail_parts.append(f"{lq_n} LQ")
+        if detail_parts:
+            detail_lbl = QLabel("  ·  ".join(detail_parts))
+            detail_lbl.setStyleSheet(
+                f"color:{_MUTED};font-size:9px;background:transparent;"
+            )
+            lay.addWidget(detail_lbl)
+
+        return w
+
     # ── Selección ─────────────────────────────────────────────────────
 
     def _on_list_select(self, row: int) -> None:
@@ -1087,6 +1235,9 @@ class OperatorFrameViewer(QMainWindow):
         elif self._mode == "nok":
             scanner_label = _scanner_display(s["scanner_id"])
             self._nav_panel.load_ok_buffer(s["frames"], scanner_label, folder_dir=None)
+        elif self._mode == "timeline":
+            scanner_label = _scanner_display(s["scanner_id"])
+            self._nav_panel.load_timeline(s["frames"], scanner_label)
         else:
             scanner_label = _scanner_display(s["scanner_id"])
             self._nav_panel.load_ok_buffer(s["frames"], scanner_label,
