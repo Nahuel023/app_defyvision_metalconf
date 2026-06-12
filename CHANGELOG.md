@@ -48,6 +48,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 183 - Fix scanner_1: restaurar roi.json y deshabilitar roi_recenter
+
+**Bug:** warning en producción `[modelo_B] Patrón calibrado a 241x480 pero frame actual
+(post-ROI) es 259x480. Resultados incorrectos`.
+
+**Causa:** el `roi_recenter` (modo `resize`) expandió el ROI de scanner_1 de `w=242`
+a `w=259` durante sesiones anteriores, desincronizándolo del patrón (image_size=241).
+El patrón fue construido con w=242 pero los frames llegaban con 259px post-ROI.
+
+**Fix:**
+- `data/patterns/scanner_1/modelo_B/roi.json`: restaurado a `x=213, w=242` (valor
+  original con que se construyó el patrón).
+- `config/io_map.yaml` (scanner_1 inspection override): `roi_recenter_enabled: false`
+  para evitar que el ROI vuelva a crecer y desincronizarse. El ROI w=242 cubre bien
+  la zona microperforada de scanner_1; el recenter no es necesario acá.
+
+**Nota:** si en el futuro se desea cambiar el ROI, hay que reconstruir el patrón
+inmediatamente con `build-pattern --model modelo_B --scanner scanner_1`.
+
+**Archivos:** `data/patterns/scanner_1/modelo_B/roi.json`, `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 182 - Inspector thread: wrapper try/except de último recurso
 
 **Bug:** si cualquier excepción no capturada ocurría en `_continuous_loop` (durante

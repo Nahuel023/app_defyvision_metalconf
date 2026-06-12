@@ -33,6 +33,10 @@ scanner_1:
     # umbral global compare_left_ignore_px=40 la cortaba. Con 28px se excluye solo
     # la columna mas izquierda (x=18-24, max=24) y se incluye siempre la segunda (x=37-42).
     compare_left_ignore_px: 28.0
+    # Deshabilitado: el roi_recenter en modo resize expandio el ROI de w=242 a w=259
+    # desincronizandolo del patron (image_size=241). Sin recenter, el ROI queda fijo
+    # en el valor del roi.json, que ya cubre bien la zona microperforada de scanner_1.
+    roi_recenter_enabled: false
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
