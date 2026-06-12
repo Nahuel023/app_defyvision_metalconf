@@ -325,6 +325,7 @@ def _inspect_bgr(
     roi_slow_ema_cooldown_frames= int(tolerances.get("roi_slow_ema_cooldown_frames", 1500))
     roi_slow_ema_max_total_px   = int(tolerances.get("roi_slow_ema_max_total_px", 40))
     roi_slow_ema_save_every     = int(tolerances.get("roi_slow_ema_save_every", 300))
+    roi_slow_ema_warmup_frames  = int(tolerances.get("roi_slow_ema_warmup_frames", 300))
 
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
@@ -1016,6 +1017,7 @@ def _inspect_bgr(
         cooldown_frames=roi_slow_ema_cooldown_frames,
         max_total_px=roi_slow_ema_max_total_px,
         save_every=roi_slow_ema_save_every,
+        warmup_frames=roi_slow_ema_warmup_frames,
     )
 
     # Build NOK cause list for the overlay panel (shown whenever final_status == "NOK")
@@ -1176,30 +1178,47 @@ def _roi_slow_ema_step(
     cooldown_frames: int,
     max_total_px: int,
     save_every: int,
+    warmup_frames: int,
 ) -> None:
-    """EMA muy lento de drift ROI. Escribe roi.json 1px a la vez solo cuando
-    el drift supera threshold_px de forma sostenida durante confirm_frames frames.
-
-    Seguro para 24/7: nunca modifica el ROI del frame en curso — la corrección
-    queda en pre['roi'] y en disco, efectiva a partir del siguiente frame.
-    """
     if not enabled or roi_info is None or roi_info.detected_roi is None:
         return
 
-    # Lazy init: cargar estado desde disco en el primer frame del proceso
     state = pre.get("roi_slow_ema")
     if state is None:
         state = load_roi_drift_state(model, scanner_id)
         pre["roi_slow_ema"] = state
 
     shift_x = float(roi_info.shift_x)
-    ema = float(state.get("ema", shift_x))
-    ema = ema * (1.0 - alpha) + shift_x * alpha
-    state["ema"] = round(ema, 4)
     n = int(state.get("n_frames", 0)) + 1
     state["n_frames"] = n
 
-    # Respetar cooldown entre correcciones
+    # Fase 1: warmup - media simple para fijar baseline (captura offset estatico)
+    if not state.get("baseline_ready", False):
+        w_sum   = float(state.get("warmup_sum",   0.0)) + shift_x
+        w_count = int(state.get("warmup_count",   0))   + 1
+        state["warmup_sum"]   = w_sum
+        state["warmup_count"] = w_count
+        if w_count >= warmup_frames:
+            baseline = w_sum / w_count
+            state["ema_baseline"]   = round(baseline, 4)
+            state["ema"]            = round(baseline, 4)
+            state["baseline_ready"] = True
+            logger.info(
+                "[%s] ROI slow EMA: baseline=%.2fpx (%d frames)",
+                scanner_id, baseline, w_count,
+            )
+        if n % save_every == 0:
+            save_roi_drift_state(state, model, scanner_id)
+        return
+
+    # Fase 2: produccion - EMA lento, comparar delta vs baseline
+    ema = float(state.get("ema", shift_x))
+    ema = ema * (1.0 - alpha) + shift_x * alpha
+    state["ema"] = round(ema, 4)
+
+    baseline = float(state.get("ema_baseline", ema))
+    delta    = ema - baseline
+
     cooldown = int(state.get("cooldown_remaining", 0))
     if cooldown > 0:
         state["cooldown_remaining"] = cooldown - 1
@@ -1207,10 +1226,9 @@ def _roi_slow_ema_step(
             save_roi_drift_state(state, model, scanner_id)
         return
 
-    # Determinar dirección de drift sostenido
-    if ema >= threshold_px:
+    if delta >= threshold_px:
         direction = 1
-    elif ema <= -threshold_px:
+    elif delta <= -threshold_px:
         direction = -1
     else:
         state["confirm_streak"] = 0
@@ -1218,7 +1236,6 @@ def _roi_slow_ema_step(
             save_roi_drift_state(state, model, scanner_id)
         return
 
-    # Acumular racha de confirmación en la misma dirección
     if state.get("confirm_dir", 0) == direction:
         streak = int(state.get("confirm_streak", 0)) + 1
     else:
@@ -1232,7 +1249,7 @@ def _roi_slow_ema_step(
     if streak < confirm_frames:
         return
 
-    # ── Drift confirmado: aplicar corrección de 1px ──────────────────
+    # Drift confirmado: aplicar correccion de 1px
     current_roi = pre.get("roi")
     if current_roi is None:
         return
@@ -1240,7 +1257,7 @@ def _roi_slow_ema_step(
     applied_total = int(state.get("applied_total_px", 0))
     if abs(applied_total + direction) > max_total_px:
         logger.warning(
-            "[%s] ROI slow EMA: límite máximo ±%dpx alcanzado — recalibración manual recomendada",
+            "[%s] ROI slow EMA: limite maximo +/-%dpx alcanzado - recalibracion manual recomendada",
             scanner_id, max_total_px,
         )
         return
@@ -1261,18 +1278,19 @@ def _roi_slow_ema_step(
         return
 
     applied_total += direction
-    state["applied_total_px"] = applied_total
-    state["confirm_streak"] = 0
+    state["applied_total_px"]   = applied_total
+    state["confirm_streak"]     = 0
     state["cooldown_remaining"] = cooldown_frames
+    state["ema_baseline"] = round(baseline + direction, 4)
     save_roi_drift_state(state, model, scanner_id)
 
-    # Actualizar ROI en memoria para el próximo frame de esta sesión
     pre["roi"] = new_roi
 
     logger.info(
-        "[%s] ROI slow EMA: +%dpx → x=%d  (EMA=%.1fpx  racha=%d  total=%+dpx)",
-        scanner_id, direction, new_roi.x, ema, streak, applied_total,
+        "[%s] ROI slow EMA: %+dpx -> x=%d  (delta=%.1fpx  racha=%d  total=%+dpx)",
+        scanner_id, direction, new_roi.x, delta, streak, applied_total,
     )
+
 
 
 def _update_runtime_roi_drift(

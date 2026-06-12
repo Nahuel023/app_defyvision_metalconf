@@ -121,6 +121,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_slow_ema_cooldown_frames": 1500,# frames de pausa entre correcciones (~5min a 5fps)
     "roi_slow_ema_max_total_px": 40,     # máximo ±40px desde la ROI original del archivo
     "roi_slow_ema_save_every": 300,      # guardar estado en disco cada N frames (~60s)
+    "roi_slow_ema_warmup_frames": 300,   # frames iniciales para establecer baseline estatico (~60s)
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
     "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron
