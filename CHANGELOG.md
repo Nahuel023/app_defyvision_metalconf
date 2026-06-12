@@ -48,6 +48,75 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 176 - Calibracion fina viernes 12: microperforado OK por scanner sin mezclar tolerancias
+
+**Pedido:** revisar `C:\Users\DefyC\Downloads\IMAGENES-VIERNES-12`, testear
+`SCANNER_1` y `SCANNER_2` por separado, y hacer tuneo fino de patron/ROI.
+Todas las imagenes del lote son OK, asi que no habia que mezclar tolerancias
+entre scanners ni dejar falsas paradas de maquina.
+
+**Hallazgos:**
+- `origin/master` no tenia cambios nuevos, pero Tadeo subio una base util a
+  `origin/clean-push` con ROI/tolerancias/patrones de `modelo_B`.
+- Esa base mejoro fuerte ambos scanners, pero todavia dejaba:
+  - `scanner_1`: `63/74 raw OK`, `74/74 temporal OK`
+  - `scanner_2`: `68/76 raw OK`, `76/76 temporal OK`
+- `scanner_1` admitia una mejora geometrica clara reconstruyendo el patron desde
+  una imagen buena del viernes.
+- `scanner_2` funcionaba mejor sobre `modelo_B` especifico que sobre las pruebas
+  hechas antes con `modelo_A`; reconstruirlo desde `frame_0000` y mover apenas
+  la ROI bajo mas el missing residual.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml`
+  - se tomo la base de `origin/clean-push` para `modelo_B`:
+    - `pattern_edge_margin_px: 22.0`
+    - `grid_affine_refinement: false`
+    - `use_hungarian_matching: true`
+- `config/io_map.yaml`
+  - `scanner_1.inspection.pattern_edge_margin_px: 5.0`
+  - `scanner_1.inspection.tol_xy_px: 38.0`
+  - `scanner_2.inspection.tol_xy_px: 42.0`
+- `data/patterns/scanner_1/modelo_B/roi.json`
+  - ROI final: `x=214, y=0, w=241, h=480`
+- `data/patterns/scanner_1/modelo_B/holes.json`
+  - reconstruido desde `12-06-2026-MICROPERFORADO_10_SCANNER_1/frame_0055.png`
+  - patron final: `167 puntos`
+- `data/patterns/scanner_2/modelo_B/roi.json`
+  - ROI final: `x=218, y=0, w=235, h=480`
+- `data/patterns/scanner_2/modelo_B/holes.json`
+  - reconstruido desde `12-06-2026-MICROPERFORADO_2_SCANNER_2/frame_0000.png`
+  - patron final: `164 puntos`
+
+**Validacion final sobre el lote del viernes:**
+- `scanner_1` con `modelo_B`
+  - `74/74 raw OK`
+  - `74/74 temporal OK`
+  - `machine_stop_frames=0`
+  - `align_failures=0/74`
+- `scanner_2` con `modelo_B`
+  - `71/76 raw OK`
+  - `76/76 temporal OK`
+  - `machine_stop_frames=0`
+  - `align_failures=0/76`
+
+**Riesgos / oportunidades:**
+- `scanner_1` quedo operativo sobre el lote OK del viernes.
+- `scanner_2` mejoro mucho el baseline de missing, pero todavia conserva
+  `5 raw NOK` residuales aunque sin disparar NOK temporal ni machine stop.
+- Si queres llevar `scanner_2` a `raw OK` total tambien, el siguiente paso sano
+  ya no parece ser abrir mas `tol_xy_px`, sino revisar esos grupos de celdas
+  residuales (`ci~3, cj~15-19`) con una captura de referencia mas centrada o
+  un ajuste puntual de patron en esa franja.
+
+**Archivos:** `config/tolerancias.yaml`, `config/io_map.yaml`,
+`data/patterns/scanner_1/modelo_B/roi.json`,
+`data/patterns/scanner_1/modelo_B/holes.json`,
+`data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
 #### Cambio 175 - ROI slow EMA: correccion de baseline para ROI angosta
 
 **Problema:** la version anterior comparaba el EMA contra threshold absoluto (15px).
