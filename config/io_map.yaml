@@ -17,9 +17,17 @@ scanner_1:
     # ROI angosta de microperforado: mantener margen chico para reconstruir el
     # patron completo en scanner_1 sin tocar scanner_2.
     pattern_edge_margin_px: 5.0
+    # El patron recortado (sin columnas derechas inestables) hace que los agujeros
+    # detectados en el borde derecho caigan fuera del convex hull esperado, lo que
+    # dispara falsos NOK en pattern_align. Deshabilitado: machine_stop cubre defectos reales.
+    pattern_align_enabled: false
     # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
     # deriva fina sin introducir extras en las pruebas de carpeta.
     tol_xy_px: 38.0
+    # Excluye columnas derechas (ci=4,5, x>=150px) al CONSTRUIR el patron: estas
+    # columnas quedan cerca del borde de chapa y son inestables en deteccion.
+    # El patron resultante no las incluye, evitando falsos missing en produccion.
+    pattern_edge_margin_right_px: 95.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -39,6 +47,10 @@ scanner_2:
     # Overrides especificos para microperforado en scanner_2.
     # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
     # la inspeccion corre con scanner_id=scanner_2.
+    # El patron recortado (sin columna derecha inestable) hace que los agujeros
+    # detectados en el borde derecho caigan fuera del convex hull esperado.
+    # Deshabilitado: machine_stop cubre defectos reales.
+    pattern_align_enabled: false
     pattern_align_abs_max_px: 24.0
     pattern_global_offset_max_px: 50.0
     pattern_slope_delta_max_deg: 26.0
@@ -54,6 +66,10 @@ scanner_2:
     # Matching mas permisivo solo para scanner_2 en microperforado; reduce
     # missing residuales del lote OK sin afectar scanner_1.
     tol_xy_px: 42.0
+    # Excluye ci=3 y ci=4 (x>=105px en ROI 205px) al CONSTRUIR el patron:
+    # ci=3 y ci=4 quedan cerca del borde derecho de la zona microperforada y
+    # generan falsos missing en produccion. Solo ci=0,1,2 son estables.
+    pattern_edge_margin_right_px: 100.0
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:
