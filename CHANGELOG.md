@@ -48,6 +48,46 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 174 - ROI slow EMA drift correction (auto-calibracion gradual)
+
+**Pedido:** calibracion automatica muy lenta del ROI para produccion 24/7, sin
+cambios instantaneos que rompan la deteccion.
+
+**Diseño:**
+- `shift_x` de `resolve_runtime_roi` (deteccion de backlight) se acumula en un EMA
+  con alpha=0.002 (converge en ~500 frames, ~100s a 5fps).
+- Solo cuando |EMA| >= threshold (15px por defecto) se mantiene por confirm_frames
+  (500 frames = ~100s) se escribe 1px de correccion a `roi.json`.
+- Despues de cada correccion: cooldown_frames=1500 (~5 min) antes de poder corregir
+  otra vez.
+- Maximo total: ±40px desde el roi.json en disco.
+- Estado persistido en `data/patterns/{scanner}/{model}/roi_drift_state.json` para
+  sobrevivir reinicios. On restart: continua desde donde quedo.
+- Nunca modifica el ROI del frame en curso — la correccion queda efectiva a partir
+  del siguiente frame.
+- Tiempo minimo para 1px de correccion a 5fps: ~3.5 min de drift sostenido.
+- Para llegar a 40px de correccion total: minimo ~2.5 horas de drift continuo.
+
+**Activar (OFF por defecto, activar por scanner):**
+En `config/io_map.yaml`, dentro del bloque del scanner (inspection_overrides):
+```yaml
+roi_slow_ema_enabled: true
+```
+
+**Parametros ajustables (todos con defaults conservadores):**
+| Param | Default | Efecto |
+|---|---|---|
+| roi_slow_ema_alpha | 0.002 | suavidad del EMA (~500 frames para converger) |
+| roi_slow_ema_threshold_px | 15.0 | drift minimo para arrancar confirmacion |
+| roi_slow_ema_confirm_frames | 500 | frames sostenidos antes de escribir 1px |
+| roi_slow_ema_cooldown_frames | 1500 | pausa entre correcciones (~5min a 5fps) |
+| roi_slow_ema_max_total_px | 40 | max correccion total permitida |
+| roi_slow_ema_save_every | 300 | frecuencia de guardado del estado (~60s) |
+
+**Archivos:** `src/inspection.py`, `src/patterns/roi.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 173 - Panel de salud ROI en pestaña Calibración
 
 **Pedido:** mostrar la salud del ROI en la pestaña de calibración.
