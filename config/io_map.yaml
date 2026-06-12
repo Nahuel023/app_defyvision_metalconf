@@ -13,7 +13,13 @@ scanner_1:
   model: "modelo_B"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X0 no llega al PLC
-  inspection: {}
+  inspection:
+    # ROI angosta de microperforado: mantener margen chico para reconstruir el
+    # patron completo en scanner_1 sin tocar scanner_2.
+    pattern_edge_margin_px: 5.0
+    # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
+    # deriva fina sin introducir extras en las pruebas de carpeta.
+    tol_xy_px: 38.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -45,6 +51,9 @@ scanner_2:
     grid_stagger_x_odd: 18.0
     grid_dx: 35.5
     grid_dy: 13.6
+    # Matching mas permisivo solo para scanner_2 en microperforado; reduce
+    # missing residuales del lote OK sin afectar scanner_1.
+    tol_xy_px: 42.0
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:
