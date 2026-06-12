@@ -2,9 +2,7 @@ log_level: "INFO"
 log_file: "logs/defyvision.log"
 
 service:
-  # Bypass temporal del login de Modo Servicio.
-  # Volver a true cuando se quiera exigir usuario/contrasena.
-  login_enabled: false
+  login_enabled: true
   username: "DEFYMOTION"
   password: "defy2026"
 

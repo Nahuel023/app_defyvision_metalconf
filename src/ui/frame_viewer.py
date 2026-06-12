@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -19,8 +20,8 @@ import shutil
 import yaml
 import cv2
 import numpy as np
-from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal
-from PyQt6.QtGui import QIcon, QImage, QPixmap
+from PyQt6.QtCore import Qt, QSize, QThread, pyqtSignal, QPointF, QRectF
+from PyQt6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -28,6 +29,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -50,9 +52,18 @@ _OK_CLR  = "#3fb950"
 _NOK_CLR = "#f85149"
 _WARN    = "#d29922"
 
-_EVENTS_DIR   = _ROOT / "data" / "events"
-_OK_BUF_BASE  = _ROOT / "data" / "output" / "ok_buffer"
-_NOK_DIR      = _ROOT / "data" / "output" / "nok"
+_EVENTS_DIR     = _ROOT / "data" / "events"
+_OK_BUF_BASE    = _ROOT / "data" / "output" / "ok_buffer"
+_NOK_DIR        = _ROOT / "data" / "output" / "nok"
+_TIMELINE_BASE  = _ROOT / "data" / "output" / "timeline"
+
+# Colores por tag de timeline
+_TL_COLORS = {
+    "OK":   _OK_CLR,
+    "NOK":  _NOK_CLR,
+    "STOP": "#f97316",   # naranja — parada de máquina
+    "LQ":   "#64748b",   # gris — baja calidad / borroso
+}
 
 _THUMB_W = 90
 _THUMB_H = 60
@@ -143,36 +154,102 @@ class _ThumbLoader(QThread):
             self.thumb_ready.emit(i, pix)
 
 
-# ── Widget: visor de un único frame a pantalla ────────────────────────────────
+# ── Widget: visor de un único frame con zoom y pan ───────────────────────────
 
-class _FrameView(QLabel):
+class ZoomableFrameView(QWidget):
+    """Visor de frame con zoom (rueda) y pan (arrastrar). API: set_image / clear_image / fit."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._img: Optional[np.ndarray] = None
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet(f"background:#000000;border-radius:6px;border:2px solid {_BORDER};")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._pixmap: Optional[QPixmap] = None
+        self._scale: float = 1.0
+        self._offset = QPointF(0.0, 0.0)
+        self._drag_start: Optional[QPointF] = None
+        self._drag_offset: Optional[QPointF] = None
         self.setMinimumSize(400, 260)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setStyleSheet(f"background:#000000;border-radius:6px;border:2px solid {_BORDER};")
+        self.setMouseTracking(True)
 
     def set_image(self, img: np.ndarray) -> None:
-        self._img = img
-        self._update()
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        h, w = rgb.shape[:2]
+        qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        self._pixmap = QPixmap.fromImage(qimg)
+        self.fit()
 
     def clear_image(self) -> None:
-        self._img = None
-        self.clear()
+        self._pixmap = None
+        self.update()
+
+    def fit(self) -> None:
+        if self._pixmap is None:
+            return
+        w, h = self.width(), self.height()
+        pw, ph = self._pixmap.width(), self._pixmap.height()
+        if pw == 0 or ph == 0 or w == 0 or h == 0:
+            return
+        self._scale = min(w / pw, h / ph)
+        self._offset = QPointF(
+            (w - pw * self._scale) / 2.0,
+            (h - ph * self._scale) / 2.0,
+        )
+        self.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self._update()
+        if self._pixmap is not None:
+            self.fit()
 
-    def _update(self):
-        if self._img is None:
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        painter.fillRect(self.rect(), QColor("#000000"))
+        if self._pixmap is not None:
+            pw = self._pixmap.width() * self._scale
+            ph = self._pixmap.height() * self._scale
+            target = QRectF(self._offset.x(), self._offset.y(), pw, ph)
+            painter.drawPixmap(target, self._pixmap, QRectF(self._pixmap.rect()))
+            painter.setPen(QColor(_MUTED))
+            painter.setFont(QFont("Segoe UI", 9))
+            badge = f"{int(round(self._scale * 100))}%"
+            painter.drawText(self.rect().adjusted(0, 4, -6, 0),
+                             Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight, badge)
+
+    def wheelEvent(self, event) -> None:
+        if self._pixmap is None:
             return
-        rect = self.contentsRect()
-        w = max(100, rect.width() - 4)
-        h = max(80, rect.height() - 4)
-        self.setPixmap(_bgr_to_pixmap(self._img, w, h))
+        delta = event.angleDelta().y()
+        factor = 1.15 if delta > 0 else (1.0 / 1.15)
+        new_scale = max(0.05, min(self._scale * factor, 30.0))
+        cursor = QPointF(event.position())
+        img_x = (cursor.x() - self._offset.x()) / self._scale
+        img_y = (cursor.y() - self._offset.y()) / self._scale
+        self._scale = new_scale
+        self._offset = QPointF(
+            cursor.x() - img_x * self._scale,
+            cursor.y() - img_y * self._scale,
+        )
+        self.update()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = QPointF(event.position())
+            self._drag_offset = QPointF(self._offset)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start is not None and self._drag_offset is not None:
+            delta = event.position() - self._drag_start
+            self._offset = self._drag_offset + delta
+            self.update()
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = None
+            self._drag_offset = None
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.fit()
 
 
 def _get_model_for_scanner(scanner_id: str) -> str:
@@ -211,6 +288,8 @@ class _InspectWorker(QThread):
 class _EventNavPanel(QWidget):
     """Visor de frames de un evento: imagen grande + tira de miniaturas + navegación."""
 
+    folder_deleted = pyqtSignal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._frames: list[Path] = []
@@ -222,6 +301,7 @@ class _EventNavPanel(QWidget):
         self._model: str = ""
         self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
         self._inspect_worker: Optional[_InspectWorker] = None
+        self._current_dir: Optional[Path] = None
         self._build_ui()
 
     def _build_ui(self):
@@ -239,7 +319,7 @@ class _EventNavPanel(QWidget):
         root.addWidget(self._info_lbl)
 
         # ── Frame grande ──────────────────────────────────────────────
-        self._view = _FrameView()
+        self._view = ZoomableFrameView()
         root.addWidget(self._view, stretch=1)
 
         # ── Controles de navegación ───────────────────────────────────
@@ -289,6 +369,40 @@ class _EventNavPanel(QWidget):
         self._overlay_btn.clicked.connect(self._toggle_overlay)
         nav.addWidget(self._overlay_btn)
 
+        self._fit_btn = QPushButton("⊡  Ajustar")
+        self._fit_btn.setMinimumHeight(36)
+        self._fit_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ border-color:#0f766e; color:{_TEXT}; }}"
+        )
+        self._fit_btn.clicked.connect(lambda: self._view.fit())
+        nav.addWidget(self._fit_btn)
+
+        self._del_frame_btn = QPushButton("✕  Borrar frame")
+        self._del_frame_btn.setMinimumHeight(36)
+        self._del_frame_btn.setEnabled(False)
+        self._del_frame_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:#f87171; border:1px solid #7f1d1d;"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ background:#7f1d1d; color:#ffffff; border-color:#dc2626; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_frame_btn.clicked.connect(self._delete_current_frame)
+        nav.addWidget(self._del_frame_btn)
+
+        self._del_folder_btn = QPushButton("✕✕  Borrar carpeta")
+        self._del_folder_btn.setMinimumHeight(36)
+        self._del_folder_btn.setEnabled(False)
+        self._del_folder_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:#fca5a5; border:1px solid #991b1b;"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 12px; }}"
+            f"QPushButton:hover {{ background:#991b1b; color:#ffffff; border-color:#ef4444; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_folder_btn.clicked.connect(self._delete_current_folder)
+        nav.addWidget(self._del_folder_btn)
+
         root.addLayout(nav)
 
         # ── Tira de miniaturas ────────────────────────────────────────
@@ -319,6 +433,7 @@ class _EventNavPanel(QWidget):
         self._scanner_id = summary.get("scanner_id", "")
         self._model = _get_model_for_scanner(self._scanner_id)
         self._is_event_mode = True
+        self._current_dir = summary.get("dir")
 
         # Separar pre/post para colorear la tira
         n_pre = summary["pre_count"]
@@ -361,12 +476,22 @@ class _EventNavPanel(QWidget):
 
         self._show_frame(0)
 
-    def load_ok_buffer(self, frames: list[Path], scanner_label: str) -> None:
+    def load_ok_buffer(self, frames: list[Path], scanner_label: str,
+                       folder_dir: Optional[Path] = None) -> None:
         self._frames = frames
         self._current = 0
         self._is_event_mode = False
+        self._current_dir = folder_dir
+        newest_ts = ""
+        if frames:
+            try:
+                newest_ts = "  ·  último: " + datetime.fromtimestamp(
+                    frames[-1].stat().st_mtime).strftime("%H:%M:%S")
+            except Exception:
+                pass
         self._info_lbl.setText(
-            f"{scanner_label}   ·   Buffer OK — últimas {len(frames)} inspecciones correctas"
+            f"{scanner_label}   ·   {len(frames)} frames OK"
+            f"   ◀ antiguo — reciente ▶{newest_ts}"
         )
         self._clear_thumbs()
         for i in range(len(frames)):
@@ -386,7 +511,54 @@ class _EventNavPanel(QWidget):
         self._loader = _ThumbLoader(frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
-        self._show_frame(0)
+        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
+
+    def load_timeline(self, frames: list[Path], scanner_label: str) -> None:
+        """Carga el buffer cronológico completo con colores por status."""
+        self._frames = frames
+        self._current = 0
+        self._is_event_mode = False
+        self._current_dir = frames[0].parent if frames else None
+
+        counts = {}
+        for f in frames:
+            tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
+            counts[tag] = counts.get(tag, 0) + 1
+        summary_parts = [f"{c} {t}" for t, c in sorted(counts.items())]
+        newest_ts = ""
+        if frames:
+            try:
+                newest_ts = "  ·  último: " + datetime.fromtimestamp(
+                    frames[-1].stat().st_mtime).strftime("%H:%M:%S")
+            except Exception:
+                pass
+        self._info_lbl.setText(
+            f"{scanner_label}   ·   {len(frames)} frames   ({', '.join(summary_parts)})"
+            f"   ◀ antiguo — reciente ▶{newest_ts}"
+        )
+
+        self._clear_thumbs()
+        for i, path in enumerate(frames):
+            tag = path.stem.split("_", 1)[1] if "_" in path.stem else "OK"
+            color = _TL_COLORS.get(tag, _MUTED)
+            lbl = QLabel()
+            lbl.setFixedSize(_THUMB_W, _THUMB_H)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet(
+                f"background:#000;border:2px solid {color};border-radius:3px;"
+            )
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            lbl.mousePressEvent = lambda e, idx=i: self._go_to(idx)
+            self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
+            self._thumb_widgets.append(lbl)
+
+        if self._loader is not None:
+            self._loader.quit()
+            self._loader.wait(200)
+        self._loader = _ThumbLoader(frames)
+        self._loader.thumb_ready.connect(self._on_thumb_ready)
+        self._loader.start()
+        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
 
     # ── Internos ──────────────────────────────────────────────────────
 
@@ -410,7 +582,11 @@ class _EventNavPanel(QWidget):
             self._pos_lbl.setText("Sin frames")
             self._prev_btn.setEnabled(False)
             self._next_btn.setEnabled(False)
+            self._del_frame_btn.setEnabled(False)
+            self._del_folder_btn.setEnabled(False)
             return
+        self._del_frame_btn.setEnabled(True)
+        self._del_folder_btn.setEnabled(self._current_dir is not None)
         idx = max(0, min(idx, len(self._frames) - 1))
         self._current = idx
         path = self._frames[idx]
@@ -429,7 +605,19 @@ class _EventNavPanel(QWidget):
 
         n = len(self._frames)
         if not (self._is_event_mode and self._show_overlay):
-            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}")
+            _tag_suffix = ""
+            _stem = path.stem
+            if "_" in _stem and not _stem.startswith("ok_"):
+                _tag = _stem.split("_", 1)[1]
+                if _tag in _TL_COLORS:
+                    _tag_suffix = f"  ·  {_tag}"
+            try:
+                _ts = datetime.fromtimestamp(path.stat().st_mtime).strftime("%H:%M:%S")
+                _tag_suffix += f"  ·  {_ts}"
+            except Exception:
+                pass
+            _newest = "  ★" if idx == n - 1 else ""
+            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}{_newest}")
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
@@ -493,6 +681,71 @@ class _EventNavPanel(QWidget):
             raw = parent / (stem + "_raw.jpg")
             return raw if raw.exists() else path
 
+    def _delete_current_frame(self) -> None:
+        if not self._frames or self._current >= len(self._frames):
+            return
+        path = self._frames[self._current]
+        answer = QMessageBox.question(
+            self, "Borrar frame",
+            f"¿Borrar '{path.name}'?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            path.unlink(missing_ok=True)
+            # También borrar archivos asociados (_raw, _overlay)
+            for suffix in ("_raw.jpg", "_overlay.jpg", "_overlay.png"):
+                assoc = path.parent / (path.stem + suffix)
+                assoc.unlink(missing_ok=True)
+            self._frames.pop(self._current)
+            # Limpiar thumbnail
+            if self._current < len(self._thumb_widgets):
+                w = self._thumb_widgets.pop(self._current)
+                self._thumb_lay.removeWidget(w)
+                w.deleteLater()
+            if not self._frames:
+                self._view.clear_image()
+                self._pos_lbl.setText("Sin frames")
+                self._prev_btn.setEnabled(False)
+                self._next_btn.setEnabled(False)
+                self._del_frame_btn.setEnabled(False)
+                return
+            next_idx = min(self._current, len(self._frames) - 1)
+            self._show_frame(next_idx)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
+    def _delete_current_folder(self) -> None:
+        if self._current_dir is None:
+            return
+        name = self._current_dir.name
+        answer = QMessageBox.question(
+            self, "Borrar carpeta completa",
+            f"¿Borrar la carpeta completa '{name}' con todos sus frames?\n"
+            f"Esta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            shutil.rmtree(self._current_dir)
+            self._frames.clear()
+            self._current_dir = None
+            self._clear_thumbs()
+            self._view.clear_image()
+            self._pos_lbl.setText("Sin frames")
+            self._prev_btn.setEnabled(False)
+            self._next_btn.setEnabled(False)
+            self._del_frame_btn.setEnabled(False)
+            self._del_folder_btn.setEnabled(False)
+            self._info_lbl.setText("Carpeta eliminada")
+            self.folder_deleted.emit()
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
     def _go_prev(self) -> None:
         self._show_frame(self._current - 1)
 
@@ -517,8 +770,9 @@ class OperatorFrameViewer(QMainWindow):
     def __init__(self, system, parent=None):
         super().__init__(parent)
         self._system = system
-        self._mode = "events"   # "events" | "ok" | "nok"
+        self._mode = "events"   # "events" | "ok" | "nok" | "timeline"
         self._summaries: list[dict] = []
+        self._current_summary: Optional[dict] = None
 
         self.setWindowTitle("Visor de Frames — DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
@@ -564,6 +818,7 @@ class OperatorFrameViewer(QMainWindow):
 
         # Panel de visor derecho
         self._nav_panel = _EventNavPanel()
+        self._nav_panel.folder_deleted.connect(self.reload)
         splitter.addWidget(self._nav_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
@@ -603,13 +858,15 @@ class OperatorFrameViewer(QMainWindow):
             b.clicked.connect(lambda: self._switch_mode(mode))
             return b
 
-        self._events_btn = _tab_btn("⚠  Paradas de línea", "events", _NOK_CLR)
-        self._ok_btn     = _tab_btn("✓  Frames OK recientes", "ok", _OK_CLR)
-        self._nok_btn    = _tab_btn("✗  Frames NOK recientes", "nok", _WARN)
+        self._events_btn   = _tab_btn("⚠  Paradas de línea",    "events",   _NOK_CLR)
+        self._ok_btn       = _tab_btn("✓  Frames OK recientes",  "ok",       _OK_CLR)
+        self._nok_btn      = _tab_btn("✗  Frames NOK recientes", "nok",      _WARN)
+        self._timeline_btn = _tab_btn("≡  Flujo cronológico",    "timeline", _ACCENT)
 
         lay.addWidget(self._events_btn)
         lay.addWidget(self._ok_btn)
         lay.addWidget(self._nok_btn)
+        lay.addWidget(self._timeline_btn)
 
         reload_btn = QPushButton("↺  Recargar")
         reload_btn.setFixedHeight(30)
@@ -620,6 +877,26 @@ class OperatorFrameViewer(QMainWindow):
         )
         reload_btn.clicked.connect(self.reload)
         lay.addWidget(reload_btn)
+
+        _del_ss = (
+            "QPushButton {{ background:transparent; color:#f87171; "
+            "border:1px solid #7f1d1d; border-radius:6px; font-size:11px; "
+            "font-weight:600; padding:0 10px; }}"
+            "QPushButton:hover {{ background:#7f1d1d; color:#ffffff; border-color:#dc2626; }}"
+            "QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._del_sel_btn = QPushButton("✕  Borrar selección")
+        self._del_sel_btn.setFixedHeight(30)
+        self._del_sel_btn.setEnabled(False)
+        self._del_sel_btn.setStyleSheet(_del_ss)
+        self._del_sel_btn.clicked.connect(self._delete_selected)
+        lay.addWidget(self._del_sel_btn)
+
+        self._del_all_btn = QPushButton("✕✕  Borrar todo")
+        self._del_all_btn.setFixedHeight(30)
+        self._del_all_btn.setStyleSheet(_del_ss)
+        self._del_all_btn.clicked.connect(self._delete_all)
+        lay.addWidget(self._del_all_btn)
 
         self._disk_lbl = QLabel("")
         self._disk_lbl.setStyleSheet(
@@ -636,6 +913,7 @@ class OperatorFrameViewer(QMainWindow):
         self._events_btn.setChecked(mode == "events")
         self._ok_btn.setChecked(mode == "ok")
         self._nok_btn.setChecked(mode == "nok")
+        self._timeline_btn.setChecked(mode == "timeline")
         self._populate_list()
 
     def reload(self) -> None:
@@ -680,6 +958,8 @@ class OperatorFrameViewer(QMainWindow):
             self._populate_events()
         elif self._mode == "nok":
             self._populate_nok()
+        elif self._mode == "timeline":
+            self._populate_timeline()
         else:
             self._populate_ok()
 
@@ -776,7 +1056,10 @@ class OperatorFrameViewer(QMainWindow):
             return
 
         for sdir in scanner_dirs:
-            frames = sorted(f for f in sdir.glob("ok_*.jpg") if "_raw" not in f.name)
+            frames = sorted(
+                (f for f in sdir.glob("ok_*.jpg") if "_raw" not in f.name),
+                key=lambda f: f.stat().st_mtime,
+            )
             if not frames:
                 continue
             summary = {
@@ -874,20 +1157,214 @@ class OperatorFrameViewer(QMainWindow):
 
         return w
 
+    def _populate_timeline(self) -> None:
+        """Lee data/output/timeline/ y muestra el flujo cronológico por scanner."""
+        self._summaries = []
+        if not _TIMELINE_BASE.exists():
+            item = QListWidgetItem("Sin flujo grabado aún")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        scanner_dirs = sorted(d for d in _TIMELINE_BASE.iterdir() if d.is_dir())
+        if not scanner_dirs:
+            item = QListWidgetItem("Sin flujo grabado aún")
+            item.setForeground(Qt.GlobalColor.gray)
+            item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list_widget.addItem(item)
+            return
+
+        for sd in scanner_dirs:
+            files = sorted(
+                (f for f in sd.iterdir() if f.suffix.lower() == ".jpg"),
+                key=lambda f: f.stat().st_mtime,
+            )
+            if not files:
+                continue
+            counts: dict[str, int] = {}
+            for f in files:
+                tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
+                counts[tag] = counts.get(tag, 0) + 1
+            summary = {
+                "type": "timeline",
+                "scanner_id": sd.name,
+                "frames": files,
+                "counts": counts,
+                "dir": sd,
+            }
+            self._summaries.append(summary)
+            widget = self._make_timeline_card(summary)
+            item = QListWidgetItem()
+            item.setSizeHint(widget.sizeHint())
+            self._list_widget.addItem(item)
+            self._list_widget.setItemWidget(item, widget)
+
+        # Auto-seleccionar el primero
+        if self._summaries:
+            self._list_widget.setCurrentRow(0)
+
+    def _make_timeline_card(self, s: dict) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background:transparent;")
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(8, 8, 8, 8)
+        lay.setSpacing(3)
+
+        scanner = _scanner_display(s["scanner_id"])
+        title = QLabel(scanner)
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:12px;font-weight:700;background:transparent;"
+        )
+        lay.addWidget(title)
+
+        total = len(s["frames"])
+        counts = s.get("counts", {})
+        ok_n    = counts.get("OK",   0)
+        nok_n   = counts.get("NOK",  0)
+        stop_n  = counts.get("STOP", 0)
+        lq_n    = counts.get("LQ",   0)
+
+        total_lbl = QLabel(f"{total} frames en orden cronológico")
+        total_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:10px;font-weight:600;background:transparent;"
+        )
+        lay.addWidget(total_lbl)
+
+        detail_parts = []
+        if ok_n:   detail_parts.append(f"{ok_n} OK")
+        if nok_n:  detail_parts.append(f"{nok_n} NOK")
+        if stop_n: detail_parts.append(f"{stop_n} STOP")
+        if lq_n:   detail_parts.append(f"{lq_n} LQ")
+        if detail_parts:
+            detail_lbl = QLabel("  ·  ".join(detail_parts))
+            detail_lbl.setStyleSheet(
+                f"color:{_MUTED};font-size:9px;background:transparent;"
+            )
+            lay.addWidget(detail_lbl)
+
+        return w
+
     # ── Selección ─────────────────────────────────────────────────────
 
     def _on_list_select(self, row: int) -> None:
         if row < 0 or row >= len(self._summaries):
+            self._current_summary = None
+            self._del_sel_btn.setEnabled(False)
             return
         s = self._summaries[row]
+        self._current_summary = s
+        self._del_sel_btn.setEnabled(True)
         if self._mode == "events":
             self._nav_panel.load_event(s)
         elif self._mode == "nok":
             scanner_label = _scanner_display(s["scanner_id"])
-            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label, folder_dir=None)
+        elif self._mode == "timeline":
+            scanner_label = _scanner_display(s["scanner_id"])
+            self._nav_panel.load_timeline(s["frames"], scanner_label)
         else:
             scanner_label = _scanner_display(s["scanner_id"])
-            self._nav_panel.load_ok_buffer(s["frames"], scanner_label)
+            self._nav_panel.load_ok_buffer(s["frames"], scanner_label,
+                                            folder_dir=s.get("dir"))
+
+    # ── Borrado ───────────────────────────────────────────────────────
+
+    def _delete_selected(self) -> None:
+        s = self._current_summary
+        if s is None:
+            return
+        if self._mode == "events":
+            name = s.get("name", str(s.get("dir", "")))
+            answer = QMessageBox.question(
+                self, "Borrar evidencia",
+                f"¿Borrar la carpeta completa '{name}'?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                shutil.rmtree(s["dir"])
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        elif self._mode == "ok":
+            scanner = _scanner_display(s["scanner_id"])
+            answer = QMessageBox.question(
+                self, "Borrar frames OK",
+                f"¿Borrar todos los frames OK de {scanner}?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                for f in s["frames"]:
+                    f.unlink(missing_ok=True)
+                for suffix in ("_raw.jpg",):
+                    for f in s["dir"].glob(f"ok_*{suffix}"):
+                        f.unlink(missing_ok=True)
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        elif self._mode == "nok":
+            scanner = _scanner_display(s["scanner_id"])
+            answer = QMessageBox.question(
+                self, "Borrar frames NOK",
+                f"¿Borrar todos los frames NOK de {scanner}?\nEsta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            try:
+                for f in s["frames"]:
+                    f.unlink(missing_ok=True)
+            except Exception as exc:
+                QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+                return
+        self._current_summary = None
+        self._del_sel_btn.setEnabled(False)
+        self._populate_list()
+
+    def _delete_all(self) -> None:
+        if self._mode == "events":
+            label = "todas las evidencias de parada"
+        elif self._mode == "ok":
+            label = "todos los frames OK guardados"
+        else:
+            label = "todos los frames NOK guardados"
+        answer = QMessageBox.question(
+            self, "Borrar todo",
+            f"¿Borrar {label}?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if self._mode == "events":
+                if _EVENTS_DIR.exists():
+                    for d in _EVENTS_DIR.iterdir():
+                        if d.is_dir():
+                            shutil.rmtree(d)
+            elif self._mode == "ok":
+                if _OK_BUF_BASE.exists():
+                    for d in _OK_BUF_BASE.iterdir():
+                        if d.is_dir():
+                            for f in d.glob("ok_*.jpg"):
+                                f.unlink(missing_ok=True)
+            elif self._mode == "nok":
+                if _NOK_DIR.exists():
+                    for f in _NOK_DIR.glob("*.png"):
+                        f.unlink(missing_ok=True)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar todo:\n{exc}")
+            return
+        self._current_summary = None
+        self._del_sel_btn.setEnabled(False)
+        self._populate_list()
 
     # ── showEvent: activar modo eventos por defecto ───────────────────
 

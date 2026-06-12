@@ -2,7 +2,7 @@
 FSM de un scanner individual.
 
 Estados:
-  IDLE    → amarilla encendida, esperando START del operador
+  IDLE    → azul encendida, esperando START del operador
   RUNNING → verde/amarillo; electroválvula activa
              MANUAL: solo electroválvula (sin backlight ni inspección)
              AUTO:   inspección continua + electroválvula + backlight
@@ -86,6 +86,7 @@ class ScannerController:
         self._max_nok_streak:    int       = 0
         self._fault_count:       int       = 0
         self._machine_stop_count: int      = 0
+        self._startup_grace_remaining: int = 0
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
         self._last_position_diff: float    = 0.0
@@ -108,6 +109,13 @@ class ScannerController:
         self._ok_buf_dir      = Path("data/output/ok_buffer") / scanner_id
         self._ok_seen: int    = 0   # frames OK vistos (para throttle)
         self._ok_write: int   = 0   # posición de escritura en el pool
+
+        # Buffer cronológico — todos los frames en orden de inspección
+        self._tl_enabled  = bool(tols.get("timeline_buffer_enabled", True))
+        self._tl_max      = max(10, int(tols.get("timeline_buffer_count", 500)))
+        self._tl_quality  = int(tols.get("ok_buffer_jpeg_quality", 75))
+        self._tl_dir      = Path("data/output/timeline") / scanner_id
+        self._tl_write: int = 0   # posición de escritura circular
 
         self._lock          = threading.Lock()
         self._force_inspect = threading.Event()
@@ -225,7 +233,7 @@ class ScannerController:
         # backlight permanece encendido siempre
 
         if new_state == ScannerState.IDLE:
-            self._set_lights(yellow=True)
+            self._set_lights(blue=True)
         else:
             self._set_lights()   # todas apagadas en STOPPED
 
@@ -240,7 +248,7 @@ class ScannerController:
                 return False
 
         self._transition(ScannerState.IDLE)
-        self._set_lights(yellow=True)
+        self._set_lights(blue=True)
         logger.info(f"[{self._id}] reset → IDLE")
         return True
 
@@ -411,11 +419,17 @@ class ScannerController:
         # Backlight siempre ON al iniciar para que la cámara sea visible
         self._io.write(f"{self._id}.backlight", True)
         if state == ScannerState.IDLE:
-            self._set_lights(yellow=True)
+            self._set_lights(blue=True)
         elif state == ScannerState.RUNNING:
             self._set_lights(green=True)
         elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
             self._set_lights(red=True)   # rojo = intervención requerida (estándar industrial)
+
+    def reload_cache(self) -> None:
+        """Invalida el cache del inspector (ROI, patrón, tolerancias) para el modelo activo."""
+        model = self._io.scanner_config(self._id).get("model", "")
+        self._inspector.invalidate(model=model or None, scanner_id=self._id)
+        logger.info(f"[{self._id}] cache invalidado — ROI/patrón se recargarán en el próximo frame")
 
     def set_model(self, model: str) -> None:
         cfg      = self._io.scanner_config(self._id)
@@ -591,6 +605,125 @@ class ScannerController:
         logger.info(f"[{self._id}] selftest OK: detection_ratio={ratio:.0%}")
         return True
 
+    def _run_roi_precalibration(self, model: str, session: InspectionSession) -> None:
+        """Mide el shift_x antes de iniciar el loop y corrige el ROI si está desplazado.
+
+        Escribe roi.json y actualiza la sesión en memoria para que el análisis
+        comience desde una posición ya calibrada.
+        """
+        from src.patterns.roi import roi_path, load_roi, ROI
+        import json as _json
+
+        tols = load_tolerances(model, scanner_id=self._id)
+        if not tols.get("roi_precal_enabled", True):
+            return
+        if not tols.get("roi_recenter_enabled", False):
+            return
+
+        n_frames   = int(tols.get("roi_precal_frames", 8))
+        max_iters  = int(tols.get("roi_precal_max_iters", 4))
+        threshold  = float(tols.get("roi_precal_threshold_px", tols.get("roi_recenter_trigger_delta_px", 6.0)))
+        overshoot  = int(tols.get("roi_precal_overshoot_px", 3))
+        resize_mode = str(tols.get("roi_recenter_mode", "resize")) == "resize"
+        max_growth = float(tols.get("roi_recenter_max_width_growth_px", 60.0))
+
+        logger.info("[%s] ROI pre-cal: iniciando (max %d iters, umbral %.1fpx)", self._id, max_iters, threshold)
+
+        for iteration in range(max_iters):
+            if self._stop_event.is_set():
+                break
+
+            shifts = []
+            for _ in range(n_frames):
+                if self._stop_event.is_set():
+                    break
+                frame = self._camera.get_frame()
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                result = session.inspect_frame(frame, force=True)
+                if result is None:
+                    continue
+                ri = getattr(result, "roi_info", None)
+                if ri is not None and ri.shift_x is not None:
+                    shifts.append(float(ri.shift_x))
+
+            if not shifts:
+                logger.warning("[%s] ROI pre-cal: no se obtuvieron frames válidos", self._id)
+                break
+
+            avg_shift = sum(shifts) / len(shifts)
+            logger.info(
+                "[%s] ROI pre-cal iter %d/%d: shift_x medio=%.1fpx (%d frames)",
+                self._id, iteration + 1, max_iters, avg_shift, len(shifts),
+            )
+
+            if abs(avg_shift) < threshold:
+                logger.info("[%s] ROI pre-cal: ROI bien calibrada (shift=%.1fpx < %.1fpx)", self._id, avg_shift, threshold)
+                break
+
+            # Leer ROI actual del preloaded de la sesión
+            current_roi: ROI | None = session._preloaded.get("roi")
+            if current_roi is None:
+                current_roi = load_roi(model, self._id)
+            if current_roi is None:
+                logger.warning("[%s] ROI pre-cal: no hay ROI definida, saltando", self._id)
+                break
+
+            # Magnitud de corrección con overshoot para dar margen
+            direction = 1 if avg_shift > 0 else -1
+            magnitude = int(round(abs(avg_shift))) + overshoot
+
+            if resize_mode:
+                # Expande el borde en la dirección del drift
+                growth = min(magnitude, max(0.0, max_growth - (current_roi.w - (session._preloaded.get("saved_roi") or current_roi).w)))
+                if growth < 1:
+                    logger.info("[%s] ROI pre-cal: limite de crecimiento alcanzado, deteniendo", self._id)
+                    break
+                if direction > 0:
+                    new_w = current_roi.w + int(growth)
+                    new_x = current_roi.x
+                else:
+                    expand = min(int(growth), current_roi.x)
+                    new_x = current_roi.x - expand
+                    new_w = current_roi.w + expand
+                new_roi = ROI(x=new_x, y=current_roi.y, w=new_w, h=current_roi.h)
+                logger.info("[%s] ROI pre-cal: resize %+dpx borde %s -> x=%d w=%d",
+                            self._id, int(growth) * direction,
+                            "derecho" if direction > 0 else "izquierdo",
+                            new_x, new_w)
+            else:
+                # Modo move: desplaza toda la ventana
+                correction = direction * magnitude
+                new_x = max(0, current_roi.x + correction)
+                new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
+                logger.info("[%s] ROI pre-cal: move %+dpx -> x=%d", self._id, correction, new_x)
+
+            if new_roi == current_roi:
+                logger.info("[%s] ROI pre-cal: sin cambio efectivo, deteniendo", self._id)
+                break
+
+            # Persistir en disco
+            p = roi_path(model, self._id)
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(
+                    _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                logger.error("[%s] ROI pre-cal: error escribiendo roi.json: %s", self._id, exc)
+                break
+
+            # Actualizar sesión en memoria
+            session._preloaded["roi"] = new_roi
+            session._preloaded["saved_roi"] = new_roi
+            session._preloaded["roi_runtime_state"] = {}
+
+            logger.info("[%s] ROI pre-cal: persistido x=%d w=%d (shift fue %.1fpx)", self._id, new_roi.x, new_roi.w, avg_shift)
+
+        logger.info("[%s] ROI pre-cal: finalizada", self._id)
+
     def _continuous_loop(self) -> None:
         """Modo continuo AUTO con la misma sesion/criterios que run-folder."""
         frame_counter = 0
@@ -609,6 +742,13 @@ class ScannerController:
             self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
+
+        self._run_roi_precalibration(model_init, session)
+
+        _grace_tols = load_tolerances(model_init, scanner_id=self._id)
+        self._startup_grace_remaining = int(_grace_tols.get("startup_grace_frames", 30))
+        if self._startup_grace_remaining > 0:
+            logger.info("[%s] startup grace: %d frames sin machine_stop ni fault", self._id, self._startup_grace_remaining)
 
         while not self._stop_event.is_set():
             with self._lock:
@@ -756,15 +896,25 @@ class ScannerController:
             streak = self._nok_streak
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak
+
+            in_grace = self._startup_grace_remaining > 0
+            if in_grace:
+                self._startup_grace_remaining -= 1
+
             if getattr(result, "machine_stop", False):
-                # Virtual stop only — no FSM transition, no hardware writes.
-                # Safety rule: solenoids stay blocked; only UI/overlay/log are affected.
-                machine_stop_triggered = True
-                self._machine_stop_count += 1
+                if in_grace:
+                    logger.debug("[%s] machine_stop suprimido (grace %d)", self._id, self._startup_grace_remaining + 1)
+                else:
+                    machine_stop_triggered = True
+                    self._machine_stop_count += 1
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
-                self._state     = ScannerState.FAULT
-                fault_triggered = True
-                self._fault_count += 1
+                if in_grace:
+                    logger.debug("[%s] fault suprimido por grace period (streak=%d)", self._id, streak)
+                    self._nok_streak = 0  # reset streak para no acumular durante grace
+                else:
+                    self._state     = ScannerState.FAULT
+                    fault_triggered = True
+                    self._fault_count += 1
 
         if machine_stop_triggered:
             _ms_reason = self._derive_stop_reason(result)
@@ -848,6 +998,41 @@ class ScannerController:
 
                 threading.Thread(target=_write, daemon=True,
                                  name=f"{self._id}-ok-buf").start()
+
+        # Buffer cronológico — guarda todos los frames inspeccionados en orden
+        if self._tl_enabled and result.overlay is not None:
+            _tl_status = getattr(result, "frame_quality", "GOOD")
+            if _tl_status == "LOW_QUALITY":
+                _tl_tag = "LQ"
+            elif getattr(result, "machine_stop", False):
+                _tl_tag = "STOP"
+            elif result.status == "NOK":
+                _tl_tag = "NOK"
+            else:
+                _tl_tag = "OK"
+            _tl_slot = self._tl_write % self._tl_max
+            self._tl_write += 1
+            _tl_path = self._tl_dir / f"{_tl_slot:05d}_{_tl_tag}.jpg"
+            _tl_img  = result.overlay
+            _tl_q    = self._tl_quality
+            _tl_dir  = self._tl_dir
+
+            def _write_tl(img=_tl_img, p=_tl_path, q=_tl_q, d=_tl_dir) -> None:
+                try:
+                    d.mkdir(parents=True, exist_ok=True)
+                    # Borrar el slot anterior del mismo número si existe (puede tener distinto tag)
+                    for old in d.glob(f"{p.stem.split('_')[0]}_*.jpg"):
+                        if old != p:
+                            try:
+                                old.unlink()
+                            except Exception:
+                                pass
+                    cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, q])
+                except Exception:
+                    pass
+
+            threading.Thread(target=_write_tl, daemon=True,
+                             name=f"{self._id}-tl-buf").start()
 
     # ------------------------------------------------------------------
     # Internos

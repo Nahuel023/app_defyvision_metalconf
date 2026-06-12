@@ -108,6 +108,7 @@ class ScannerPanel(QWidget):
         self._overlay_until_ms: int = 0
         self._nok_threshold: int = 5
         self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
+        self._run_start_time: float | None = None
 
         self._build_ui()
         self._populate_models()
@@ -176,12 +177,12 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
-        # ── Tres métricas operativas: OK / ALARMAS / TOTAL ────────────
+        # ── Tres métricas operativas: OK / TIEMPO / TOTAL ────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
-        self._ok_val    = self._metric_card("OK",      "0",  _OK_CLR)
-        self._nok_val   = self._metric_card("ALARMAS", "0",  _MUTED)
-        self._total_val = self._metric_card("TOTAL",   "0",  _MUTED)
+        self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
+        self._nok_val   = self._metric_card("TIEMPO",  "00:00",  _MUTED)
+        self._total_val = self._metric_card("TOTAL",   "0",      _MUTED)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
         self._result_val = self._metric_card("ÚLTIMO",    "—",    _MUTED)
@@ -208,6 +209,12 @@ class ScannerPanel(QWidget):
         model_row.addWidget(self.model_combo, stretch=1)
         root.addLayout(model_row)
 
+        # ── RESET FALLA — aparece encima de INICIAR/DETENER al detenerse ──
+        self.reset_btn = self._primary_btn("↺  RESET FALLA", "#b45309")
+        self.reset_btn.clicked.connect(self._on_reset)
+        self.reset_btn.setVisible(False)
+        root.addWidget(self.reset_btn)
+
         # ── Botones principales: INICIAR / DETENER ────────────────────
         main_btn_row = QHBoxLayout()
         main_btn_row.setSpacing(8)
@@ -218,18 +225,6 @@ class ScannerPanel(QWidget):
         main_btn_row.addWidget(self.start_btn)
         main_btn_row.addWidget(self.stop_btn)
         root.addLayout(main_btn_row)
-
-        # ── Reset + Simular (fila inferior secundaria) ────────────────
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
-        self.reset_btn = self._secondary_btn("↺  RESET FALLA", "#3b82f6")
-        self.reset_btn.clicked.connect(self._on_reset)
-        sim_btn = self._secondary_btn("⚡  Simular parada", "#d29922")
-        sim_btn.clicked.connect(self._on_simulate_stop)
-        bottom_row.addWidget(self.reset_btn)
-        bottom_row.addStretch()
-        bottom_row.addWidget(sim_btn)
-        root.addLayout(bottom_row)
 
         self._refresh_buttons(ScannerState.IDLE)
 
@@ -409,9 +404,15 @@ class ScannerPanel(QWidget):
         self._ok_val[1].setText(str(ok_cnt))
         self._ok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{ok_c};background:transparent;")
 
-        fault_c = _NOK_CLR if fault_cnt > 0 else _MUTED
-        self._nok_val[1].setText(str(fault_cnt))
-        self._nok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{fault_c};background:transparent;")
+        if self._run_start_time is not None and state == ScannerState.RUNNING:
+            elapsed = int(time.monotonic() - self._run_start_time)
+            h, rem = divmod(elapsed, 3600)
+            m, sec = divmod(rem, 60)
+            time_txt = f"{h:02d}:{m:02d}:{sec:02d}" if h > 0 else f"{m:02d}:{sec:02d}"
+        else:
+            time_txt = "00:00"
+        self._nok_val[1].setText(time_txt)
+        self._nok_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{_MUTED};background:transparent;")
 
         # ÚLTIMO: salud temporal del sistema
         if state == ScannerState.STOPPED:
@@ -462,16 +463,19 @@ class ScannerPanel(QWidget):
 
     def _on_start(self) -> None:
         self._feedback(self.start_btn, "▶  INICIAR", "#1a6b3a", "● Iniciando...")
-        if not self._scanner.start():
+        if self._scanner.start():
+            self._run_start_time = time.monotonic()
+        else:
             QMessageBox.warning(self, "Iniciar", f"No se pudo iniciar {self._id}.")
 
     def _on_stop(self) -> None:
         self._feedback(self.stop_btn, "■  DETENER", "#7f1d1d", "● Deteniendo...")
         self._scanner.stop()
+        self._run_start_time = None
 
     def _on_reset(self) -> None:
         if self._scanner.reset():
-            self._feedback(self.reset_btn, "↺  RESET FALLA", "#1e3a5f", "● Reseteando...")
+            self._feedback(self.reset_btn, "↺  RESET FALLA", "#7c2d12", "● Reseteando...")
         else:
             QMessageBox.information(self, "Reset", "Solo disponible en estado PARADO.")
 
@@ -530,22 +534,10 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_buttons(self, state: ScannerState) -> None:
+        is_stopped = (state == ScannerState.STOPPED)
+        self.reset_btn.setVisible(is_stopped)
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
-
-        can_reset = (state == ScannerState.STOPPED)
-        self.reset_btn.setEnabled(can_reset)
-        if can_reset:
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background:#b45309; color:#ffffff; font-weight:700; "
-                "border-radius:5px; font-size:12px; border:none; padding:0 14px; }"
-                "QPushButton:hover { background:#d97706; }"
-            )
-        else:
-            self.reset_btn.setStyleSheet(
-                "QPushButton { background:transparent; color:#4b5563; font-weight:600; "
-                "border-radius:5px; font-size:11px; border:1px solid #374151; padding:0 12px; }"
-            )
 
     def _populate_models(self) -> None:
         from src.utils.model_names import DISPLAY_NAMES, to_display
@@ -846,7 +838,7 @@ class OperatorWindow(QMainWindow):
             return b
 
         metrics_btn   = _hbtn("Métricas",    "#1e40af", "#ffffff", self._open_metrics)
-        errors_btn    = _hbtn("Errores",     "#7f1d1d", "#fca5a5", self._open_errors)
+        errors_btn    = _hbtn("Grabación",   "#7f1d1d", "#fca5a5", self._open_errors)
         tolerance_btn = _hbtn("Tolerancias", "#065f46", "#6ee7b7", self._open_tolerances)
         service_btn   = _hbtn("Servicio",    "#334155", "#94a3b8", self._open_service)
 

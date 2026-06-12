@@ -33,7 +33,7 @@ if (Test-Path "build") {
 
 # Compilar
 Write-Host "`nCompilando..." -ForegroundColor Yellow
-.\.venv\Scripts\pyinstaller.exe --clean metalconf.spec
+.\.venv\Scripts\pyinstaller.exe --clean --noconfirm metalconf.spec
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR en la compilacion." -ForegroundColor Red
     exit 1

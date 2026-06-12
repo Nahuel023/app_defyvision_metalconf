@@ -67,6 +67,8 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "ok_buffer_count": 200,            # cuántos frames OK mantener por scanner
     "ok_buffer_every": 3,              # guardar 1 de cada N frames OK (throttle)
     "ok_buffer_jpeg_quality": 75,      # calidad JPEG (75 = buen balance tamaño/calidad)
+    "timeline_buffer_enabled": True,   # buffer cronológico de todos los frames (OK+NOK+LQ+STOP)
+    "timeline_buffer_count": 500,      # últimos N frames a mantener por scanner
     # ─────────────────────────────────────────────────────────────────────
     "events_enabled": False,           # activar en producción
     "events_max_disk_gb": 10.0,        # presupuesto total de data/events
@@ -112,6 +114,18 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_recenter_streak_frames": 6,
     "roi_recenter_step_px": 1.0,
     "roi_recenter_max_total_shift_px": 40.0,
+    "roi_recenter_urgent_delta_px": 15.0,    # drift >= este valor actua al toque (streak=1)
+    "roi_recenter_cooldown_frames": 15,      # frames de pausa tras primera correccion (~3s a 5fps)
+    "roi_recenter_cooldown_max_frames": 120, # techo del cooldown (~24s a 5fps)
+    "roi_recenter_cooldown_mult": 2.0,       # multiplicador del cooldown por cada correccion
+    "roi_recenter_mode": "resize",           # "move" = desplaza x; "resize" = expande el borde
+    "roi_recenter_max_width_growth_px": 60.0,# maximo crecimiento total del ancho en modo resize
+    "roi_precal_enabled": True,              # pre-calibrar ROI antes de iniciar el loop de inspeccion
+    "roi_precal_frames": 8,                  # frames a capturar por iteracion de pre-cal
+    "roi_precal_max_iters": 4,               # maximas iteraciones de correccion pre-inicio
+    "roi_precal_threshold_px": 10.0,        # shift medio (px) que dispara correccion en pre-cal
+    "roi_precal_overshoot_px": 3,           # pixeles extra sobre el shift medido (margen de seguridad)
+    "startup_grace_frames": 30,             # frames iniciales sin machine_stop ni fault (da tiempo al roi_recenter)
     # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
     # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
     "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides

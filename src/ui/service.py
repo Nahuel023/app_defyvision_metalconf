@@ -492,8 +492,14 @@ class PLCDiagTab(QWidget):
                 )
 
     def _toggle(self, idx: int) -> None:
-        self._plc.write_coil(idx, not self._y_vals[idx])
-        logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if not self._y_vals[idx] else 'OFF'}")
+        if self._y_name.get(idx) == "solenoid":
+            logger.warning(f"[SAFETY] Toggle bloqueado: Y{idx} es solenoide")
+            return
+        new_val = not self._y_vals[idx]
+        if self._y_name.get(idx) == "solenoid" and new_val:
+            return
+        self._plc.write_coil(idx, new_val)
+        logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if new_val else 'OFF'}")
 
 
 # ==================================================================
@@ -2100,8 +2106,8 @@ class RecordingTab(QWidget):
         scale   = thumb_w / W
         thumb   = cv2.resize(vis, (thumb_w, int(H * scale)), interpolation=cv2.INTER_AREA)
         th, tw  = thumb.shape[:2]
-        rgb     = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888)
+        rgb     = np.ascontiguousarray(cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB))
+        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888).copy()
         pix     = QPixmap.fromImage(qimg)
         self._roi_preview_lbl.setPixmap(
             pix.scaled(
@@ -2128,8 +2134,65 @@ class RecordingTab(QWidget):
         path = roi_path(internal, scanner_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
-        self._roi_status_lbl.setText(f"Guardado: {path}")
+        self._roi_status_lbl.setText("ROI guardado — reconstruyendo patrón…")
         self._refresh_current_roi_label()
+
+        # Reconstruir patrón automáticamente con el frame actual de calibración
+        frame_copy = self._roi_frame.copy()
+        self._rebuild_pattern_async(frame_copy, internal, scanner_id)
+
+    def _rebuild_pattern_async(self, frame, model: str, scanner_id) -> None:
+        """Reconstruye holes.json en background usando el frame de calibración."""
+        import tempfile, os, cv2
+
+        class _RebuildWorker(QThread):
+            done = pyqtSignal(str, bool)   # (mensaje, ok)
+
+            def __init__(self, frame, model, scanner_id):
+                super().__init__()
+                self._frame      = frame
+                self._model      = model
+                self._scanner_id = scanner_id
+
+            def run(self):
+                tmp = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                        tmp = f.name
+                    cv2.imwrite(tmp, self._frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    from src.patterns.pattern_build import build_pattern_from_image
+                    out = build_pattern_from_image(
+                        self._model,
+                        Path(tmp),
+                        scanner_id=self._scanner_id,
+                    )
+                    self.done.emit(f"ROI y patrón guardados → {out.name}", True)
+                except Exception as exc:
+                    self.done.emit(f"ROI guardado · Error reconstruyendo patrón: {exc}", False)
+                finally:
+                    if tmp and os.path.exists(tmp):
+                        os.unlink(tmp)
+
+        worker = _RebuildWorker(frame, model, scanner_id)
+        # Capturar scanner_id en closure para invalidar cache al terminar
+        _sid = scanner_id
+        def _on_done(msg: str, ok: bool) -> None:
+            if hasattr(self, "_roi_status_lbl"):
+                self._on_rebuild_done(msg, ok)
+            if ok and _sid and hasattr(self, "_system"):
+                try:
+                    self._system.scanner(_sid).reload_cache()
+                except Exception:
+                    pass
+        worker.done.connect(_on_done)
+        worker.done.connect(lambda *_: worker.deleteLater())
+        self._rebuild_worker = worker   # retener referencia
+        worker.start()
+
+    def _on_rebuild_done(self, msg: str, ok: bool) -> None:
+        color = "#22c55e" if ok else "#f87171"
+        self._roi_status_lbl.setText(msg)
+        self._roi_status_lbl.setStyleSheet(f"color:{color};font-size:11px;")
 
     # ------------------------------------------------------------------ ROI live camera
 
@@ -2251,6 +2314,8 @@ class RecordingTab(QWidget):
             self._roi_status_lbl.setText("")
 
     def _roi_grab_live(self) -> None:
+        if not self._roi_live_active:
+            return
         sid = self._roi_scanner_combo.currentText()
         try:
             cam = self._system.camera(sid)
@@ -2429,9 +2494,9 @@ class RecordingTab(QWidget):
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(400, rect.height() - 4)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         fh, fw = rgb.shape[:2]
-        qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888).copy()
         pxm = QPixmap.fromImage(qi).scaled(
             w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -3342,8 +3407,10 @@ class RecordingTab(QWidget):
     def _show_frame(self, idx: int) -> None:
         if not self._frame_paths:
             return
-        first_load = self._current_idx == 0 and idx == 0 and self._img_view.current_pixmap() is None
         idx = max(0, min(idx, len(self._frame_paths) - 1))
+        if idx >= len(self._frame_paths):
+            return
+        first_load = self._current_idx == 0 and idx == 0 and self._img_view.current_pixmap() is None
         self._current_idx = idx
 
         show_ov = self._overlay_toggle.isChecked() and idx < len(self._results)
@@ -3358,9 +3425,9 @@ class RecordingTab(QWidget):
 
             if bgr is not None:
                 # cv2.cvtColor is faster than numpy channel-flip for large images.
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
                 h, w = rgb.shape[:2]
-                qi  = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                qi  = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
                 pxm = QPixmap.fromImage(qi)
 
                 # Store in cache; evict entries farthest from current index when full.
@@ -3950,6 +4017,32 @@ class RecordingTab(QWidget):
 # Evidencias / Eventos
 # ==================================================================
 
+class _EvOverlayWorker(QThread):
+    """Corre inspect_image en background y emite (idx, QPixmap) con el overlay."""
+    done = pyqtSignal(int, QPixmap)
+
+    def __init__(self, idx: int, path: Path, model: str, scanner_id: str, parent=None):
+        super().__init__(parent)
+        self._idx = idx
+        self._path = path
+        self._model = model
+        self._scanner_id = scanner_id
+
+    def run(self):
+        try:
+            from src.inspection import inspect_image
+            result = inspect_image(self._model, str(self._path),
+                                   scanner_id=self._scanner_id)
+            ov = result.overlay
+            if ov is not None:
+                rgb = np.ascontiguousarray(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB))
+                h, w = rgb.shape[:2]
+                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+                self.done.emit(self._idx, QPixmap.fromImage(qi))
+        except Exception:
+            pass
+
+
 @dataclass
 class _EventEntry:
     folder: Path
@@ -3978,6 +4071,9 @@ class EventBrowserTab(QWidget):
         self._current_idx = 0
         self._px_cache: dict[int, QPixmap] = {}
         self._px_cache_max = 18
+        self._show_overlay: bool = False
+        self._ov_cache: dict[int, QPixmap] = {}
+        self._overlay_worker: Optional[_EvOverlayWorker] = None
         self._build_ui()
         self._refresh_events()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -4015,12 +4111,15 @@ class EventBrowserTab(QWidget):
         self._btn_latest_event = self._mk_btn("Ir al último", "#0f766e", h=36, fs=11)
         self._btn_open_folder = self._mk_btn("Abrir carpeta", "#374151", h=36, fs=11)
         self._btn_delete_event = self._mk_btn("Borrar evento", "#991b1b", h=36, fs=11)
+        self._btn_delete_frame = self._mk_btn("Borrar frame", "#7f1d1d", h=36, fs=11)
         self._btn_open_folder.setEnabled(False)
         self._btn_delete_event.setEnabled(False)
+        self._btn_delete_frame.setEnabled(False)
         row1.addWidget(self._btn_refresh_events)
         row1.addWidget(self._btn_latest_event)
         row1.addWidget(self._btn_open_folder)
         row1.addWidget(self._btn_delete_event)
+        row1.addWidget(self._btn_delete_frame)
         row1.addSpacing(12)
 
         self._storage_lbl = self._metric_badge("Uso: 0 B / 10.0 GB", _TEXT, _DARK, _BORDER)
@@ -4063,6 +4162,7 @@ class EventBrowserTab(QWidget):
         self._btn_latest_event.clicked.connect(self._go_to_latest)
         self._btn_open_folder.clicked.connect(self._open_current_folder)
         self._btn_delete_event.clicked.connect(self._delete_current_event)
+        self._btn_delete_frame.clicked.connect(self._delete_current_frame)
         self._scanner_filter.currentTextChanged.connect(self._apply_filters)
         self._type_filter.currentTextChanged.connect(self._apply_filters)
         self._search_edit.textChanged.connect(self._apply_filters)
@@ -4181,6 +4281,13 @@ class EventBrowserTab(QWidget):
         self._btn_event_next10 = _nav_btn("+10  >>", w=74, fs=11)
         self._btn_event_last = _nav_btn(">|", w=40, pad=0)
         self._btn_event_fit = _nav_btn("Ajustar", w=86, bg="#0f766e", bd="#0f766e", hv="#0d9488", fs=11)
+        self._btn_event_overlay = _nav_btn("OVERLAY", w=96, fs=11)
+        self._btn_event_overlay.setCheckable(True)
+        self._btn_event_overlay.setChecked(False)
+        self._btn_event_overlay.setStyleSheet(
+            self._btn_event_overlay.styleSheet()
+            + f"QPushButton:checked {{ background:{_ACCENT}; color:#ffffff; border-color:{_ACCENT}; }}"
+        )
 
         for btn in (
             self._btn_event_first, self._btn_event_prev10, self._btn_event_prev,
@@ -4195,6 +4302,15 @@ class EventBrowserTab(QWidget):
         self._btn_event_next10.clicked.connect(lambda: self._show_event_frame(self._current_idx + 10))
         self._btn_event_last.clicked.connect(lambda: self._show_event_frame(len(self._frame_paths) - 1))
         self._btn_event_fit.clicked.connect(lambda: self._event_img_view.fit())
+        self._btn_event_overlay.clicked.connect(self._on_overlay_toggled)
+
+        # Scanner selector para análisis overlay
+        _sc_lbl = QLabel("Scanner:")
+        _sc_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:600;")
+        self._overlay_scanner_combo = self._make_combo(
+            self._system.scanner_ids(), min_w=110
+        )
+        self._overlay_scanner_combo.currentTextChanged.connect(self._on_overlay_scanner_changed)
 
         nav.addWidget(self._btn_event_first)
         nav.addWidget(self._btn_event_prev10)
@@ -4207,6 +4323,10 @@ class EventBrowserTab(QWidget):
         nav.addWidget(self._btn_event_last)
         nav.addSpacing(10)
         nav.addWidget(self._btn_event_fit)
+        nav.addWidget(self._btn_event_overlay)
+        nav.addSpacing(8)
+        nav.addWidget(_sc_lbl)
+        nav.addWidget(self._overlay_scanner_combo)
         nav.addStretch()
         return nav
 
@@ -4353,6 +4473,10 @@ class EventBrowserTab(QWidget):
         self._frame_paths = self._discover_event_frames(entry.folder)
         self._current_idx = 0
         self._px_cache.clear()
+        self._ov_cache.clear()
+        if self._overlay_worker is not None and self._overlay_worker.isRunning():
+            self._overlay_worker.done.disconnect()
+            self._overlay_worker.quit()
 
         self._event_title_lbl.setText(entry.name)
         dt_txt = entry.event_dt.strftime("%d-%m-%Y %H:%M:%S") if entry.event_dt else "-"
@@ -4367,8 +4491,16 @@ class EventBrowserTab(QWidget):
                 f"Motivo:     {entry.reason or '-'}",
             ])
         )
+
+        # Sincronizar combo de scanner con el del evento (sin disparar recarga)
+        if entry.scanner_id in self._system.scanner_ids():
+            self._overlay_scanner_combo.blockSignals(True)
+            self._overlay_scanner_combo.setCurrentText(entry.scanner_id)
+            self._overlay_scanner_combo.blockSignals(False)
+
         self._btn_open_folder.setEnabled(True)
         self._btn_delete_event.setEnabled(True)
+        self._btn_delete_frame.setEnabled(bool(self._frame_paths))
 
         if self._frame_paths:
             self._frame_slider.blockSignals(True)
@@ -4394,25 +4526,38 @@ class EventBrowserTab(QWidget):
         idx = max(0, min(idx, len(self._frame_paths) - 1))
         self._current_idx = idx
 
-        pxm = self._px_cache.get(idx)
-        if pxm is None:
-            bgr = cv2.imread(str(self._frame_paths[idx]))
-            if bgr is not None:
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-                h, w = rgb.shape[:2]
-                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
-                pxm = QPixmap.fromImage(qi)
-                self._px_cache[idx] = pxm
-                if len(self._px_cache) > self._px_cache_max:
-                    keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
-                    for key in keys[self._px_cache_max // 2:]:
-                        del self._px_cache[key]
-            else:
-                self._event_img_view.clear("No se pudo leer la imagen seleccionada")
+        # ── Overlay mode ──────────────────────────────────────────────
+        if self._show_overlay and self._current_entry is not None:
+            ov_pxm = self._ov_cache.get(idx)
+            sc_sel = self._overlay_scanner_combo.currentText()
+            if ov_pxm is not None:
+                prev = self._event_img_view.current_pixmap()
+                needs_fit = prev is None or prev.size() != ov_pxm.size()
+                self._event_img_view.set_pixmap(ov_pxm, auto_fit=needs_fit)
                 self._events_status_lbl.setText(
-                    f"Frame ilegible: {self._frame_paths[idx].name}"
+                    f"Overlay · {sc_sel} · {self._scanner_model(sc_sel)}"
                 )
+            else:
+                # Mostrar frame crudo mientras se analiza
+                raw_pxm = self._load_raw_pixmap(idx)
+                if raw_pxm is not None:
+                    prev = self._event_img_view.current_pixmap()
+                    needs_fit = prev is None or prev.size() != raw_pxm.size()
+                    self._event_img_view.set_pixmap(raw_pxm, auto_fit=needs_fit)
+                self._events_status_lbl.setText(
+                    f"Analizando con {sc_sel} · {self._scanner_model(sc_sel)}…"
+                )
+                self._launch_overlay_worker(idx)
+            self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
+            self._frame_file_lbl.setText(self._frame_paths[idx].name)
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setValue(idx)
+            self._frame_slider.blockSignals(False)
+            self._update_event_nav_state()
+            return
 
+        # ── Raw mode ──────────────────────────────────────────────────
+        pxm = self._load_raw_pixmap(idx)
         if pxm is not None:
             prev = self._event_img_view.current_pixmap()
             needs_fit = prev is None or prev.size() != pxm.size()
@@ -4420,6 +4565,9 @@ class EventBrowserTab(QWidget):
             self._events_status_lbl.setText(
                 f"Mostrando {self._current_entry.name if self._current_entry else '-'}"
             )
+        else:
+            self._event_img_view.clear("No se pudo leer la imagen seleccionada")
+            self._events_status_lbl.setText(f"Frame ilegible: {self._frame_paths[idx].name}")
 
         self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")
         self._frame_file_lbl.setText(self._frame_paths[idx].name)
@@ -4427,6 +4575,62 @@ class EventBrowserTab(QWidget):
         self._frame_slider.setValue(idx)
         self._frame_slider.blockSignals(False)
         self._update_event_nav_state()
+
+    def _load_raw_pixmap(self, idx: int) -> Optional[QPixmap]:
+        pxm = self._px_cache.get(idx)
+        if pxm is None:
+            bgr = cv2.imread(str(self._frame_paths[idx]))
+            if bgr is None:
+                return None
+            rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+            h, w = rgb.shape[:2]
+            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
+            pxm = QPixmap.fromImage(qi)
+            self._px_cache[idx] = pxm
+            if len(self._px_cache) > self._px_cache_max:
+                keys = sorted(self._px_cache.keys(), key=lambda key: abs(key - idx), reverse=True)
+                for key in keys[self._px_cache_max // 2:]:
+                    del self._px_cache[key]
+        return pxm
+
+    def _launch_overlay_worker(self, idx: int) -> None:
+        if self._overlay_worker is not None and self._overlay_worker.isRunning():
+            self._overlay_worker.done.disconnect()
+            self._overlay_worker.quit()
+        scanner_id = self._overlay_scanner_combo.currentText()
+        model = self._scanner_model(scanner_id)
+        worker = _EvOverlayWorker(idx, self._frame_paths[idx], model, scanner_id)
+        worker.done.connect(self._on_overlay_done)
+        self._overlay_worker = worker
+        worker.start()
+
+    def _on_overlay_done(self, idx: int, pxm: QPixmap) -> None:
+        self._ov_cache[idx] = pxm
+        if idx == self._current_idx and self._show_overlay:
+            prev = self._event_img_view.current_pixmap()
+            needs_fit = prev is None or prev.size() != pxm.size()
+            self._event_img_view.set_pixmap(pxm, auto_fit=needs_fit)
+            scanner_id = self._overlay_scanner_combo.currentText()
+            model = self._scanner_model(scanner_id)
+            self._events_status_lbl.setText(f"Overlay · {scanner_id} · {model}")
+
+    def _on_overlay_toggled(self) -> None:
+        self._show_overlay = self._btn_event_overlay.isChecked()
+        self._show_event_frame(self._current_idx)
+
+    def _on_overlay_scanner_changed(self, _scanner_id: str) -> None:
+        """Al cambiar el scanner para análisis: invalidar cache de overlays y re-analizar."""
+        self._ov_cache.clear()
+        if self._show_overlay:
+            self._show_event_frame(self._current_idx)
+
+    def _scanner_model(self, scanner_id: str) -> str:
+        try:
+            import yaml
+            cfg = yaml.safe_load((_ROOT / "config" / "io_map.yaml").read_text(encoding="utf-8"))
+            return cfg.get(scanner_id, {}).get("model", "modelo_A")
+        except Exception:
+            return "modelo_A"
 
     def _on_slider_changed(self, value: int) -> None:
         self._show_event_frame(value)
@@ -4476,6 +4680,48 @@ class EventBrowserTab(QWidget):
         except Exception as exc:
             QMessageBox.warning(self, "Borrar evidencia", f"No se pudo borrar:\n{exc}")
 
+    def _delete_current_frame(self) -> None:
+        if not self._frame_paths or self._current_idx >= len(self._frame_paths):
+            return
+        path = self._frame_paths[self._current_idx]
+        answer = QMessageBox.question(
+            self, "Borrar frame",
+            f"¿Borrar '{path.name}'?\nEsta acción no se puede deshacer.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            path.unlink(missing_ok=True)
+            logger.info(f"[Evidencias] frame eliminado: {path.name}")
+            self._frame_paths.pop(self._current_idx)
+            self._px_cache.pop(self._current_idx, None)
+            self._ov_cache.pop(self._current_idx, None)
+            # Re-indexar caches
+            self._px_cache = {(k if k < self._current_idx else k - 1): v
+                              for k, v in self._px_cache.items()}
+            self._ov_cache = {(k if k < self._current_idx else k - 1): v
+                              for k, v in self._ov_cache.items()}
+            if not self._frame_paths:
+                self._event_img_view.clear("No hay más frames en este evento")
+                self._event_nav_lbl.setText("0 / 0")
+                self._frame_file_lbl.setText("-")
+                self._frame_slider.blockSignals(True)
+                self._frame_slider.setEnabled(False)
+                self._frame_slider.setRange(0, 0)
+                self._frame_slider.blockSignals(False)
+                self._btn_delete_frame.setEnabled(False)
+                self._update_event_nav_state()
+                return
+            self._frame_slider.blockSignals(True)
+            self._frame_slider.setRange(0, len(self._frame_paths) - 1)
+            self._frame_slider.blockSignals(False)
+            next_idx = min(self._current_idx, len(self._frame_paths) - 1)
+            self._show_event_frame(next_idx)
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo borrar:\n{exc}")
+
     def _clear_event_selection(self, placeholder: str) -> None:
         self._current_entry = None
         self._frame_paths = []
@@ -4483,6 +4729,7 @@ class EventBrowserTab(QWidget):
         self._px_cache.clear()
         self._btn_open_folder.setEnabled(False)
         self._btn_delete_event.setEnabled(False)
+        self._btn_delete_frame.setEnabled(False)
         self._event_title_lbl.setText("Seleccione una evidencia")
         self._event_meta_lbl.setText("Sin datos")
         self._event_nav_lbl.setText("0 / 0")
@@ -5572,7 +5819,7 @@ class CameraCalibTab(QWidget):
             if slot == self._ip_slot:
                 self._ip_capture_status.setStyleSheet(f"color:{_WARN};font-size:11px;")
                 self._ip_capture_status.setText(f"Diag: {out_path.name}")
-                QTimer.singleShot(5000, lambda: self._ip_capture_status.setText(""))
+                QTimer.singleShot(5000, lambda: hasattr(self, "_ip_capture_status") and self._ip_capture_status.setText(""))
         except Exception:
             logger.exception("No se pudo guardar snapshot diagnostico IP")
 
@@ -5608,6 +5855,8 @@ class CameraCalibTab(QWidget):
             self._show_ip_frame(frame)
 
     def _refresh_ip_camera(self, slot: int) -> None:
+        if slot < 0 or slot >= len(self._ip_caps):
+            return
         cap = self._ip_caps[slot]
         if cap is None or not cap.isOpened():
             self._disconnect_ip_slot(slot)
@@ -5623,9 +5872,9 @@ class CameraCalibTab(QWidget):
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(420, rect.height() - 4)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         fh, fw = rgb.shape[:2]
-        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888).copy()
         pxm = QPixmap.fromImage(qi).scaled(
             w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -5648,7 +5897,7 @@ class CameraCalibTab(QWidget):
             self._ip_capture_status.setStyleSheet(f"color:{_OK};font-size:11px;")
             self._ip_capture_status.setText(f"Guardado: {out_path.name}")
             # Limpiar el mensaje después de 4 segundos
-            QTimer.singleShot(4000, lambda: self._ip_capture_status.setText(""))
+            QTimer.singleShot(4000, lambda: hasattr(self, "_ip_capture_status") and self._ip_capture_status.setText(""))
         except Exception as exc:
             self._ip_capture_status.setStyleSheet(f"color:{_NOK};font-size:11px;")
             self._ip_capture_status.setText(f"Error: {exc}")
@@ -5694,7 +5943,7 @@ class CameraCalibTab(QWidget):
 
         self._ip_save_status.setStyleSheet(f"color:{_OK};font-size:11px;")
         self._ip_save_status.setText("Guardado — se conectará al iniciar")
-        QTimer.singleShot(3000, lambda: self._ip_save_status.setText(""))
+        QTimer.singleShot(3000, lambda: hasattr(self, "_ip_save_status") and self._ip_save_status.setText(""))
 
     def _auto_connect_all_slots(self) -> None:
         """Conecta ambas cámaras IP al abrir la pestaña usando los ajustes guardados."""
@@ -5823,8 +6072,8 @@ class CameraCalibTab(QWidget):
         if frame is None:
             return
         h, w = frame.shape[:2]
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         pix = QPixmap.fromImage(img)
         target = self._preview_lbl.size()
         self._preview_lbl.setPixmap(

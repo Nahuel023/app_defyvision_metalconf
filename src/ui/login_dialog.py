@@ -111,7 +111,6 @@ class LoginDialog(QDialog):
             "background:#1d4ed8;color:white;border-radius:5px;"
             "font-size:12px;font-weight:700;padding:0 20px;border:none;"
         )
-        ok_btn.setDefault(True)
         ok_btn.clicked.connect(self._on_accept)
 
         btn_row.addWidget(cancel_btn)

@@ -80,30 +80,6 @@ _PARAMS: list[dict[str, Any]] = [
         vmin=2, vmax=20, vstep=1,
     ),
     dict(
-        key="tol_xy_px",
-        label="Tolerancia de posición",
-        desc=(
-            "Margen en píxeles para considerar un agujero como detectado correctamente. "
-            "Subir si hay demasiados falsos faltantes; bajar si se pierden defectos reales."
-        ),
-        unit="px",
-        vtype="float",
-        vmin=5.0, vmax=40.0, vstep=1.0,
-        decimals=1,
-    ),
-    dict(
-        key="tilt_warn_deg",
-        label="Inclinación máxima de la chapa",
-        desc=(
-            "Si la chapa se inclina más de este ángulo, se marca como CHAPA INCLINADA. "
-            "0 = solo medir, nunca avisar."
-        ),
-        unit="°",
-        vtype="float",
-        vmin=0.0, vmax=10.0, vstep=0.5,
-        decimals=1,
-    ),
-    dict(
         key="consecutive_nok_frames",
         label="Frames NOK para FAULT",
         desc=(
