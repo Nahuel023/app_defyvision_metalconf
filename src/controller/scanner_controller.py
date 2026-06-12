@@ -86,6 +86,7 @@ class ScannerController:
         self._max_nok_streak:    int       = 0
         self._fault_count:       int       = 0
         self._machine_stop_count: int      = 0
+        self._startup_grace_remaining: int = 0
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
         self._last_position_diff: float    = 0.0
@@ -727,6 +728,11 @@ class ScannerController:
 
         self._run_roi_precalibration(model_init, session)
 
+        _grace_tols = load_tolerances(model_init, scanner_id=self._id)
+        self._startup_grace_remaining = int(_grace_tols.get("startup_grace_frames", 30))
+        if self._startup_grace_remaining > 0:
+            logger.info("[%s] startup grace: %d frames sin machine_stop ni fault", self._id, self._startup_grace_remaining)
+
         while not self._stop_event.is_set():
             with self._lock:
                 if self._state != ScannerState.RUNNING:
@@ -873,15 +879,25 @@ class ScannerController:
             streak = self._nok_streak
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak
+
+            in_grace = self._startup_grace_remaining > 0
+            if in_grace:
+                self._startup_grace_remaining -= 1
+
             if getattr(result, "machine_stop", False):
-                # Virtual stop only — no FSM transition, no hardware writes.
-                # Safety rule: solenoids stay blocked; only UI/overlay/log are affected.
-                machine_stop_triggered = True
-                self._machine_stop_count += 1
+                if in_grace:
+                    logger.debug("[%s] machine_stop suprimido (grace %d)", self._id, self._startup_grace_remaining + 1)
+                else:
+                    machine_stop_triggered = True
+                    self._machine_stop_count += 1
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
-                self._state     = ScannerState.FAULT
-                fault_triggered = True
-                self._fault_count += 1
+                if in_grace:
+                    logger.debug("[%s] fault suprimido por grace period (streak=%d)", self._id, streak)
+                    self._nok_streak = 0  # reset streak para no acumular durante grace
+                else:
+                    self._state     = ScannerState.FAULT
+                    fault_triggered = True
+                    self._fault_count += 1
 
         if machine_stop_triggered:
             _ms_reason = self._derive_stop_reason(result)
