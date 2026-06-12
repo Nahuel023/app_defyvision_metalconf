@@ -48,6 +48,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 175 - ROI slow EMA: correccion de baseline para ROI angosta
+
+**Problema:** la version anterior comparaba el EMA contra threshold absoluto (15px).
+Para scanner_2 con ROI angosta (x=225, w=205), el centro del ROI esta desplazado
+~7px del centro de la chapa por diseno. Esto hacia que el EMA arrancara fuera
+del umbral sin que hubiera drift real.
+
+**Solucion:**
+- Fase warmup (primeros `roi_slow_ema_warmup_frames` frames, default 300 = ~60s):
+  acumula media simple de shift_x para capturar el offset estatico real.
+  Al terminar: `ema_baseline = mean(shift_x durante warmup)`, se guarda en disco.
+- Produccion: drift real = `EMA - ema_baseline`. Solo se actua cuando este delta
+  supera threshold_px de forma sostenida.
+- Agrega nueva clave `roi_slow_ema_warmup_frames: 300` en DEFAULT_TOLERANCES.
+
+**Funciona correctamente para:**
+- scanner_1: ROI ancha, offset ~0px → igual comportamiento que antes
+- scanner_2: ROI angosta, offset estatico ~-7px → absorbido en el baseline
+
+**Archivos:** `src/inspection.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 174 - ROI slow EMA drift correction (auto-calibracion gradual)
 
 **Pedido:** calibracion automatica muy lenta del ROI para produccion 24/7, sin
