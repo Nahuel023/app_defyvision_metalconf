@@ -114,6 +114,10 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_recenter_streak_frames": 6,
     "roi_recenter_step_px": 1.0,
     "roi_recenter_max_total_shift_px": 40.0,
+    "roi_recenter_urgent_delta_px": 15.0,    # drift >= este valor actua al toque (streak=1)
+    "roi_recenter_cooldown_frames": 15,      # frames de pausa tras primera correccion (~3s a 5fps)
+    "roi_recenter_cooldown_max_frames": 120, # techo del cooldown (~24s a 5fps)
+    "roi_recenter_cooldown_mult": 2.0,       # multiplicador del cooldown por cada correccion
     # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
     # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
     "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides
