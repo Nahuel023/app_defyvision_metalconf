@@ -604,6 +604,108 @@ class ScannerController:
         logger.info(f"[{self._id}] selftest OK: detection_ratio={ratio:.0%}")
         return True
 
+    def _run_roi_precalibration(self, model: str, session: InspectionSession) -> None:
+        """Mide el shift_x antes de iniciar el loop y corrige el ROI si está desplazado.
+
+        Escribe roi.json y actualiza la sesión en memoria para que el análisis
+        comience desde una posición ya calibrada.
+        """
+        from src.patterns.roi import roi_path, load_roi, ROI
+        import json as _json
+
+        tols = load_tolerances(model, scanner_id=self._id)
+        if not tols.get("roi_precal_enabled", True):
+            return
+        if not tols.get("roi_recenter_enabled", False):
+            return
+
+        n_frames  = int(tols.get("roi_precal_frames", 8))
+        max_iters = int(tols.get("roi_precal_max_iters", 4))
+        threshold = float(tols.get("roi_precal_threshold_px", tols.get("roi_recenter_trigger_delta_px", 6.0)))
+        max_shift = float(tols.get("roi_recenter_max_total_shift_px", 40.0))
+
+        logger.info("[%s] ROI pre-cal: iniciando (max %d iters, umbral %.1fpx)", self._id, max_iters, threshold)
+
+        for iteration in range(max_iters):
+            if self._stop_event.is_set():
+                break
+
+            shifts = []
+            for _ in range(n_frames):
+                if self._stop_event.is_set():
+                    break
+                frame = self._camera.get_frame()
+                if frame is None:
+                    time.sleep(0.05)
+                    continue
+                result = session.inspect_frame(frame, force=True)
+                if result is None:
+                    continue
+                ri = getattr(result, "roi_info", None)
+                if ri is not None and ri.shift_x is not None:
+                    shifts.append(float(ri.shift_x))
+
+            if not shifts:
+                logger.warning("[%s] ROI pre-cal: no se obtuvieron frames válidos", self._id)
+                break
+
+            avg_shift = sum(shifts) / len(shifts)
+            logger.info(
+                "[%s] ROI pre-cal iter %d/%d: shift_x medio=%.1fpx (%d frames)",
+                self._id, iteration + 1, max_iters, avg_shift, len(shifts),
+            )
+
+            if abs(avg_shift) < threshold:
+                logger.info("[%s] ROI pre-cal: ROI bien calibrada (shift=%.1fpx < %.1fpx)", self._id, avg_shift, threshold)
+                break
+
+            # Leer ROI actual del preloaded de la sesión
+            current_roi: ROI | None = session._preloaded.get("roi")
+            if current_roi is None:
+                current_roi = load_roi(model, self._id)
+            if current_roi is None:
+                logger.warning("[%s] ROI pre-cal: no hay ROI definida, saltando", self._id)
+                break
+
+            # Calcular corrección: mover en la dirección del shift detectado
+            correction = int(round(avg_shift))
+            if max_shift > 0:
+                applied_total = abs(current_roi.x - (session._preloaded.get("saved_roi") or current_roi).x)
+                remaining = max_shift - applied_total
+                correction = int(max(-remaining, min(remaining, correction)))
+
+            if correction == 0:
+                logger.info("[%s] ROI pre-cal: corrección = 0px, deteniendo", self._id)
+                break
+
+            frame_w = shifts and getattr(session._preloaded.get("roi"), "w", None)
+            new_x = max(0, current_roi.x + correction)
+            new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
+
+            # Persistir en disco
+            p = roi_path(model, self._id)
+            try:
+                p.parent.mkdir(parents=True, exist_ok=True)
+                p.write_text(
+                    _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception as exc:
+                logger.error("[%s] ROI pre-cal: error escribiendo roi.json: %s", self._id, exc)
+                break
+
+            # Actualizar sesión en memoria
+            session._preloaded["roi"] = new_roi
+            session._preloaded["saved_roi"] = new_roi
+            session._preloaded["roi_runtime_state"] = {}
+
+            logger.info(
+                "[%s] ROI pre-cal: corregido %+dpx -> x=%d (shift fue %.1fpx)",
+                self._id, correction, new_roi.x, avg_shift,
+            )
+
+        logger.info("[%s] ROI pre-cal: finalizada", self._id)
+
     def _continuous_loop(self) -> None:
         """Modo continuo AUTO con la misma sesion/criterios que run-folder."""
         frame_counter = 0
@@ -622,6 +724,8 @@ class ScannerController:
             self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
+
+        self._run_roi_precalibration(model_init, session)
 
         while not self._stop_event.is_set():
             with self._lock:
