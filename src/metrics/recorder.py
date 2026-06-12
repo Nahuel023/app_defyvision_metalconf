@@ -113,6 +113,38 @@ class MetricsRecorder:
             logger.error(f"MetricsRecorder.query error: {exc}")
             return []
 
+    def query_recent(self, scanner_id: str, limit: int = 240) -> list[dict]:
+        """Devuelve los últimos `limit` snapshots de un scanner."""
+        try:
+            con = sqlite3.connect(self._db_path)
+            con.row_factory = sqlite3.Row
+            cur = con.execute(
+                "SELECT * FROM metrics WHERE scanner_id=? ORDER BY ts DESC LIMIT ?",
+                (scanner_id, int(limit)),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            con.close()
+            rows.reverse()
+            return rows
+        except Exception as exc:
+            logger.error(f"MetricsRecorder.query_recent error: {exc}")
+            return []
+
+    def latest_timestamp(self, scanner_id: str) -> float | None:
+        """Devuelve el timestamp del último snapshot disponible para un scanner."""
+        try:
+            con = sqlite3.connect(self._db_path)
+            cur = con.execute(
+                "SELECT MAX(ts) FROM metrics WHERE scanner_id=?",
+                (scanner_id,),
+            )
+            value = cur.fetchone()[0]
+            con.close()
+            return float(value) if value is not None else None
+        except Exception as exc:
+            logger.error(f"MetricsRecorder.latest_timestamp error: {exc}")
+            return None
+
     def available_scanners(self) -> list[str]:
         try:
             con = sqlite3.connect(self._db_path)

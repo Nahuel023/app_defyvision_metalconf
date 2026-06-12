@@ -155,6 +155,8 @@ _TIME_RANGES = [
     ("8 h",  8),
     ("24 h", 24),
     ("48 h", 48),
+    ("7 d", 168),
+    ("30 d", 720),
 ]
 
 
@@ -408,7 +410,7 @@ class _HistoricalTab(QWidget):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
         self._system  = system
-        self._hours   = 8
+        self._hours   = 168
         self._scanner = system.scanner_ids()[0] if system.scanner_ids() else ""
         self._range_btns: list[QPushButton] = []
         self._axes:   list = []
@@ -422,8 +424,13 @@ class _HistoricalTab(QWidget):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(12)
 
-        # ── barra superior ────────────────────────────────────────
-        top = QHBoxLayout()
+        top_box = QFrame()
+        top_box.setStyleSheet(
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {_SURFACE}, stop:1 {_PANEL});"
+            f"border:1px solid {_BORDER};border-radius:16px;"
+        )
+        top = QHBoxLayout(top_box)
+        top.setContentsMargins(16, 14, 16, 14)
         top.setSpacing(10)
 
         sc_lbl = QLabel("Scanner:")
@@ -464,7 +471,23 @@ class _HistoricalTab(QWidget):
         )
         ref_btn.clicked.connect(self._update_charts)
         top.addWidget(ref_btn)
-        root.addLayout(top)
+        root.addWidget(top_box)
+
+        self._hist_status = QLabel("")
+        self._hist_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hist_status.setStyleSheet(
+            f"background:{_SURFACE};color:{_MUTED};border:1px solid {_BORDER};"
+            "border-radius:12px;padding:8px 14px;font-size:11px;font-weight:700;"
+        )
+        root.addWidget(self._hist_status)
+
+        chart_box = QFrame()
+        chart_box.setStyleSheet(
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {_SURFACE}, stop:1 {_PANEL});"
+            f"border:1px solid {_BORDER};border-radius:18px;"
+        )
+        chart_lay = QVBoxLayout(chart_box)
+        chart_lay.setContentsMargins(14, 14, 14, 14)
 
         # ── área de gráficos ──────────────────────────────────────
         if _MPL:
@@ -478,7 +501,8 @@ class _HistoricalTab(QWidget):
 
             self._canvas = FigureCanvas(self._fig)
             self._canvas.setStyleSheet(f"background:{_SURFACE};")
-            root.addWidget(self._canvas, stretch=1)
+            chart_lay.addWidget(self._canvas, stretch=1)
+            root.addWidget(chart_box, stretch=1)
             self._update_charts()
         else:
             msg = QLabel(
@@ -489,7 +513,8 @@ class _HistoricalTab(QWidget):
             msg.setStyleSheet(
                 f"color:{_WARN};font-size:13px;background:{_DARK};"
             )
-            root.addWidget(msg, stretch=1)
+            chart_lay.addWidget(msg, stretch=1)
+            root.addWidget(chart_box, stretch=1)
 
     def _range_style(self, active: bool) -> str:
         bg = _ACCENT if active else _PANEL
@@ -517,6 +542,28 @@ class _HistoricalTab(QWidget):
             return
 
         rows = self._system.metrics.query(self._scanner, self._hours)
+        using_fallback = False
+        latest_ts = self._system.metrics.latest_timestamp(self._scanner)
+
+        if rows:
+            status_text = (
+                f"{self._scanner.upper()} · Ultimas {self._hours} h · "
+                f"{len(rows)} muestras"
+            )
+        elif latest_ts is not None:
+            rows = self._system.metrics.query_recent(self._scanner, limit=240)
+            using_fallback = bool(rows)
+            last_dt = datetime.fromtimestamp(latest_ts)
+            status_text = (
+                f"{self._scanner.upper()} · Sin datos en {self._hours} h · "
+                f"mostrando ultimos registros hasta {last_dt:%d/%m/%Y %H:%M}"
+            )
+        else:
+            status_text = (
+                f"{self._scanner.upper()} · Todavia no hay historial guardado"
+            )
+
+        self._hist_status.setText(status_text)
 
         for ax, (col, lbl, color, ylabel) in zip(self._axes, _CHART_DEF):
             ax.cla()
@@ -530,10 +577,14 @@ class _HistoricalTab(QWidget):
 
             if not rows:
                 ax.text(
-                    0.5, 0.5, "Sin datos aún\n(primeros datos en ~1 min)",
+                    0.5,
+                    0.5,
+                    "Sin datos historicos\ndisponibles",
                     transform=ax.transAxes,
-                    ha="center", va="center",
-                    color=_MUTED, fontsize=9,
+                    ha="center",
+                    va="center",
+                    color=_MUTED,
+                    fontsize=9,
                 )
                 continue
 
@@ -544,7 +595,8 @@ class _HistoricalTab(QWidget):
                     marker="o", markersize=3.2, zorder=3)
             ax.fill_between(xs, ys, alpha=0.14, color=color)
 
-            ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
+            time_format = "%d/%m %H:%M" if using_fallback else "%H:%M"
+            ax.xaxis.set_major_formatter(mdates.DateFormatter(time_format))
             ax.xaxis.set_major_locator(mdates.AutoDateLocator())
             self._fig.autofmt_xdate(rotation=30, ha="right")
 
