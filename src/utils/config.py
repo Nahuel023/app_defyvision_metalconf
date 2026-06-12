@@ -114,6 +114,16 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_recenter_streak_frames": 6,
     "roi_recenter_step_px": 1.0,
     "roi_recenter_max_total_shift_px": 40.0,
+    # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
+    # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
+    "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides
+    "roi_slow_ema_alpha": 0.002,         # EMA α — converge en ~500 frames (~100s a 5fps)
+    "roi_slow_ema_threshold_px": 15.0,   # drift mínimo (px) para arrancar confirmación
+    "roi_slow_ema_confirm_frames": 500,  # frames sostenidos antes de escribir 1px (~100s)
+    "roi_slow_ema_cooldown_frames": 1500,# frames de pausa entre correcciones (~5min a 5fps)
+    "roi_slow_ema_max_total_px": 40,     # máximo ±40px desde la ROI original del archivo
+    "roi_slow_ema_save_every": 300,      # guardar estado en disco cada N frames (~60s)
+    "roi_slow_ema_warmup_frames": 300,   # frames iniciales para establecer baseline estatico (~60s)
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
     "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron

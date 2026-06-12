@@ -48,6 +48,93 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 175 - ROI slow EMA: correccion de baseline para ROI angosta
+
+**Problema:** la version anterior comparaba el EMA contra threshold absoluto (15px).
+Para scanner_2 con ROI angosta (x=225, w=205), el centro del ROI esta desplazado
+~7px del centro de la chapa por diseno. Esto hacia que el EMA arrancara fuera
+del umbral sin que hubiera drift real.
+
+**Solucion:**
+- Fase warmup (primeros `roi_slow_ema_warmup_frames` frames, default 300 = ~60s):
+  acumula media simple de shift_x para capturar el offset estatico real.
+  Al terminar: `ema_baseline = mean(shift_x durante warmup)`, se guarda en disco.
+- Produccion: drift real = `EMA - ema_baseline`. Solo se actua cuando este delta
+  supera threshold_px de forma sostenida.
+- Agrega nueva clave `roi_slow_ema_warmup_frames: 300` en DEFAULT_TOLERANCES.
+
+**Funciona correctamente para:**
+- scanner_1: ROI ancha, offset ~0px → igual comportamiento que antes
+- scanner_2: ROI angosta, offset estatico ~-7px → absorbido en el baseline
+
+**Archivos:** `src/inspection.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 174 - ROI slow EMA drift correction (auto-calibracion gradual)
+
+**Pedido:** calibracion automatica muy lenta del ROI para produccion 24/7, sin
+cambios instantaneos que rompan la deteccion.
+
+**Diseño:**
+- `shift_x` de `resolve_runtime_roi` (deteccion de backlight) se acumula en un EMA
+  con alpha=0.002 (converge en ~500 frames, ~100s a 5fps).
+- Solo cuando |EMA| >= threshold (15px por defecto) se mantiene por confirm_frames
+  (500 frames = ~100s) se escribe 1px de correccion a `roi.json`.
+- Despues de cada correccion: cooldown_frames=1500 (~5 min) antes de poder corregir
+  otra vez.
+- Maximo total: ±40px desde el roi.json en disco.
+- Estado persistido en `data/patterns/{scanner}/{model}/roi_drift_state.json` para
+  sobrevivir reinicios. On restart: continua desde donde quedo.
+- Nunca modifica el ROI del frame en curso — la correccion queda efectiva a partir
+  del siguiente frame.
+- Tiempo minimo para 1px de correccion a 5fps: ~3.5 min de drift sostenido.
+- Para llegar a 40px de correccion total: minimo ~2.5 horas de drift continuo.
+
+**Activar (OFF por defecto, activar por scanner):**
+En `config/io_map.yaml`, dentro del bloque del scanner (inspection_overrides):
+```yaml
+roi_slow_ema_enabled: true
+```
+
+**Parametros ajustables (todos con defaults conservadores):**
+| Param | Default | Efecto |
+|---|---|---|
+| roi_slow_ema_alpha | 0.002 | suavidad del EMA (~500 frames para converger) |
+| roi_slow_ema_threshold_px | 15.0 | drift minimo para arrancar confirmacion |
+| roi_slow_ema_confirm_frames | 500 | frames sostenidos antes de escribir 1px |
+| roi_slow_ema_cooldown_frames | 1500 | pausa entre correcciones (~5min a 5fps) |
+| roi_slow_ema_max_total_px | 40 | max correccion total permitida |
+| roi_slow_ema_save_every | 300 | frecuencia de guardado del estado (~60s) |
+
+**Archivos:** `src/inspection.py`, `src/patterns/roi.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 173 - Panel de salud ROI en pestaña Calibración
+
+**Pedido:** mostrar la salud del ROI en la pestaña de calibración.
+
+**Comportamiento:**
+- Se muestra bajo el preview, con borde de color:
+  - Verde: drift < 10px y sin warning → "OK"
+  - Naranja: drift 10-∞px sin warning → "Drift moderado"
+  - Rojo: hay warning → muestra el texto del warning
+- Campos mostrados: Frame WxH, ROI guardada (x, w), ROI detectada (x, w), Drift X (px), Estado
+- Si no hay ROI guardada: muestra frame size + ROI detectada (si la hay)
+- Se actualiza al cargar imagen o carpeta (inmediato)
+- En modo Cámara en vivo: actualiza cada ~15 frames (~2s a 8fps) para no saturar CPU
+
+**Implementación:**
+- `_roi_health_lbl`: QLabel con fondo oscuro y borde de color dinámico
+- `_roi_refresh_health()`: llama a `resolve_runtime_roi` (o `detect_roi_from_images`
+  si no hay ROI guardada) y actualiza el label
+- `_roi_live_frame_count`: contador para throttle del health check en live
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 172 - Nombres de grabaciones incluyen scanner
 
 **Pedido:** al guardar grabaciones, incluir el scanner en el nombre de carpeta.
