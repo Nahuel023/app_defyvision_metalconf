@@ -48,6 +48,36 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 177 - Detención de máquina: cartel grande con scanner dominante y foco operario
+
+**Pedido:** hacer más estética la pantalla grande de detención de máquina y
+mostrar claramente en qué `SCANNER` ocurrió la falla para que el operario lo vea
+rápido y sin ambigüedad.
+
+**Cambios en `src/ui/operator.py`:**
+- `MachineStopDialog` rediseñado con jerarquía visual más clara:
+  - cabecera roja más alta con mejor contraste;
+  - `SCANNER X · MODELO` en un bloque central grande y muy visible;
+  - instrucción operativa explícita: revisar esa estación antes de reanudar.
+- El pie del diálogo ahora separa mejor el motivo:
+  - nuevo bloque `MOTIVO DE LA DETENCION`;
+  - razón en tipografía más grande;
+  - botón principal más grande: `CONFIRMAR Y CONTINUAR`.
+- La etiqueta enviada al diálogo desde `ScannerPanel._on_result()` quedó con
+  formato más limpio y consistente para que el scanner se lea mejor.
+
+**Resultado esperado:**
+- Cuando hay `machine_stop`, el operario identifica primero el scanner afectado,
+  luego el motivo, y recién después confirma la intervención.
+- La pantalla queda más legible a distancia y más alineada a uso en planta.
+
+**Validación:**
+- `python -m py_compile src/ui/operator.py` OK
+
+**Archivos:** `src/ui/operator.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 176 - Calibracion fina viernes 12: microperforado OK por scanner sin mezclar tolerancias
 
 **Pedido:** revisar `C:\Users\DefyC\Downloads\IMAGENES-VIERNES-12`, testear

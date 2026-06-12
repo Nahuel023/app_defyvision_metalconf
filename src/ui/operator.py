@@ -518,7 +518,7 @@ class ScannerPanel(QWidget):
             from src.utils.model_names import to_display as _td
             _num  = self._id.split("_")[-1]
             model = self._system.io.scanner_config(self._id).get("model", "")
-            label = f"SCANNER {_num}  ·  {_td(model) if model else '—'}"
+            label = f"SCANNER {_num}   ·   {_td(model) if model else '—'}"
             reason = _stop_reason(result)
             self._sig_stop_alert.emit(overlay, label, reason)
         elif result.status == "NOK":
@@ -604,53 +604,95 @@ class MachineStopDialog(QDialog):
         self.showMaximized()
 
     def _build_ui(self) -> None:
-        self.setStyleSheet("background:#0d0000;")
+        self.setStyleSheet("background:#120607;")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Banner rojo superior ──────────────────────────────────────
-        header = QLabel(f"  ⚠   DETENCIÓN DE MÁQUINA   —   {self._scanner_label}")
-        header.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header.setFixedHeight(52)
-        header.setStyleSheet(
-            "background:#7f1d1d;color:#fecaca;"
-            "font-size:22px;font-weight:700;letter-spacing:2px;padding:0 18px;"
+        # Encabezado orientado al operario: alarma + scanner bien dominante.
+        top = QFrame()
+        top.setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #7f1d1d, stop:0.6 #991b1b, stop:1 #450a0a);"
+            "border-bottom:3px solid #fecaca;"
         )
-        root.addWidget(header)
+        top_lay = QVBoxLayout(top)
+        top_lay.setContentsMargins(36, 22, 36, 22)
+        top_lay.setSpacing(10)
+
+        alarm_lbl = QLabel("DETENCION DE MAQUINA")
+        alarm_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        alarm_lbl.setStyleSheet(
+            "color:#fff1f2;font-size:24px;font-weight:800;"
+            "letter-spacing:3px;background:transparent;"
+        )
+        top_lay.addWidget(alarm_lbl)
+
+        scanner_lbl = QLabel(self._scanner_label)
+        scanner_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scanner_lbl.setStyleSheet(
+            "color:#ffffff;font-size:42px;font-weight:900;"
+            "letter-spacing:2px;background:#ffffff12;"
+            "border:2px solid #fecaca;border-radius:14px;padding:14px 20px;"
+        )
+        top_lay.addWidget(scanner_lbl)
+
+        instruction_lbl = QLabel("REVISAR ESTA ESTACION ANTES DE REANUDAR LA LINEA")
+        instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        instruction_lbl.setStyleSheet(
+            "color:#fecaca;font-size:17px;font-weight:700;"
+            "letter-spacing:1px;background:transparent;"
+        )
+        top_lay.addWidget(instruction_lbl)
+        root.addWidget(top)
 
         # ── Imagen del frame con el defecto — ocupa el máximo espacio ─
         self._img_lbl = QLabel()
         self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._img_lbl.setStyleSheet("background:#000000;")
+        self._img_lbl.setStyleSheet(
+            "background:#000000;border-top:1px solid #2b0b0b;border-bottom:1px solid #2b0b0b;"
+        )
         self._img_lbl.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         root.addWidget(self._img_lbl, stretch=1)
 
-        # ── Pie: motivo + botón ACEPTAR en la misma fila ─────────────
         footer = QWidget()
-        footer.setFixedHeight(52)
+        footer.setFixedHeight(96)
         footer.setStyleSheet("background:#1a0000;border-top:2px solid #7f1d1d;")
         foot_lay = QHBoxLayout(footer)
-        foot_lay.setContentsMargins(16, 0, 0, 0)
-        foot_lay.setSpacing(0)
+        foot_lay.setContentsMargins(26, 14, 18, 14)
+        foot_lay.setSpacing(16)
 
-        reason_lbl = QLabel(f"⚠  {self._reason}")
-        reason_lbl.setStyleSheet(
-            "color:#fca5a5;font-size:15px;font-weight:600;background:transparent;"
+        reason_box = QFrame()
+        reason_box.setStyleSheet(
+            "background:#2a0d10;border:1px solid #7f1d1d;border-radius:12px;"
         )
-        foot_lay.addWidget(reason_lbl, stretch=1)
+        reason_lay = QVBoxLayout(reason_box)
+        reason_lay.setContentsMargins(18, 10, 18, 10)
+        reason_lay.setSpacing(4)
 
-        btn = QPushButton("ACEPTAR")
-        btn.setFixedHeight(52)
-        btn.setMinimumWidth(160)
+        reason_title = QLabel("MOTIVO DE LA DETENCION")
+        reason_title.setStyleSheet(
+            "color:#fca5a5;font-size:12px;font-weight:800;letter-spacing:2px;background:transparent;"
+        )
+        reason_lbl = QLabel(self._reason.upper())
+        reason_lbl.setStyleSheet(
+            "color:#ffffff;font-size:22px;font-weight:800;background:transparent;"
+        )
+        reason_lay.addWidget(reason_title)
+        reason_lay.addWidget(reason_lbl)
+        foot_lay.addWidget(reason_box, stretch=1)
+
+        btn = QPushButton("CONFIRMAR Y CONTINUAR")
+        btn.setFixedHeight(68)
+        btn.setMinimumWidth(280)
         btn.setStyleSheet(
-            "QPushButton { background:#991b1b;color:#ffffff;"
-            "font-size:20px;font-weight:700;letter-spacing:1px;"
-            "border:none;border-left:2px solid #7f1d1d; }"
-            "QPushButton:hover { background:#dc2626; }"
-            "QPushButton:pressed { background:#7f1d1d; }"
+            "QPushButton { background:#dc2626;color:#ffffff;"
+            "font-size:22px;font-weight:900;letter-spacing:1px;"
+            "border:none;border-radius:12px;padding:0 20px; }"
+            "QPushButton:hover { background:#ef4444; }"
+            "QPushButton:pressed { background:#991b1b; }"
         )
         btn.clicked.connect(self.accept)
         foot_lay.addWidget(btn)
