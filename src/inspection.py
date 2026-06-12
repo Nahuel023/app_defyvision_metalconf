@@ -999,6 +999,8 @@ def _inspect_bgr(
         roi,
         roi_info,
         report,
+        model=model,
+        scanner_id=scanner_id,
         enabled=roi_recenter_enabled,
         warmup_frames=roi_recenter_warmup_frames,
         trigger_delta_px=roi_recenter_trigger_delta_px,
@@ -1307,6 +1309,8 @@ def _update_runtime_roi_drift(
     roi_info: RuntimeROIInfo | None,
     report: CompareReport,
     *,
+    model: str = "",
+    scanner_id: str | None = None,
     enabled: bool,
     warmup_frames: int,
     trigger_delta_px: float,
@@ -1408,7 +1412,9 @@ def _update_runtime_roi_drift(
     new_x = max(0, min(new_x, max_x))
     new_roi = ROI(x=new_x, y=active_roi.y, w=active_roi.w, h=active_roi.h)
     pre["roi"] = new_roi
-    state["applied_total_shift_px"] = float(new_roi.x - saved_roi.x)
+    # Actualizar saved_roi para que los shifts futuros se midan desde la nueva base
+    pre["saved_roi"] = new_roi
+    state["applied_total_shift_px"] = 0.0
     state["drift_streak"] = 0
     state["last_step_px"] = float(new_roi.x - active_roi.x)
 
@@ -1419,6 +1425,24 @@ def _update_runtime_roi_drift(
     ))
     state["cooldown_remaining"] = next_cooldown
     state["current_cooldown"] = next_cooldown
+
+    # Persistir en roi.json para que el próximo arranque parta de la posición corregida
+    if model:
+        import json as _json
+        from src.patterns.roi import roi_path
+        p = roi_path(model, scanner_id)
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(
+                _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
+                encoding="utf-8",
+            )
+            logger.info(
+                "[%s] ROI recenter persistido: x=%d  (paso=%+.0fpx  cooldown=%df)",
+                scanner_id, new_roi.x, state["last_step_px"], next_cooldown,
+            )
+        except Exception as exc:
+            logger.error("[%s] ROI recenter: error escribiendo roi.json: %s", scanner_id, exc)
 
     recenter_note = f"ROI recenter {state['last_step_px']:+.0f}px -> x={new_roi.x} (cooldown={next_cooldown}f)"
     return RuntimeROIInfo(
