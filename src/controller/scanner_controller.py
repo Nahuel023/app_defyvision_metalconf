@@ -620,10 +620,12 @@ class ScannerController:
         if not tols.get("roi_recenter_enabled", False):
             return
 
-        n_frames  = int(tols.get("roi_precal_frames", 8))
-        max_iters = int(tols.get("roi_precal_max_iters", 4))
-        threshold = float(tols.get("roi_precal_threshold_px", tols.get("roi_recenter_trigger_delta_px", 6.0)))
-        max_shift = float(tols.get("roi_recenter_max_total_shift_px", 40.0))
+        n_frames   = int(tols.get("roi_precal_frames", 8))
+        max_iters  = int(tols.get("roi_precal_max_iters", 4))
+        threshold  = float(tols.get("roi_precal_threshold_px", tols.get("roi_recenter_trigger_delta_px", 6.0)))
+        overshoot  = int(tols.get("roi_precal_overshoot_px", 3))
+        resize_mode = str(tols.get("roi_recenter_mode", "resize")) == "resize"
+        max_growth = float(tols.get("roi_recenter_max_width_growth_px", 60.0))
 
         logger.info("[%s] ROI pre-cal: iniciando (max %d iters, umbral %.1fpx)", self._id, max_iters, threshold)
 
@@ -668,20 +670,38 @@ class ScannerController:
                 logger.warning("[%s] ROI pre-cal: no hay ROI definida, saltando", self._id)
                 break
 
-            # Calcular corrección: mover en la dirección del shift detectado
-            correction = int(round(avg_shift))
-            if max_shift > 0:
-                applied_total = abs(current_roi.x - (session._preloaded.get("saved_roi") or current_roi).x)
-                remaining = max_shift - applied_total
-                correction = int(max(-remaining, min(remaining, correction)))
+            # Magnitud de corrección con overshoot para dar margen
+            direction = 1 if avg_shift > 0 else -1
+            magnitude = int(round(abs(avg_shift))) + overshoot
 
-            if correction == 0:
-                logger.info("[%s] ROI pre-cal: corrección = 0px, deteniendo", self._id)
+            if resize_mode:
+                # Expande el borde en la dirección del drift
+                growth = min(magnitude, max(0.0, max_growth - (current_roi.w - (session._preloaded.get("saved_roi") or current_roi).w)))
+                if growth < 1:
+                    logger.info("[%s] ROI pre-cal: limite de crecimiento alcanzado, deteniendo", self._id)
+                    break
+                if direction > 0:
+                    new_w = current_roi.w + int(growth)
+                    new_x = current_roi.x
+                else:
+                    expand = min(int(growth), current_roi.x)
+                    new_x = current_roi.x - expand
+                    new_w = current_roi.w + expand
+                new_roi = ROI(x=new_x, y=current_roi.y, w=new_w, h=current_roi.h)
+                logger.info("[%s] ROI pre-cal: resize %+dpx borde %s -> x=%d w=%d",
+                            self._id, int(growth) * direction,
+                            "derecho" if direction > 0 else "izquierdo",
+                            new_x, new_w)
+            else:
+                # Modo move: desplaza toda la ventana
+                correction = direction * magnitude
+                new_x = max(0, current_roi.x + correction)
+                new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
+                logger.info("[%s] ROI pre-cal: move %+dpx -> x=%d", self._id, correction, new_x)
+
+            if new_roi == current_roi:
+                logger.info("[%s] ROI pre-cal: sin cambio efectivo, deteniendo", self._id)
                 break
-
-            frame_w = shifts and getattr(session._preloaded.get("roi"), "w", None)
-            new_x = max(0, current_roi.x + correction)
-            new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
 
             # Persistir en disco
             p = roi_path(model, self._id)
@@ -700,10 +720,7 @@ class ScannerController:
             session._preloaded["saved_roi"] = new_roi
             session._preloaded["roi_runtime_state"] = {}
 
-            logger.info(
-                "[%s] ROI pre-cal: corregido %+dpx -> x=%d (shift fue %.1fpx)",
-                self._id, correction, new_roi.x, avg_shift,
-            )
+            logger.info("[%s] ROI pre-cal: persistido x=%d w=%d (shift fue %.1fpx)", self._id, new_roi.x, new_roi.w, avg_shift)
 
         logger.info("[%s] ROI pre-cal: finalizada", self._id)
 

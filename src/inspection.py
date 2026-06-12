@@ -322,6 +322,8 @@ def _inspect_bgr(
     roi_recenter_cooldown_frames = int(tolerances.get("roi_recenter_cooldown_frames", 15))
     roi_recenter_cooldown_max_frames = int(tolerances.get("roi_recenter_cooldown_max_frames", 120))
     roi_recenter_cooldown_mult = float(tolerances.get("roi_recenter_cooldown_mult", 2.0))
+    roi_recenter_mode = str(tolerances.get("roi_recenter_mode", "resize"))
+    roi_recenter_max_width_growth_px = float(tolerances.get("roi_recenter_max_width_growth_px", 60.0))
     roi_slow_ema_enabled        = bool(tolerances.get("roi_slow_ema_enabled", False))
     roi_slow_ema_alpha          = float(tolerances.get("roi_slow_ema_alpha", 0.002))
     roi_slow_ema_threshold_px   = float(tolerances.get("roi_slow_ema_threshold_px", 15.0))
@@ -1013,6 +1015,8 @@ def _inspect_bgr(
         cooldown_frames=roi_recenter_cooldown_frames,
         cooldown_max_frames=roi_recenter_cooldown_max_frames,
         cooldown_mult=roi_recenter_cooldown_mult,
+        recenter_mode=roi_recenter_mode,
+        max_width_growth_px=roi_recenter_max_width_growth_px,
     )
 
     _roi_slow_ema_step(
@@ -1323,6 +1327,8 @@ def _update_runtime_roi_drift(
     cooldown_frames: int = 15,
     cooldown_max_frames: int = 120,
     cooldown_mult: float = 2.0,
+    recenter_mode: str = "resize",
+    max_width_growth_px: float = 60.0,
 ) -> RuntimeROIInfo | None:
     if not enabled or active_roi is None or roi_info is None or roi_info.detected_roi is None:
         return roi_info
@@ -1404,25 +1410,50 @@ def _update_runtime_roi_drift(
     if int(state.get("drift_streak", 0)) < required_streak:
         return roi_info
 
-    current_total_shift = float(active_roi.x - saved_roi.x)
-    target_total_shift = current_total_shift + (float(step_px) * evidence_dir)
-    if max_total_shift_px > 0.0:
-        target_total_shift = max(-max_total_shift_px, min(max_total_shift_px, target_total_shift))
-    applied_step = target_total_shift - current_total_shift
-    if abs(applied_step) < 0.5:
-        state["drift_streak"] = 0
-        return roi_info
+    if recenter_mode == "resize":
+        # Expande el borde en la dirección del drift sin mover el lado opuesto
+        total_growth = float(active_roi.w - saved_roi.w)
+        new_growth = total_growth + float(step_px)
+        if max_width_growth_px > 0.0:
+            new_growth = min(new_growth, max_width_growth_px)
+        actual_step = new_growth - total_growth
+        if actual_step < 0.5:
+            state["drift_streak"] = 0
+            return roi_info
+        if evidence_dir > 0:
+            # Contenido corrido a la derecha: expandir borde derecho
+            new_w = int(round(active_roi.w + actual_step))
+            new_x = active_roi.x
+        else:
+            # Contenido corrido a la izquierda: expandir borde izquierdo
+            expand = int(round(actual_step))
+            new_x = max(0, active_roi.x - expand)
+            actual_expand = active_roi.x - new_x
+            new_w = active_roi.w + actual_expand
+        frame_w = roi_info.frame_w
+        new_w = min(new_w, frame_w - new_x)
+        new_roi = ROI(x=new_x, y=active_roi.y, w=new_w, h=active_roi.h)
+        state["last_step_px"] = float(new_roi.w - active_roi.w) * evidence_dir
+    else:
+        # Modo move: desplaza toda la ventana
+        current_total_shift = float(active_roi.x - saved_roi.x)
+        target_total_shift = current_total_shift + (float(step_px) * evidence_dir)
+        if max_total_shift_px > 0.0:
+            target_total_shift = max(-max_total_shift_px, min(max_total_shift_px, target_total_shift))
+        applied_step = target_total_shift - current_total_shift
+        if abs(applied_step) < 0.5:
+            state["drift_streak"] = 0
+            return roi_info
+        new_x = int(round(saved_roi.x + target_total_shift))
+        max_x = max(0, roi_info.frame_w - active_roi.w)
+        new_x = max(0, min(new_x, max_x))
+        new_roi = ROI(x=new_x, y=active_roi.y, w=active_roi.w, h=active_roi.h)
+        state["last_step_px"] = float(new_roi.x - active_roi.x)
 
-    new_x = int(round(saved_roi.x + target_total_shift))
-    max_x = max(0, roi_info.frame_w - active_roi.w)
-    new_x = max(0, min(new_x, max_x))
-    new_roi = ROI(x=new_x, y=active_roi.y, w=active_roi.w, h=active_roi.h)
     pre["roi"] = new_roi
-    # Actualizar saved_roi para que los shifts futuros se midan desde la nueva base
     pre["saved_roi"] = new_roi
     state["applied_total_shift_px"] = 0.0
     state["drift_streak"] = 0
-    state["last_step_px"] = float(new_roi.x - active_roi.x)
 
     # Cooldown adaptativo: crece con cada corrección hasta el máximo
     next_cooldown = int(min(
@@ -1444,13 +1475,13 @@ def _update_runtime_roi_drift(
                 encoding="utf-8",
             )
             logger.info(
-                "[%s] ROI recenter persistido: x=%d  (paso=%+.0fpx  cooldown=%df)",
-                scanner_id, new_roi.x, state["last_step_px"], next_cooldown,
+                "[%s] ROI recenter persistido: x=%d w=%d (paso=%+.0fpx  cooldown=%df  modo=%s)",
+                scanner_id, new_roi.x, new_roi.w, state["last_step_px"], next_cooldown, recenter_mode,
             )
         except Exception as exc:
             logger.error("[%s] ROI recenter: error escribiendo roi.json: %s", scanner_id, exc)
 
-    recenter_note = f"ROI recenter {state['last_step_px']:+.0f}px -> x={new_roi.x} (cooldown={next_cooldown}f)"
+    recenter_note = f"ROI recenter {state['last_step_px']:+.0f}px -> x={new_roi.x} w={new_roi.w} (cooldown={next_cooldown}f)"
     return RuntimeROIInfo(
         frame_w=roi_info.frame_w,
         frame_h=roi_info.frame_h,
