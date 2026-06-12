@@ -2106,8 +2106,8 @@ class RecordingTab(QWidget):
         scale   = thumb_w / W
         thumb   = cv2.resize(vis, (thumb_w, int(H * scale)), interpolation=cv2.INTER_AREA)
         th, tw  = thumb.shape[:2]
-        rgb     = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
-        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888)
+        rgb     = np.ascontiguousarray(cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB))
+        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888).copy()
         pix     = QPixmap.fromImage(qimg)
         self._roi_preview_lbl.setPixmap(
             pix.scaled(
@@ -2177,7 +2177,8 @@ class RecordingTab(QWidget):
         # Capturar scanner_id en closure para invalidar cache al terminar
         _sid = scanner_id
         def _on_done(msg: str, ok: bool) -> None:
-            self._on_rebuild_done(msg, ok)
+            if hasattr(self, "_roi_status_lbl"):
+                self._on_rebuild_done(msg, ok)
             if ok and _sid and hasattr(self, "_system"):
                 try:
                     self._system.scanner(_sid).reload_cache()
@@ -2313,6 +2314,8 @@ class RecordingTab(QWidget):
             self._roi_status_lbl.setText("")
 
     def _roi_grab_live(self) -> None:
+        if not self._roi_live_active:
+            return
         sid = self._roi_scanner_combo.currentText()
         try:
             cam = self._system.camera(sid)
@@ -2491,9 +2494,9 @@ class RecordingTab(QWidget):
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(400, rect.height() - 4)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         fh, fw = rgb.shape[:2]
-        qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        qi  = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888).copy()
         pxm = QPixmap.fromImage(qi).scaled(
             w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -3404,8 +3407,10 @@ class RecordingTab(QWidget):
     def _show_frame(self, idx: int) -> None:
         if not self._frame_paths:
             return
-        first_load = self._current_idx == 0 and idx == 0 and self._img_view.current_pixmap() is None
         idx = max(0, min(idx, len(self._frame_paths) - 1))
+        if idx >= len(self._frame_paths):
+            return
+        first_load = self._current_idx == 0 and idx == 0 and self._img_view.current_pixmap() is None
         self._current_idx = idx
 
         show_ov = self._overlay_toggle.isChecked() and idx < len(self._results)
@@ -3420,9 +3425,9 @@ class RecordingTab(QWidget):
 
             if bgr is not None:
                 # cv2.cvtColor is faster than numpy channel-flip for large images.
-                rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+                rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
                 h, w = rgb.shape[:2]
-                qi  = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                qi  = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
                 pxm = QPixmap.fromImage(qi)
 
                 # Store in cache; evict entries farthest from current index when full.
@@ -4030,9 +4035,9 @@ class _EvOverlayWorker(QThread):
                                    scanner_id=self._scanner_id)
             ov = result.overlay
             if ov is not None:
-                rgb = cv2.cvtColor(ov, cv2.COLOR_BGR2RGB)
+                rgb = np.ascontiguousarray(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB))
                 h, w = rgb.shape[:2]
-                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+                qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
                 self.done.emit(self._idx, QPixmap.fromImage(qi))
         except Exception:
             pass
@@ -4577,9 +4582,9 @@ class EventBrowserTab(QWidget):
             bgr = cv2.imread(str(self._frame_paths[idx]))
             if bgr is None:
                 return None
-            rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
             h, w = rgb.shape[:2]
-            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888)
+            qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
             pxm = QPixmap.fromImage(qi)
             self._px_cache[idx] = pxm
             if len(self._px_cache) > self._px_cache_max:
@@ -5814,7 +5819,7 @@ class CameraCalibTab(QWidget):
             if slot == self._ip_slot:
                 self._ip_capture_status.setStyleSheet(f"color:{_WARN};font-size:11px;")
                 self._ip_capture_status.setText(f"Diag: {out_path.name}")
-                QTimer.singleShot(5000, lambda: self._ip_capture_status.setText(""))
+                QTimer.singleShot(5000, lambda: hasattr(self, "_ip_capture_status") and self._ip_capture_status.setText(""))
         except Exception:
             logger.exception("No se pudo guardar snapshot diagnostico IP")
 
@@ -5850,6 +5855,8 @@ class CameraCalibTab(QWidget):
             self._show_ip_frame(frame)
 
     def _refresh_ip_camera(self, slot: int) -> None:
+        if slot < 0 or slot >= len(self._ip_caps):
+            return
         cap = self._ip_caps[slot]
         if cap is None or not cap.isOpened():
             self._disconnect_ip_slot(slot)
@@ -5865,9 +5872,9 @@ class CameraCalibTab(QWidget):
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(420, rect.height() - 4)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         fh, fw = rgb.shape[:2]
-        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888)
+        qi = QImage(rgb.data, fw, fh, fw * 3, QImage.Format.Format_RGB888).copy()
         pxm = QPixmap.fromImage(qi).scaled(
             w, h,
             Qt.AspectRatioMode.KeepAspectRatio,
@@ -5890,7 +5897,7 @@ class CameraCalibTab(QWidget):
             self._ip_capture_status.setStyleSheet(f"color:{_OK};font-size:11px;")
             self._ip_capture_status.setText(f"Guardado: {out_path.name}")
             # Limpiar el mensaje después de 4 segundos
-            QTimer.singleShot(4000, lambda: self._ip_capture_status.setText(""))
+            QTimer.singleShot(4000, lambda: hasattr(self, "_ip_capture_status") and self._ip_capture_status.setText(""))
         except Exception as exc:
             self._ip_capture_status.setStyleSheet(f"color:{_NOK};font-size:11px;")
             self._ip_capture_status.setText(f"Error: {exc}")
@@ -5936,7 +5943,7 @@ class CameraCalibTab(QWidget):
 
         self._ip_save_status.setStyleSheet(f"color:{_OK};font-size:11px;")
         self._ip_save_status.setText("Guardado — se conectará al iniciar")
-        QTimer.singleShot(3000, lambda: self._ip_save_status.setText(""))
+        QTimer.singleShot(3000, lambda: hasattr(self, "_ip_save_status") and self._ip_save_status.setText(""))
 
     def _auto_connect_all_slots(self) -> None:
         """Conecta ambas cámaras IP al abrir la pestaña usando los ajustes guardados."""
@@ -6065,8 +6072,8 @@ class CameraCalibTab(QWidget):
         if frame is None:
             return
         h, w = frame.shape[:2]
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
         pix = QPixmap.fromImage(img)
         target = self._preview_lbl.size()
         self._preview_lbl.setPixmap(
