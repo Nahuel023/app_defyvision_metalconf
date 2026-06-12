@@ -48,6 +48,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 173 - Panel de salud ROI en pestaña Calibración
+
+**Pedido:** mostrar la salud del ROI en la pestaña de calibración.
+
+**Comportamiento:**
+- Se muestra bajo el preview, con borde de color:
+  - Verde: drift < 10px y sin warning → "OK"
+  - Naranja: drift 10-∞px sin warning → "Drift moderado"
+  - Rojo: hay warning → muestra el texto del warning
+- Campos mostrados: Frame WxH, ROI guardada (x, w), ROI detectada (x, w), Drift X (px), Estado
+- Si no hay ROI guardada: muestra frame size + ROI detectada (si la hay)
+- Se actualiza al cargar imagen o carpeta (inmediato)
+- En modo Cámara en vivo: actualiza cada ~15 frames (~2s a 8fps) para no saturar CPU
+
+**Implementación:**
+- `_roi_health_lbl`: QLabel con fondo oscuro y borde de color dinámico
+- `_roi_refresh_health()`: llama a `resolve_runtime_roi` (o `detect_roi_from_images`
+  si no hay ROI guardada) y actualiza el label
+- `_roi_live_frame_count`: contador para throttle del health check en live
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 172 - Nombres de grabaciones incluyen scanner
 
 **Pedido:** al guardar grabaciones, incluir el scanner en el nombre de carpeta.
