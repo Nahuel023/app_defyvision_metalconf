@@ -1370,11 +1370,18 @@ def _update_runtime_roi_drift(
     state["baseline_samples"] = baseline_samples
 
     drift_delta = shift_x - float(baseline_shift_x)
-    evidence_dir = 0
-    if drift_delta <= -trigger_delta_px and left_missing >= edge_missing_min:
-        evidence_dir = -1
-    elif drift_delta >= trigger_delta_px and right_missing >= edge_missing_min:
-        evidence_dir = 1
+    is_urgent = abs(drift_delta) >= urgent_delta_px
+
+    # Urgente: la magnitud sola es suficiente, no se necesitan agujeros faltantes en el borde
+    if is_urgent:
+        evidence_dir = 1 if drift_delta > 0 else -1
+    else:
+        # Normal: requiere además agujeros faltantes en el borde correspondiente
+        evidence_dir = 0
+        if drift_delta <= -trigger_delta_px and left_missing >= edge_missing_min:
+            evidence_dir = -1
+        elif drift_delta >= trigger_delta_px and right_missing >= edge_missing_min:
+            evidence_dir = 1
 
     if evidence_dir == 0:
         state["drift_streak"] = 0
@@ -1392,8 +1399,7 @@ def _update_runtime_roi_drift(
     if not state.get("baseline_ready", False):
         return roi_info
 
-    # Umbral de racha: urgente = 1 frame, normal = streak_frames
-    is_urgent = abs(drift_delta) >= urgent_delta_px
+    # Urgente actúa con 1 frame de racha; normal espera streak_frames
     required_streak = 1 if is_urgent else max(1, streak_frames)
     if int(state.get("drift_streak", 0)) < required_streak:
         return roi_info
