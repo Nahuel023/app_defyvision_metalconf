@@ -105,6 +105,108 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_detect_roi(args: argparse.Namespace) -> int:
+    """Detecta automáticamente la ROI de la chapa a partir de imágenes con backlight."""
+    import cv2
+    import json
+
+    from src.inspection import iter_image_files
+    from src.patterns.roi import detect_roi_from_images, roi_path
+
+    src: Path = args.img
+    if not src.exists():
+        print(f"[detect-roi] ERROR: no existe: {src}")
+        return 1
+
+    # Collect images: single file or folder (sample up to --max-frames)
+    if src.is_dir():
+        all_paths = list(iter_image_files(src))
+        if not all_paths:
+            print(f"[detect-roi] ERROR: no se encontraron imágenes en {src}")
+            return 1
+        step = max(1, len(all_paths) // args.max_frames)
+        paths = all_paths[::step][: args.max_frames]
+        print(f"[detect-roi] carpeta: {len(all_paths)} frames, usando {len(paths)}")
+    else:
+        paths = [src]
+        print(f"[detect-roi] imagen única: {src.name}")
+
+    imgs = []
+    for p in paths:
+        img = cv2.imread(str(p))
+        if img is not None:
+            imgs.append(img)
+
+    if not imgs:
+        print("[detect-roi] ERROR: no se pudieron leer imágenes")
+        return 1
+
+    roi = detect_roi_from_images(
+        imgs,
+        channel=args.channel,
+        margin_px=args.margin,
+        min_contrast=args.min_contrast,
+    )
+
+    if roi is None:
+        print("[detect-roi] ERROR: no se pudo detectar la ROI — verificar backlight y canal")
+        return 1
+
+    H, W = imgs[0].shape[:2]
+    print(f"[detect-roi] frame: {W}x{H}")
+    print(f"[detect-roi] ROI detectada: x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}")
+    print(f"             izq={roi.x}px  der={roi.x + roi.w}px  margen={args.margin}px")
+
+    # Build preview image: reference frame + ROI box + column profile overlay
+    ref = imgs[len(imgs) // 2].copy()
+    H_ref, W_ref = ref.shape[:2]
+    # ROI rectangle
+    cv2.rectangle(ref, (roi.x, 0), (roi.x + roi.w - 1, H_ref - 1), (0, 255, 255), 3)
+    cv2.putText(ref, f"ROI x={roi.x} w={roi.w}", (max(0, roi.x + 4), 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2, cv2.LINE_AA)
+    # Column R-profile bar on top
+    if args.channel == "r":
+        ch_vis = ref[:, :, 2].astype(float)
+    elif args.channel == "g":
+        ch_vis = ref[:, :, 1].astype(float)
+    elif args.channel == "b":
+        ch_vis = ref[:, :, 0].astype(float)
+    else:
+        import cv2 as _cv2
+        ch_vis = _cv2.cvtColor(ref, _cv2.COLOR_BGR2GRAY).astype(float)
+    import numpy as _np
+    col_p = _np.percentile(ch_vis, 20, axis=0)
+    bar_h = 40
+    for x in range(W_ref):
+        val = int(col_p[x] / 255.0 * bar_h)
+        cv2.line(ref, (x, bar_h - val), (x, bar_h), (180, 180, 180), 1)
+    cv2.line(ref, (roi.x, 0), (roi.x, bar_h), (0, 255, 0), 2)
+    cv2.line(ref, (roi.x + roi.w - 1, 0), (roi.x + roi.w - 1, bar_h), (0, 200, 255), 2)
+
+    preview_path = Path("data/output/detect_roi_preview.png")
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    cv2.imwrite(str(preview_path), ref)
+    print(f"[detect-roi] preview: {preview_path}")
+
+    if args.show:
+        _show_scaled_window("detect-roi — cualquier tecla para cerrar", ref)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+
+    if args.dry_run:
+        print("[detect-roi] --dry-run: ROI NO guardada")
+        return 0
+
+    out_path = roi_path(args.model, args.scanner)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps({"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h}),
+        encoding="utf-8",
+    )
+    print(f"[detect-roi] guardado: {out_path}")
+    return 0
+
+
 def cmd_build_pattern(args: argparse.Namespace) -> int:
     from src.patterns.pattern_build import build_pattern_from_image
 
@@ -118,9 +220,12 @@ def cmd_run_image(args: argparse.Namespace) -> int:
     import cv2
 
     from src.inspection import inspect_image
+    from src.patterns.pattern_io import infer_scanner_id
 
+    scanner_id = args.scanner or infer_scanner_id(args.model, args.img)
     result = inspect_image(args.model, args.img, save=args.save,
-                           scanner_id=args.scanner)
+                           scanner_id=scanner_id)
+    print(f"[context] scanner={scanner_id or '-'}")
     print(f"[align] angle_deg={result.angle_deg:.2f} lines={result.used_lines}")
     if result.shift_xy is None:
         print("[shift] skipped (not enough points)")
@@ -133,6 +238,15 @@ def cmd_run_image(args: argparse.Namespace) -> int:
         f"missing={result.report.missing}  extra={result.report.extra}\n"
         f"  detection_ratio={result.detection_ratio:.0%}  alignment_ok={result.alignment_ok}"
     )
+    if result.roi_info is not None:
+        info = result.roi_info
+        print(
+            f"[roi] frame={info.frame_w}x{info.frame_h} "
+            f"saved_x={info.saved_roi.x} active_x={info.effective_roi.x} "
+            f"shift_x={info.shift_x:+.1f} auto={info.auto_corrected}"
+        )
+        if info.warning:
+            print(f"[roi] warn={info.warning}")
 
     if args.show:
         _show_scaled_window("mask", result.mask)
@@ -149,14 +263,18 @@ def cmd_run_image(args: argparse.Namespace) -> int:
 
 def cmd_run_folder(args: argparse.Namespace) -> int:
     from src.inspection import inspect_folder
+    from src.patterns.pattern_io import infer_scanner_id
+
+    scanner_id = args.scanner or infer_scanner_id(args.model, args.input)
 
     summary = inspect_folder(
         args.model,
         args.input,
         save=args.save,
         frame_rate_hz=args.fps,
-        scanner_id=args.scanner,
+        scanner_id=scanner_id,
     )
+    print(f"[context] scanner={scanner_id or '-'}")
     print(
         f"[run-folder] model={args.model} total={summary.total} "
         f"raw_ok={summary.ok} raw_nok={summary.nok} "
@@ -193,6 +311,14 @@ def cmd_run_folder(args: argparse.Namespace) -> int:
             f"  missing={result.report.missing}  extra={result.report.extra}"
             f"  ratio={result.detection_ratio:.0%}{warn}"
         )
+        if result.roi_info is not None and (result.roi_info.warning or result.roi_info.auto_corrected):
+            print(
+                f"    roi: frame={result.roi_info.frame_w}x{result.roi_info.frame_h} "
+                f"active_x={result.roi_info.effective_roi.x} "
+                f"shift_x={result.roi_info.shift_x:+.1f} "
+                f"auto={result.roi_info.auto_corrected} "
+                f"warn={result.roi_info.warning or '-'}"
+            )
 
     # Summary of most frequently missing cells — helps identify edge artifacts vs real defects
     from collections import Counter
@@ -487,6 +613,100 @@ def cmd_center_folder(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_roi_check(args: argparse.Namespace) -> int:
+    """Diagnostic: verify frame size and ROI drift for one image or a folder."""
+    import csv
+    import statistics
+    import cv2
+
+    from src.inspection import iter_image_files
+    from src.patterns.pattern_io import infer_scanner_id
+    from src.patterns.roi import load_roi, resolve_runtime_roi
+
+    src: Path = args.input
+    scanner_id = args.scanner or infer_scanner_id(args.model, src)
+    roi = load_roi(args.model, scanner_id)
+    if roi is None:
+        print(f"[roi-check] ERROR: no hay ROI guardada para model={args.model} scanner={scanner_id or '-'}")
+        return 1
+    if not src.exists():
+        print(f"[roi-check] ERROR: no existe: {src}")
+        return 1
+
+    if src.is_dir():
+        paths = list(iter_image_files(src))
+        if not paths:
+            print(f"[roi-check] ERROR: no se encontraron imagenes en {src}")
+            return 1
+    else:
+        paths = [src]
+
+    output_dir = args.output
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "roi_check.csv"
+
+    rows = []
+    shifts = []
+    warned = 0
+    size_counts: dict[tuple[int, int], int] = {}
+
+    for path in paths:
+        img = cv2.imread(str(path))
+        if img is None:
+            continue
+        eff_roi, info = resolve_runtime_roi(
+            img,
+            roi,
+            auto_correct_enabled=False,
+            max_shift_px=args.max_shift,
+            max_width_delta_px=args.max_width_delta,
+            channel=args.channel,
+            margin_px=args.margin,
+            min_contrast=args.min_contrast,
+        )
+        size_counts[(info.frame_w, info.frame_h)] = size_counts.get((info.frame_w, info.frame_h), 0) + 1
+        shifts.append(info.shift_x)
+        if info.warning:
+            warned += 1
+        rows.append({
+            "frame": path.name,
+            "frame_w": info.frame_w,
+            "frame_h": info.frame_h,
+            "saved_x": roi.x,
+            "saved_w": roi.w,
+            "effective_x": eff_roi.x,
+            "effective_w": eff_roi.w,
+            "detected_x": "" if info.detected_roi is None else info.detected_roi.x,
+            "detected_w": "" if info.detected_roi is None else info.detected_roi.w,
+            "shift_x": f"{info.shift_x:.2f}",
+            "width_delta_px": f"{info.width_delta_px:.2f}",
+            "warning": info.warning,
+        })
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()) if rows else [
+            "frame", "frame_w", "frame_h", "saved_x", "saved_w", "effective_x",
+            "effective_w", "detected_x", "detected_w", "shift_x", "width_delta_px", "warning",
+        ])
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"[roi-check] model={args.model}  scanner={scanner_id or '-'}  frames={len(rows)}")
+    print(f"[roi-check] ROI guardada: x={roi.x} y={roi.y} w={roi.w} h={roi.h}")
+    print(f"[roi-check] CSV: {csv_path}")
+    if size_counts:
+        print("[roi-check] tamanos detectados:")
+        for (w, h), count in sorted(size_counts.items(), key=lambda item: (-item[1], item[0])):
+            print(f"  {w}x{h}: {count}")
+    if shifts:
+        print(
+            f"[roi-check] shift_x px: mediana={statistics.median(shifts):+.2f} "
+            f"min={min(shifts):+.2f} max={max(shifts):+.2f}"
+        )
+    print(f"[roi-check] frames con advertencia: {warned}/{len(rows)}")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
     from src.utils.logger import setup_logging
@@ -541,6 +761,27 @@ def build_parser() -> argparse.ArgumentParser:
         description="MVP CLI: inspeccion de patron de agujeros (OK/NOK).",
     )
     sub = p.add_subparsers(dest="command", required=True)
+
+    sp = sub.add_parser(
+        "detect-roi",
+        help="Detectar ROI automáticamente desde imágenes con backlight encendido.",
+    )
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_1). Sin esto guarda ROI compartida.")
+    sp.add_argument("--img",     required=True, type=Path,
+                    help="Imagen de referencia o carpeta de frames con backlight encendido.")
+    sp.add_argument("--channel", default="r", choices=["r", "g", "b", "gray"],
+                    help="Canal para detectar transiciones backlight/chapa (default: r).")
+    sp.add_argument("--margin",  type=int, default=0,
+                    help="Píxeles a recortar hacia adentro desde el borde detectado (default: 0).")
+    sp.add_argument("--min-contrast", type=float, default=30.0, dest="min_contrast",
+                    help="Contraste mínimo entre backlight y chapa para confiar en la detección (default: 30).")
+    sp.add_argument("--max-frames", type=int, default=20, dest="max_frames",
+                    help="Máximo de frames a usar si se pasa una carpeta (default: 20).")
+    sp.add_argument("--show",    action="store_true", help="Mostrar preview de la ROI sobre el frame.")
+    sp.add_argument("--dry-run", action="store_true", dest="dry_run",
+                    help="Mostrar ROI detectada sin guardar roi.json.")
+    sp.set_defaults(func=cmd_detect_roi)
 
     sp = sub.add_parser("define-roi", help="Seleccionar ROI interactivamente desde imagen o cámara.")
     sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_A).")
@@ -599,6 +840,29 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--input",   required=True, type=Path, help="Carpeta con frames a analizar.")
     sp.add_argument("--output",  required=True, type=Path, help="Carpeta de salida (CSV + overlays).")
     sp.set_defaults(func=cmd_center_folder)
+
+    sp = sub.add_parser(
+        "roi-check",
+        help=(
+            "Diagnostico: verifica tamano de frame y deriva de ROI contra la ROI guardada. "
+            "Exporta CSV; no toca la logica de produccion."
+        ),
+    )
+    sp.add_argument("--model",   required=True, help="Nombre del modelo (ej: modelo_B).")
+    sp.add_argument("--scanner", default=None,  help="ID del scanner (ej: scanner_2).")
+    sp.add_argument("--input",   required=True, type=Path, help="Imagen o carpeta de frames.")
+    sp.add_argument("--output",  required=True, type=Path, help="Carpeta de salida para CSV.")
+    sp.add_argument("--channel", default="r", choices=["r", "g", "b", "gray"],
+                    help="Canal para detectar bordes backlight/chapa (default: r).")
+    sp.add_argument("--margin",  type=int, default=0,
+                    help="Margen inward al detectar ROI (default: 0).")
+    sp.add_argument("--min-contrast", type=float, default=30.0, dest="min_contrast",
+                    help="Contraste minimo para confiar en la ROI detectada.")
+    sp.add_argument("--max-shift", type=float, default=18.0, dest="max_shift",
+                    help="Shift X maximo tolerado antes de advertir (default: 18).")
+    sp.add_argument("--max-width-delta", type=float, default=20.0, dest="max_width_delta",
+                    help="Delta de ancho maximo tolerado antes de advertir (default: 20).")
+    sp.set_defaults(func=cmd_roi_check)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.add_argument("--no-plc-outputs", action="store_true", dest="no_plc_outputs",

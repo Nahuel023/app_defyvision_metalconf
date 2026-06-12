@@ -17,8 +17,18 @@ data/output/
 
 # Large local media and ad-hoc captures
 data/videos/
+data/video/
 data/input/IMG_*.jpg
 data/input/WIN_*.jpg
+
+# Runtime inspection data (frames, events, recordings, metrics) — no van a git
+data/events/
+data/recordings/
+data/metrics/
+data/ok_buffer/
+
+# Setup / provisioning (binarios grandes de Visual Studio y similares)
+setup_prov_pc/
 
 # Claude Code internal files
 .claude/

@@ -8,10 +8,10 @@ import numpy as np
 
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
-from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern
-from src.patterns.roi import apply_roi, load_roi, ROI
+from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern, infer_scanner_id
+from src.patterns.roi import apply_roi, load_roi, roi_path, ROI, RuntimeROIInfo, resolve_runtime_roi, load_roi_drift_state, save_roi_drift_state
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
-from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator
+from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator, draw_roi_health_indicator
 from src.pipeline.machine_stop import MachineStopDetector
 from src.pipeline.compare import CompareReport, compare_missing_only
 from src.pipeline.detect_holes import Hole, detect_holes_from_mask
@@ -78,6 +78,8 @@ class InspectionResult:
     pattern_center_zigzag_max_px: float = 0.0
     sheet_tilt_deg: float = 0.0        # inclinación de la grilla (grados); NaN si no medible
     tilt_warn: bool = False            # True cuando |sheet_tilt_deg| supera tilt_warn_deg
+    active_roi: "ROI | None" = None
+    roi_info: "RuntimeROIInfo | None" = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +128,7 @@ def inspect_image(
     _preloaded: Optional[dict] = None,
 ) -> InspectionResult:
     """Inspect an image from disk."""
+    scanner_id = scanner_id or infer_scanner_id(model, img_path)
     img_full = load_bgr_image(img_path)
     result = _inspect_bgr(model, img_full, image_path=img_path, scanner_id=scanner_id,
                           _machine_stop_detector=_machine_stop_detector,
@@ -174,11 +177,18 @@ def _inspect_bgr(
         _machine_stop_detector or pre.get("machine_stop_detector")
     )
 
-    tolerances = pre.get("tolerances") or load_tolerances(model)
+    # Estado de racha de desalineacion del patron (persiste entre frames igual que ema_state).
+    # Formato: {"streak": int, "reason": str}
+    desalign_state: dict = pre.get("desalign_state") or {"streak": 0, "reason": ""}
+
+    tolerances = pre.get("tolerances") or load_tolerances(model, scanner_id=scanner_id)
     pattern: Pattern = pre.get("pattern") or load_pattern(find_pattern_path(model, scanner_id))
     roi: Optional[ROI] = pre.get("roi", _SENTINEL)
     if roi is _SENTINEL:
         roi = load_roi(model, scanner_id)
+    saved_roi: Optional[ROI] = pre.get("saved_roi", roi)
+    roi_runtime_state: dict = pre.get("roi_runtime_state") or {}
+    pre["roi_runtime_state"] = roi_runtime_state
     ema_state: Optional[dict] = pre.get("ema_state")
 
     threshold        = int(tolerances["threshold"])
@@ -233,6 +243,9 @@ def _inspect_bgr(
     # puede DETENER LA MAQUINA (parada inmediata). Los faltantes, en cambio, solo paran
     # por persistencia. Default False; se activa por modelo.
     machine_stop_on_tilt   = bool(tolerances.get("machine_stop_on_tilt", False))
+    machine_stop_require_frame_nok = bool(
+        tolerances.get("machine_stop_require_frame_nok", False)
+    )
     # Desalineacion del patron: si la fraccion de esperados sin matchear (tras el mejor
     # ajuste) supera este ratio, es un corrimiento/cizalla del patron → DETENER MAQUINA.
     pattern_desalign_enabled       = bool(tolerances.get("pattern_desalign_enabled", False))
@@ -244,6 +257,8 @@ def _inspect_bgr(
     pattern_desalign_bottom_shift_px = float(tolerances.get("pattern_desalign_bottom_shift_px", 0.0))
     compare_top_ignore_px = float(tolerances.get("compare_top_ignore_px", 0.0))
     compare_bottom_ignore_px = float(tolerances.get("compare_bottom_ignore_px", 0.0))
+    compare_left_ignore_px = float(tolerances.get("compare_left_ignore_px", 0.0))
+    compare_right_ignore_px = float(tolerances.get("compare_right_ignore_px", 0.0))
     pattern_hull_margin_px = float(tolerances.get("pattern_hull_margin_px", 0.0))
     grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
@@ -272,6 +287,12 @@ def _inspect_bgr(
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
+    # Cuando True, pattern_alignment_warn acumula una racha de frames desalineados antes de parar.
+    # Cuando False, solo marca NOK + badge sin parar la maquina nunca.
+    pattern_align_machine_stop = bool(tolerances.get("pattern_align_machine_stop", True))
+    # Frames consecutivos con desalineacion de patron necesarios para disparar machine_stop.
+    # 1 = parada inmediata en el primer frame; 3 = requiere 3 frames seguidos (mas robusto al ruido).
+    pattern_align_stop_frames  = int(tolerances.get("pattern_align_stop_frames", 3))
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
@@ -279,12 +300,32 @@ def _inspect_bgr(
     pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
     pattern_center_zigzag_abs_max   = float(tolerances.get("pattern_center_zigzag_abs_max_px", 18.0))
 
-    # Camara Sony gran angular: en microperforado los checks basados en bordes laterales
-    # y offset global generan falsos "UNSTABLE"/desalineado, aunque la grilla central
-    # este bien. La inspeccion por matching de agujeros sigue siendo confiable.
-    if model == "modelo_B":
-        verticality_quality_enabled = False
-        pattern_global_offset_max_px = 0.0
+    # Nota: verticality_quality_enabled y pattern_global_offset_max_px se controlan
+    # desde tolerancias.yaml por modelo. Para modelo_B mantener ambos en false/0
+    # a menos que se valide que el centering de bordes es confiable con la camara usada.
+    roi_autocorrect_enabled = bool(tolerances.get("roi_autocorrect_enabled", False))
+    roi_autocorrect_max_shift_px = float(tolerances.get("roi_autocorrect_max_shift_px", 0.0))
+    roi_autocorrect_max_width_delta_px = float(
+        tolerances.get("roi_autocorrect_max_width_delta_px", 0.0)
+    )
+    roi_detect_margin_px = int(tolerances.get("roi_detect_margin_px", 0))
+    roi_detect_min_contrast = float(tolerances.get("roi_detect_min_contrast", 30.0))
+    roi_recenter_enabled = bool(tolerances.get("roi_recenter_enabled", False))
+    roi_recenter_warmup_frames = int(tolerances.get("roi_recenter_warmup_frames", 20))
+    roi_recenter_trigger_delta_px = float(tolerances.get("roi_recenter_trigger_delta_px", 6.0))
+    roi_recenter_edge_missing_min = int(tolerances.get("roi_recenter_edge_missing_min", 3))
+    roi_recenter_edge_band_px = float(tolerances.get("roi_recenter_edge_band_px", 28.0))
+    roi_recenter_streak_frames = int(tolerances.get("roi_recenter_streak_frames", 6))
+    roi_recenter_step_px = float(tolerances.get("roi_recenter_step_px", 1.0))
+    roi_recenter_max_total_shift_px = float(tolerances.get("roi_recenter_max_total_shift_px", 40.0))
+    roi_slow_ema_enabled        = bool(tolerances.get("roi_slow_ema_enabled", False))
+    roi_slow_ema_alpha          = float(tolerances.get("roi_slow_ema_alpha", 0.002))
+    roi_slow_ema_threshold_px   = float(tolerances.get("roi_slow_ema_threshold_px", 15.0))
+    roi_slow_ema_confirm_frames = int(tolerances.get("roi_slow_ema_confirm_frames", 500))
+    roi_slow_ema_cooldown_frames= int(tolerances.get("roi_slow_ema_cooldown_frames", 1500))
+    roi_slow_ema_max_total_px   = int(tolerances.get("roi_slow_ema_max_total_px", 40))
+    roi_slow_ema_save_every     = int(tolerances.get("roi_slow_ema_save_every", 300))
+    roi_slow_ema_warmup_frames  = int(tolerances.get("roi_slow_ema_warmup_frames", 300))
 
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
@@ -293,7 +334,18 @@ def _inspect_bgr(
         img_aligned = img_full
         align_res = EdgeAlignResult(angle_deg=0.0, used_lines=0)
 
+    roi_info: RuntimeROIInfo | None = None
     if roi is not None:
+        roi, roi_info = resolve_runtime_roi(
+            img_aligned,
+            roi,
+            auto_correct_enabled=roi_autocorrect_enabled,
+            max_shift_px=roi_autocorrect_max_shift_px,
+            max_width_delta_px=roi_autocorrect_max_width_delta_px,
+            channel=use_channel,
+            margin_px=roi_detect_margin_px,
+            min_contrast=roi_detect_min_contrast,
+        )
         try:
             img = apply_roi(img_aligned, roi)
         except ValueError as exc:
@@ -318,6 +370,19 @@ def _inspect_bgr(
                 "build-pattern --model %s --scanner <scanner_id> --img <ref.jpg>",
                 model, pat_w, pat_h, frame_w, frame_h, model,
             )
+            if roi_info is not None:
+                warn = f"ROI/patron {frame_w}x{frame_h} vs {pat_w}x{pat_h}"
+                roi_info = RuntimeROIInfo(
+                    frame_w=roi_info.frame_w,
+                    frame_h=roi_info.frame_h,
+                    saved_roi=roi_info.saved_roi,
+                    effective_roi=roi_info.effective_roi,
+                    detected_roi=roi_info.detected_roi,
+                    shift_x=roi_info.shift_x,
+                    width_delta_px=roi_info.width_delta_px,
+                    auto_corrected=roi_info.auto_corrected,
+                    warning=f"{roi_info.warning} | {warn}".strip(" |"),
+                )
 
     preprocess_kw = dict(
         threshold=threshold, use_channel=use_channel, polarity=polarity,
@@ -490,23 +555,27 @@ def _inspect_bgr(
                 if y_clip_min <= y <= y_clip_max
             ]
 
-    # Ignorar bordes superior/inferior solo en la etapa de comparacion.
-    # Sirve para no penalizar filas extremas cuando la calibracion de los bordes
-    # es inestable o el patron queda parcialmente cortado arriba/abajo.
-    if compare_points and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
-        y_keep_min = compare_top_ignore_px
-        y_keep_max = img_h - compare_bottom_ignore_px
+    # Ignorar bordes superior/inferior/izquierdo/derecho en la etapa de comparacion.
+    # Sirve para no penalizar filas/columnas extremas cuando la calibracion de los bordes
+    # es inestable o el patron queda parcialmente cortado en algun borde.
+    _y_keep_min = compare_top_ignore_px
+    _y_keep_max = img_h - compare_bottom_ignore_px
+    _x_keep_min = compare_left_ignore_px
+    _x_keep_max = img_w - compare_right_ignore_px
+    _has_ignore = (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0
+                   or compare_left_ignore_px > 0.0 or compare_right_ignore_px > 0.0)
+    if compare_points and _has_ignore:
         if compare_cells:
             _filtered = [
                 (p, c) for p, c in zip(compare_points, compare_cells)
-                if y_keep_min <= p[1] <= y_keep_max
+                if _y_keep_min <= p[1] <= _y_keep_max and _x_keep_min <= p[0] <= _x_keep_max
             ]
             compare_points = [p for p, _ in _filtered]
             compare_cells = [c for _, c in _filtered]
         else:
             compare_points = [
                 (x, y) for x, y in compare_points
-                if y_keep_min <= y <= y_keep_max
+                if _y_keep_min <= y <= _y_keep_max and _x_keep_min <= x <= _x_keep_max
             ]
 
     # Derive expected hole types from pattern radii (when type classification is active).
@@ -550,6 +619,7 @@ def _inspect_bgr(
     # fuera del area del patrón desplacen global_left/global_right.
     detected_types: list[str] | None = None
     holes_in_bbox: list = holes  # default: all holes (updated below when bbox is applied)
+    detected_holes_in_bbox: list = holes
     if compare_points and bbox_filter_margin_px >= 0:
         xs = [p[0] for p in compare_points]
         ys = [p[1] for p in compare_points]
@@ -567,24 +637,32 @@ def _inspect_bgr(
             detected_in_bbox = [(x, y) for x, y in detected_points
                                 if bx1 <= x <= bx2 and by1 <= y <= by2]
         holes_in_bbox = [hh for hh in holes if bx1 <= hh.x <= bx2 and by1 <= hh.y <= by2]
+        detected_holes_in_bbox = holes_in_bbox
     else:
         detected_in_bbox = detected_points
         detected_types   = _det_types_full
 
-    if detected_in_bbox and (compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0):
-        y_keep_min = compare_top_ignore_px
-        y_keep_max = img_h - compare_bottom_ignore_px
+    # Filtrar detecciones solo por top/bottom (no por left/right).
+    # El filtro X se aplica solo a compare_points (no a detected) porque los agujeros
+    # detectados cerca del borde lateral siguen siendo validos para matchear con expected
+    # points que estan dentro de la zona de comparacion pero cerca del margen.
+    _has_tb_ignore = compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0
+    if detected_in_bbox and _has_tb_ignore:
+        detected_holes_in_bbox = [
+            hh for hh in detected_holes_in_bbox
+            if _y_keep_min <= hh.y <= _y_keep_max
+        ]
         if detected_types is not None:
             _filtered = [
                 (pt, dt) for pt, dt in zip(detected_in_bbox, detected_types)
-                if y_keep_min <= pt[1] <= y_keep_max
+                if _y_keep_min <= pt[1] <= _y_keep_max
             ]
             detected_in_bbox = [p for p, _ in _filtered]
             detected_types = [t for _, t in _filtered]
         else:
             detected_in_bbox = [
                 (x, y) for x, y in detected_in_bbox
-                if y_keep_min <= y <= y_keep_max
+                if _y_keep_min <= y <= _y_keep_max
             ]
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
@@ -664,6 +742,8 @@ def _inspect_bgr(
     pattern_alignment_warn = False
     pattern_offset_warn = False
     pattern_slope_warn = False
+    _desalign_stop   = False   # Desalineacion de patron: parada inmediata
+    _desalign_reason = ""
 
     if centering is not None:
         chapa_zigzag_std_px          = getattr(centering, "chapa_zigzag_std_px",          0.0)
@@ -692,6 +772,12 @@ def _inspect_bgr(
                     or pattern_zigzag_max_px > pattern_align_abs_max_px):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - ZIGZAG BORDE "
+                        f"(std={pattern_zigzag_std_px:.1f}px, max={pattern_zigzag_max_px:.1f}px)"
+                    )
             if (
                 pattern_global_offset_max_px > 0.0
                 and abs(centering.offset_px) > pattern_global_offset_max_px
@@ -699,6 +785,12 @@ def _inspect_bgr(
                 pattern_offset_warn = True
                 pattern_alignment_warn = True
                 final_status = "NOK"
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - DESCENTRADO "
+                        f"({centering.offset_px:+.1f}px)"
+                    )
             if (
                 pattern_slope_delta_max_deg > 0.0
                 and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
@@ -707,12 +799,24 @@ def _inspect_bgr(
                 pattern_slope_warn = True
                 pattern_alignment_warn = True
                 final_status = "NOK"
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - INCLINACION "
+                        f"({getattr(centering, 'pattern_sheet_slope_delta_max_deg', 0.0):.1f} deg)"
+                    )
 
         if pattern_center_align_enabled and frame_geometry_quality != "UNSTABLE":
             if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
                     or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # zigzag interno del patrón → NOK
+                if pattern_align_machine_stop:
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO - ZIGZAG CENTRO "
+                        f"(std={pattern_center_zigzag_std_px:.1f}px, max={pattern_center_zigzag_max_px:.1f}px)"
+                    )
 
     # Near-miss pairs: missing expected points with a detected hole between tol and 2×tol.
     # Shown as thin cyan lines in the overlay so the operator can see the gap at a glance.
@@ -746,20 +850,59 @@ def _inspect_bgr(
     machine_stop = False
     _ms_reason   = "AGUJERO PERSISTENTE FALTANTE"
     if _ms_detector is not None:
+        _ms_missing_points = report.missing_points
+        _ms_missing_cells = report.missing_cells
+        _ms_near_miss_pairs = near_miss_pairs
+        if (
+            machine_stop_require_frame_nok
+            and frame_missing_nok_threshold is not None
+            and report.missing <= frame_missing_nok_threshold
+        ):
+            # For microperforado, do not accumulate machine-stop evidence from
+            # low-severity missing bursts that are still below the frame NOK gate.
+            _ms_missing_points = []
+            _ms_missing_cells = []
+            _ms_near_miss_pairs = []
         # FALTANTES: solo paran por PERSISTENCIA (>=2 frames). Los frames inclinados se
         # pasan como baja calidad para que la inclinacion (que genera muchos faltantes
         # que NO son punzon roto) no contamine ni dispare la parada por faltantes.
         # Un solo frame con faltantes NUNCA para (el metal pudo correrse).
         _ms_fq = "LOW_QUALITY" if tilt_warn else frame_quality
         machine_stop, _ms_positions = _ms_detector.update(
-            report.missing_points, near_miss_pairs, _ms_fq, img_h,
-            missing_cells=report.missing_cells,
+            _ms_missing_points, _ms_near_miss_pairs, _ms_fq, img_h,
+            missing_cells=_ms_missing_cells,
         )
         if machine_stop:
             cols = _ms_detector.triggered_columns
             if cols:
                 col_str  = ", ".join(str(c) for c in cols)
                 _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
+
+    # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada por RACHA de N frames.
+    # _desalign_stop = True en este frame → incrementar racha.
+    # _desalign_stop = False → resetear racha (ya no hay desalineacion).
+    # Solo se para cuando racha >= pattern_align_stop_frames.
+    # Se aplica DESPUES del ms_detector para no ser reseteado por machine_stop=False.
+    # IMPORTANTE: guardar desalign_state de vuelta en pre[] para que persista al proximo frame
+    # (mismo patron que ema_state: el dict mutado queda en _preloaded entre llamadas).
+    if pattern_align_machine_stop:
+        if _desalign_stop:
+            desalign_state["streak"] += 1
+            desalign_state["reason"]  = _desalign_reason
+        else:
+            desalign_state["streak"] = 0
+            desalign_state["reason"] = ""
+        if desalign_state["streak"] >= pattern_align_stop_frames:
+            machine_stop = True
+            _ms_reason   = (
+                f"{desalign_state['reason']} "
+                f"[{desalign_state['streak']}/{pattern_align_stop_frames} frames]"
+            )
+    else:
+        desalign_state["streak"] = 0
+        desalign_state["reason"] = ""
+    # Persistir estado al siguiente frame (si _preloaded es un dict mutable compartido)
+    pre["desalign_state"] = desalign_state
 
     # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
     # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
@@ -847,6 +990,36 @@ def _inspect_bgr(
     if machine_stop:
         final_status = "NOK"
 
+    roi_info = _update_runtime_roi_drift(
+        pre,
+        roi,
+        roi_info,
+        report,
+        enabled=roi_recenter_enabled,
+        warmup_frames=roi_recenter_warmup_frames,
+        trigger_delta_px=roi_recenter_trigger_delta_px,
+        edge_missing_min=roi_recenter_edge_missing_min,
+        edge_band_px=roi_recenter_edge_band_px,
+        streak_frames=roi_recenter_streak_frames,
+        step_px=roi_recenter_step_px,
+        max_total_shift_px=roi_recenter_max_total_shift_px,
+    )
+
+    _roi_slow_ema_step(
+        pre,
+        roi_info,
+        model,
+        scanner_id,
+        enabled=roi_slow_ema_enabled,
+        alpha=roi_slow_ema_alpha,
+        threshold_px=roi_slow_ema_threshold_px,
+        confirm_frames=roi_slow_ema_confirm_frames,
+        cooldown_frames=roi_slow_ema_cooldown_frames,
+        max_total_px=roi_slow_ema_max_total_px,
+        save_every=roi_slow_ema_save_every,
+        warmup_frames=roi_slow_ema_warmup_frames,
+    )
+
     # Build NOK cause list for the overlay panel (shown whenever final_status == "NOK")
     nok_reasons: list[str] = []
     if report.missing > 0:
@@ -877,34 +1050,20 @@ def _inspect_bgr(
 
     badge_count = int(bool(machine_stop)) + int(bool(pattern_alignment_warn)) + int(bool(_lateral_shift_warn))
 
-    overlay_holes = holes
-    if compare_points:
-        if bbox_filter_margin_px >= 0:
-            xs = [p[0] for p in compare_points]
-            ys = [p[1] for p in compare_points]
-            m = bbox_filter_margin_px
-            bx1, bx2 = min(xs) - m, max(xs) + m
-            by1, by2 = min(ys) - m, max(ys) + m
-            overlay_holes = [
-                h for h in overlay_holes
-                if bx1 <= h.x <= bx2 and by1 <= h.y <= by2
-            ]
-        if compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0:
-            y_keep_min = compare_top_ignore_px
-            y_keep_max = img_h - compare_bottom_ignore_px
-            overlay_holes = [
-                h for h in overlay_holes
-                if y_keep_min <= h.y <= y_keep_max
-            ]
-        if pattern_hull_margin_px > 0.0 and len(compare_points) >= 3:
-            hull = cv2.convexHull(np.array(compare_points, dtype=np.float32).reshape(-1, 1, 2))
-            overlay_holes = [
-                h for h in overlay_holes
-                if cv2.pointPolygonTest(hull, (float(h.x), float(h.y)), True) >= -pattern_hull_margin_px
-            ]
+    # Visual semantics for operators:
+    # green = detected hole inside the active pattern comparison window
+    # cyan  = raw detection outside that active window
+    #
+    # Using only report.matched_detected_idx made the overlay too strict: a hole
+    # could be valid and relevant to the pattern region, but remain cyan simply
+    # because the 1-to-1 matcher assigned a nearby neighbor to the expected point.
+    # For operator feedback we want "participates in pattern analysis", not
+    # "won the exact assignment slot".
+    overlay_holes = list(detected_holes_in_bbox)
 
     # Draw hole annotations on the ROI image (hole coords are in ROI space)
     overlay_roi = draw_compare_overlay(img, overlay_holes, report.missing_points, final_status,
+                                       raw_detected=holes,
                                        extra_points=report.extra_points,
                                        near_miss_pairs=near_miss_pairs,
                                        nok_reasons=nok_reasons,
@@ -951,6 +1110,7 @@ def _inspect_bgr(
     overlay = draw_status_indicator(overlay, final_status, nok_reasons, badge_count)
     overlay = draw_tilt_indicator(overlay, sheet_tilt_deg, warn=tilt_warn)
     overlay = draw_blur_indicator(overlay, blur_score, blur_score_min)
+    overlay = draw_roi_health_indicator(overlay, roi_info)
 
     return InspectionResult(
         model=model,
@@ -982,6 +1142,263 @@ def _inspect_bgr(
         sheet_tilt_deg=float(sheet_tilt_deg),
         tilt_warn=tilt_warn,
         image=img_full,
+        active_roi=roi,
+        roi_info=roi_info,
+    )
+
+
+def _edge_missing_counts(
+    missing_points: list[tuple[float, float]],
+    roi_w: int,
+    band_px: float,
+) -> tuple[int, int]:
+    if not missing_points or band_px <= 0.0 or roi_w <= 0:
+        return 0, 0
+    left = 0
+    right = 0
+    right_x0 = max(0.0, float(roi_w) - band_px)
+    for x, _ in missing_points:
+        if x <= band_px:
+            left += 1
+        if x >= right_x0:
+            right += 1
+    return left, right
+
+
+def _roi_slow_ema_step(
+    pre: dict,
+    roi_info: "RuntimeROIInfo | None",
+    model: str,
+    scanner_id: "str | None",
+    *,
+    enabled: bool,
+    alpha: float,
+    threshold_px: float,
+    confirm_frames: int,
+    cooldown_frames: int,
+    max_total_px: int,
+    save_every: int,
+    warmup_frames: int,
+) -> None:
+    if not enabled or roi_info is None or roi_info.detected_roi is None:
+        return
+
+    state = pre.get("roi_slow_ema")
+    if state is None:
+        state = load_roi_drift_state(model, scanner_id)
+        pre["roi_slow_ema"] = state
+
+    shift_x = float(roi_info.shift_x)
+    n = int(state.get("n_frames", 0)) + 1
+    state["n_frames"] = n
+
+    # Fase 1: warmup - media simple para fijar baseline (captura offset estatico)
+    if not state.get("baseline_ready", False):
+        w_sum   = float(state.get("warmup_sum",   0.0)) + shift_x
+        w_count = int(state.get("warmup_count",   0))   + 1
+        state["warmup_sum"]   = w_sum
+        state["warmup_count"] = w_count
+        if w_count >= warmup_frames:
+            baseline = w_sum / w_count
+            state["ema_baseline"]   = round(baseline, 4)
+            state["ema"]            = round(baseline, 4)
+            state["baseline_ready"] = True
+            logger.info(
+                "[%s] ROI slow EMA: baseline=%.2fpx (%d frames)",
+                scanner_id, baseline, w_count,
+            )
+        if n % save_every == 0:
+            save_roi_drift_state(state, model, scanner_id)
+        return
+
+    # Fase 2: produccion - EMA lento, comparar delta vs baseline
+    ema = float(state.get("ema", shift_x))
+    ema = ema * (1.0 - alpha) + shift_x * alpha
+    state["ema"] = round(ema, 4)
+
+    baseline = float(state.get("ema_baseline", ema))
+    delta    = ema - baseline
+
+    cooldown = int(state.get("cooldown_remaining", 0))
+    if cooldown > 0:
+        state["cooldown_remaining"] = cooldown - 1
+        if n % save_every == 0:
+            save_roi_drift_state(state, model, scanner_id)
+        return
+
+    if delta >= threshold_px:
+        direction = 1
+    elif delta <= -threshold_px:
+        direction = -1
+    else:
+        state["confirm_streak"] = 0
+        if n % save_every == 0:
+            save_roi_drift_state(state, model, scanner_id)
+        return
+
+    if state.get("confirm_dir", 0) == direction:
+        streak = int(state.get("confirm_streak", 0)) + 1
+    else:
+        state["confirm_dir"] = direction
+        streak = 1
+    state["confirm_streak"] = streak
+
+    if n % save_every == 0:
+        save_roi_drift_state(state, model, scanner_id)
+
+    if streak < confirm_frames:
+        return
+
+    # Drift confirmado: aplicar correccion de 1px
+    current_roi = pre.get("roi")
+    if current_roi is None:
+        return
+
+    applied_total = int(state.get("applied_total_px", 0))
+    if abs(applied_total + direction) > max_total_px:
+        logger.warning(
+            "[%s] ROI slow EMA: limite maximo +/-%dpx alcanzado - recalibracion manual recomendada",
+            scanner_id, max_total_px,
+        )
+        return
+
+    new_x = max(0, min(roi_info.frame_w - current_roi.w, current_roi.x + direction))
+    new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
+
+    import json as _json
+    p = roi_path(model, scanner_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.error("[%s] ROI slow EMA: error escribiendo roi.json: %s", scanner_id, exc)
+        return
+
+    applied_total += direction
+    state["applied_total_px"]   = applied_total
+    state["confirm_streak"]     = 0
+    state["cooldown_remaining"] = cooldown_frames
+    state["ema_baseline"] = round(baseline + direction, 4)
+    save_roi_drift_state(state, model, scanner_id)
+
+    pre["roi"] = new_roi
+
+    logger.info(
+        "[%s] ROI slow EMA: %+dpx -> x=%d  (delta=%.1fpx  racha=%d  total=%+dpx)",
+        scanner_id, direction, new_roi.x, delta, streak, applied_total,
+    )
+
+
+
+def _update_runtime_roi_drift(
+    pre: dict,
+    active_roi: ROI | None,
+    roi_info: RuntimeROIInfo | None,
+    report: CompareReport,
+    *,
+    enabled: bool,
+    warmup_frames: int,
+    trigger_delta_px: float,
+    edge_missing_min: int,
+    edge_band_px: float,
+    streak_frames: int,
+    step_px: float,
+    max_total_shift_px: float,
+) -> RuntimeROIInfo | None:
+    if not enabled or active_roi is None or roi_info is None or roi_info.detected_roi is None:
+        return roi_info
+
+    state = pre.get("roi_runtime_state") or {}
+    pre["roi_runtime_state"] = state
+    saved_roi = pre.get("saved_roi") or active_roi
+    state.setdefault("baseline_shift_x", None)
+    state.setdefault("baseline_samples", 0)
+    state.setdefault("drift_streak", 0)
+    state.setdefault("drift_dir", 0)
+    state.setdefault("applied_total_shift_px", float(active_roi.x - saved_roi.x))
+    state.setdefault("last_step_px", 0.0)
+    state.setdefault("baseline_ready", False)
+
+    shift_x = float(roi_info.shift_x)
+    baseline_shift_x = state.get("baseline_shift_x")
+    baseline_samples = int(state.get("baseline_samples", 0))
+
+    left_missing, right_missing = _edge_missing_counts(
+        list(report.missing_points or []),
+        active_roi.w,
+        edge_band_px,
+    )
+
+    if baseline_shift_x is None:
+        baseline_shift_x = shift_x
+        baseline_samples = 1
+    elif not state.get("baseline_ready", False):
+        baseline_shift_x = ((baseline_shift_x * baseline_samples) + shift_x) / (baseline_samples + 1)
+        baseline_samples += 1
+
+    if baseline_samples >= max(1, warmup_frames):
+        state["baseline_ready"] = True
+
+    state["baseline_shift_x"] = baseline_shift_x
+    state["baseline_samples"] = baseline_samples
+
+    drift_delta = shift_x - float(baseline_shift_x)
+    evidence_dir = 0
+    if drift_delta <= -trigger_delta_px and left_missing >= edge_missing_min:
+        evidence_dir = -1
+    elif drift_delta >= trigger_delta_px and right_missing >= edge_missing_min:
+        evidence_dir = 1
+
+    if evidence_dir == 0:
+        state["drift_streak"] = 0
+        state["drift_dir"] = 0
+        state["last_step_px"] = 0.0
+        return roi_info
+
+    if int(state.get("drift_dir", 0)) == evidence_dir:
+        state["drift_streak"] = int(state.get("drift_streak", 0)) + 1
+    else:
+        state["drift_dir"] = evidence_dir
+        state["drift_streak"] = 1
+
+    state["last_step_px"] = 0.0
+    if not state.get("baseline_ready", False):
+        return roi_info
+    if int(state.get("drift_streak", 0)) < max(1, streak_frames):
+        return roi_info
+
+    current_total_shift = float(active_roi.x - saved_roi.x)
+    target_total_shift = current_total_shift + (float(step_px) * evidence_dir)
+    if max_total_shift_px > 0.0:
+        target_total_shift = max(-max_total_shift_px, min(max_total_shift_px, target_total_shift))
+    applied_step = target_total_shift - current_total_shift
+    if abs(applied_step) < 0.5:
+        state["drift_streak"] = 0
+        return roi_info
+
+    new_x = int(round(saved_roi.x + target_total_shift))
+    max_x = max(0, roi_info.frame_w - active_roi.w)
+    new_x = max(0, min(new_x, max_x))
+    new_roi = ROI(x=new_x, y=active_roi.y, w=active_roi.w, h=active_roi.h)
+    pre["roi"] = new_roi
+    state["applied_total_shift_px"] = float(new_roi.x - saved_roi.x)
+    state["drift_streak"] = 0
+    state["last_step_px"] = float(new_roi.x - active_roi.x)
+
+    recenter_note = f"ROI recenter {state['last_step_px']:+.0f}px -> x={new_roi.x}"
+    return RuntimeROIInfo(
+        frame_w=roi_info.frame_w,
+        frame_h=roi_info.frame_h,
+        saved_roi=roi_info.saved_roi,
+        effective_roi=roi_info.effective_roi,
+        detected_roi=roi_info.detected_roi,
+        shift_x=roi_info.shift_x,
+        width_delta_px=roi_info.width_delta_px,
+        auto_corrected=True,
+        warning=f"{roi_info.warning} | {recenter_note}".strip(" |"),
     )
 
 
@@ -1029,7 +1446,11 @@ def inspect_folder(
     max_response_sec: float | None = None,
     scanner_id: str | None = None,
 ) -> FolderInspectionSummary:
-    tolerances = load_tolerances(model)
+    from src.vision.inspector import InspectionSession
+
+    scanner_id = scanner_id or infer_scanner_id(model, input_dir)
+
+    tolerances = load_tolerances(model, scanner_id=scanner_id)
     frame_rate_hz = float(
         tolerances["frame_rate_hz"] if frame_rate_hz is None else frame_rate_hz
     )
@@ -1043,16 +1464,7 @@ def inspect_folder(
     )
 
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))
-
-    ms_detector = MachineStopDetector(
-        enabled=bool(tolerances.get("machine_stop_enabled", False)),
-        missing_frames=int(tolerances.get("machine_stop_missing_frames", 5)),
-        min_missing=int(tolerances.get("machine_stop_min_missing", 1)),
-        same_zone_px=float(tolerances.get("machine_stop_same_zone_px", 35.0)),
-        ignore_near_miss=bool(tolerances.get("machine_stop_ignore_near_miss", True)),
-        track_by_grid=bool(tolerances.get("machine_stop_track_by_grid", True)),
-        same_column_tol_cells=int(tolerances.get("machine_stop_same_column_tol_cells", 0)),
-    )
+    movement_threshold = float(tolerances.get("continuous_position_threshold", 0.0))
 
     import os
     from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1061,21 +1473,20 @@ def inspect_folder(
     n = len(image_paths)
 
     # Pre-load shared read-only resources once (elimina N×3 lecturas de disco)
-    _pre: dict = {
-        "tolerances": tolerances,
-        "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
-        "roi":        load_roi(model, scanner_id),
-    }
+    session = InspectionSession(
+        model,
+        scanner_id=scanner_id,
+        save=save,
+        movement_threshold=movement_threshold,
+        min_interval_sec=0.0,
+    )
 
-    if ms_detector._enabled:
-        # Secuencial obligatorio: MachineStopDetector tiene estado y debe ver
-        # los frames en orden para acumular rachas correctamente.
-        _pre["machine_stop_detector"] = ms_detector
-        results = [
-            inspect_image(model, path, save=save, scanner_id=scanner_id,
-                          _preloaded=_pre)
-            for path in image_paths
-        ]
+    if "machine_stop_detector" in session._preloaded:
+        results = []
+        for path in image_paths:
+            result = session.inspect_path(path)
+            if result is not None:
+                results.append(result)
     else:
         # Paralelo seguro: sin detector con estado.
         # OpenCV y numpy liberan el GIL en operaciones pesadas.
@@ -1084,8 +1495,7 @@ def inspect_folder(
 
         def _worker(args):
             idx, path = args
-            return idx, inspect_image(model, path, save=save,
-                                      scanner_id=scanner_id, _preloaded=_pre)
+            return idx, inspect_image(model, path, save=save, scanner_id=scanner_id)
 
         with ThreadPoolExecutor(max_workers=n_workers) as executor:
             futures = {

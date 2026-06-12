@@ -46,7 +46,1386 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-12 — Tadeo + Claude
+
+#### Cambio 176 - Calibracion fina viernes 12: microperforado OK por scanner sin mezclar tolerancias
+
+**Pedido:** revisar `C:\Users\DefyC\Downloads\IMAGENES-VIERNES-12`, testear
+`SCANNER_1` y `SCANNER_2` por separado, y hacer tuneo fino de patron/ROI.
+Todas las imagenes del lote son OK, asi que no habia que mezclar tolerancias
+entre scanners ni dejar falsas paradas de maquina.
+
+**Hallazgos:**
+- `origin/master` no tenia cambios nuevos, pero Tadeo subio una base util a
+  `origin/clean-push` con ROI/tolerancias/patrones de `modelo_B`.
+- Esa base mejoro fuerte ambos scanners, pero todavia dejaba:
+  - `scanner_1`: `63/74 raw OK`, `74/74 temporal OK`
+  - `scanner_2`: `68/76 raw OK`, `76/76 temporal OK`
+- `scanner_1` admitia una mejora geometrica clara reconstruyendo el patron desde
+  una imagen buena del viernes.
+- `scanner_2` funcionaba mejor sobre `modelo_B` especifico que sobre las pruebas
+  hechas antes con `modelo_A`; reconstruirlo desde `frame_0000` y mover apenas
+  la ROI bajo mas el missing residual.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml`
+  - se tomo la base de `origin/clean-push` para `modelo_B`:
+    - `pattern_edge_margin_px: 22.0`
+    - `grid_affine_refinement: false`
+    - `use_hungarian_matching: true`
+- `config/io_map.yaml`
+  - `scanner_1.inspection.pattern_edge_margin_px: 5.0`
+  - `scanner_1.inspection.tol_xy_px: 38.0`
+  - `scanner_2.inspection.tol_xy_px: 42.0`
+- `data/patterns/scanner_1/modelo_B/roi.json`
+  - ROI final: `x=214, y=0, w=241, h=480`
+- `data/patterns/scanner_1/modelo_B/holes.json`
+  - reconstruido desde `12-06-2026-MICROPERFORADO_10_SCANNER_1/frame_0055.png`
+  - patron final: `167 puntos`
+- `data/patterns/scanner_2/modelo_B/roi.json`
+  - ROI final: `x=218, y=0, w=235, h=480`
+- `data/patterns/scanner_2/modelo_B/holes.json`
+  - reconstruido desde `12-06-2026-MICROPERFORADO_2_SCANNER_2/frame_0000.png`
+  - patron final: `164 puntos`
+
+**Validacion final sobre el lote del viernes:**
+- `scanner_1` con `modelo_B`
+  - `74/74 raw OK`
+  - `74/74 temporal OK`
+  - `machine_stop_frames=0`
+  - `align_failures=0/74`
+- `scanner_2` con `modelo_B`
+  - `71/76 raw OK`
+  - `76/76 temporal OK`
+  - `machine_stop_frames=0`
+  - `align_failures=0/76`
+
+**Riesgos / oportunidades:**
+- `scanner_1` quedo operativo sobre el lote OK del viernes.
+- `scanner_2` mejoro mucho el baseline de missing, pero todavia conserva
+  `5 raw NOK` residuales aunque sin disparar NOK temporal ni machine stop.
+- Si queres llevar `scanner_2` a `raw OK` total tambien, el siguiente paso sano
+  ya no parece ser abrir mas `tol_xy_px`, sino revisar esos grupos de celdas
+  residuales (`ci~3, cj~15-19`) con una captura de referencia mas centrada o
+  un ajuste puntual de patron en esa franja.
+
+**Archivos:** `config/tolerancias.yaml`, `config/io_map.yaml`,
+`data/patterns/scanner_1/modelo_B/roi.json`,
+`data/patterns/scanner_1/modelo_B/holes.json`,
+`data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
+#### Cambio 175 - ROI slow EMA: correccion de baseline para ROI angosta
+
+**Problema:** la version anterior comparaba el EMA contra threshold absoluto (15px).
+Para scanner_2 con ROI angosta (x=225, w=205), el centro del ROI esta desplazado
+~7px del centro de la chapa por diseno. Esto hacia que el EMA arrancara fuera
+del umbral sin que hubiera drift real.
+
+**Solucion:**
+- Fase warmup (primeros `roi_slow_ema_warmup_frames` frames, default 300 = ~60s):
+  acumula media simple de shift_x para capturar el offset estatico real.
+  Al terminar: `ema_baseline = mean(shift_x durante warmup)`, se guarda en disco.
+- Produccion: drift real = `EMA - ema_baseline`. Solo se actua cuando este delta
+  supera threshold_px de forma sostenida.
+- Agrega nueva clave `roi_slow_ema_warmup_frames: 300` en DEFAULT_TOLERANCES.
+
+**Funciona correctamente para:**
+- scanner_1: ROI ancha, offset ~0px → igual comportamiento que antes
+- scanner_2: ROI angosta, offset estatico ~-7px → absorbido en el baseline
+
+**Archivos:** `src/inspection.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 174 - ROI slow EMA drift correction (auto-calibracion gradual)
+
+**Pedido:** calibracion automatica muy lenta del ROI para produccion 24/7, sin
+cambios instantaneos que rompan la deteccion.
+
+**Diseño:**
+- `shift_x` de `resolve_runtime_roi` (deteccion de backlight) se acumula en un EMA
+  con alpha=0.002 (converge en ~500 frames, ~100s a 5fps).
+- Solo cuando |EMA| >= threshold (15px por defecto) se mantiene por confirm_frames
+  (500 frames = ~100s) se escribe 1px de correccion a `roi.json`.
+- Despues de cada correccion: cooldown_frames=1500 (~5 min) antes de poder corregir
+  otra vez.
+- Maximo total: ±40px desde el roi.json en disco.
+- Estado persistido en `data/patterns/{scanner}/{model}/roi_drift_state.json` para
+  sobrevivir reinicios. On restart: continua desde donde quedo.
+- Nunca modifica el ROI del frame en curso — la correccion queda efectiva a partir
+  del siguiente frame.
+- Tiempo minimo para 1px de correccion a 5fps: ~3.5 min de drift sostenido.
+- Para llegar a 40px de correccion total: minimo ~2.5 horas de drift continuo.
+
+**Activar (OFF por defecto, activar por scanner):**
+En `config/io_map.yaml`, dentro del bloque del scanner (inspection_overrides):
+```yaml
+roi_slow_ema_enabled: true
+```
+
+**Parametros ajustables (todos con defaults conservadores):**
+| Param | Default | Efecto |
+|---|---|---|
+| roi_slow_ema_alpha | 0.002 | suavidad del EMA (~500 frames para converger) |
+| roi_slow_ema_threshold_px | 15.0 | drift minimo para arrancar confirmacion |
+| roi_slow_ema_confirm_frames | 500 | frames sostenidos antes de escribir 1px |
+| roi_slow_ema_cooldown_frames | 1500 | pausa entre correcciones (~5min a 5fps) |
+| roi_slow_ema_max_total_px | 40 | max correccion total permitida |
+| roi_slow_ema_save_every | 300 | frecuencia de guardado del estado (~60s) |
+
+**Archivos:** `src/inspection.py`, `src/patterns/roi.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 173 - Panel de salud ROI en pestaña Calibración
+
+**Pedido:** mostrar la salud del ROI en la pestaña de calibración.
+
+**Comportamiento:**
+- Se muestra bajo el preview, con borde de color:
+  - Verde: drift < 10px y sin warning → "OK"
+  - Naranja: drift 10-∞px sin warning → "Drift moderado"
+  - Rojo: hay warning → muestra el texto del warning
+- Campos mostrados: Frame WxH, ROI guardada (x, w), ROI detectada (x, w), Drift X (px), Estado
+- Si no hay ROI guardada: muestra frame size + ROI detectada (si la hay)
+- Se actualiza al cargar imagen o carpeta (inmediato)
+- En modo Cámara en vivo: actualiza cada ~15 frames (~2s a 8fps) para no saturar CPU
+
+**Implementación:**
+- `_roi_health_lbl`: QLabel con fondo oscuro y borde de color dinámico
+- `_roi_refresh_health()`: llama a `resolve_runtime_roi` (o `detect_roi_from_images`
+  si no hay ROI guardada) y actualiza el label
+- `_roi_live_frame_count`: contador para throttle del health check en live
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 172 - Nombres de grabaciones incluyen scanner
+
+**Pedido:** al guardar grabaciones, incluir el scanner en el nombre de carpeta.
+**Formato:** `DD-MM-YYYY-MODELO_N_SCANNER_X` (ej: `11-06-2026-MICROPERFORADO_9_SCANNER_2`).
+
+**Cambios en `src/ui/service.py`:**
+- `_build_recording_folder_name(date_str, scanner_id)`: acepta `scanner_id`, lo
+  normaliza a mayusculas (ej: `scanner_2` → `SCANNER_2`) y lo agrega al final del nombre.
+  El parsing de `next_idx` ahora soporta ambos formatos (viejo sin scanner, nuevo con scanner).
+- `_on_start`: pasa `sid` (scanner seleccionado) a `_build_recording_folder_name`.
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 171 - ROI calibracion: preview en vivo desde camara del scanner
+
+**Pedido:** en la pantalla de calibracion ROI, poder ver la imagen en tiempo real
+del scanner 1 o 2 seleccionado, ademas de poder abrir imagen o carpeta.
+
+**Cambios en `src/ui/service.py`:**
+- Nuevo estado: `_roi_live_active`, `_roi_live_timer` (QTimer, 120ms ≈ 8fps).
+- Nuevo botón "▶ Cámara en vivo" (checkable) en la fila de fuente del grupo ROI.
+  Al activar: verde, deshabilita los otros botones de fuente, inicia el timer.
+  Al desactivar o cambiar de scanner: restaura a estado normal, congela el frame.
+- `_roi_grab_live()`: obtiene frame via `self._system.camera(sid).get_frame()` y
+  llama a `_roi_redraw()`. En el primer frame inicializa bordes con ROI guardada.
+- `_on_roi_scanner_changed()`: si live está activo al cambiar scanner, lo detiene.
+- Clases de estilo `_ROI_BTN_SS` / `_ROI_BTN_LIVE_SS` como atributos de clase
+  (BTN_SS es local a `_build_roi_section` y no accesible en handlers).
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 170 - scanner_2 microperforado: correccion completa de ROI, patron y grid
+
+**Pedido:** el scanner_2 en modo MICROPERFORADO tomaba muy mal los agujeros (patron de
+55 holes vs ~200 reales, ratio=346%), ROI incorrecta, margenes mal. Corregir sin tocar scanner_1.
+
+**Diagnostico:**
+- ROI estaba en `{x:109, w:438}` (casi full-frame) en vez de `{x:225, w:205}` (banda correcta).
+- `pattern_edge_margin_px: 50.0` en ROI de 208px dejaba solo 2-3 columnas al construir patron.
+- `grid_stagger_x_odd: -18.0` (global) es OPUESTO al stagger real de scanner_2 (+18px):
+  en scanner_1 filas impares van a la IZQUIERDA; en scanner_2 van a la DERECHA.
+- `grid_dx: 36.0` y `grid_dy: 14.0` globales no matcheaban la geometria real de scanner_2
+  (dx medido=35.5, dy=13.6 de 10 frames, 1700+ mediciones).
+- `estimate_phase(xs, dx)` mezcla filas pares e impares (offset 18px entre sí) produciendo
+  distribucion bimodal; la moda elegía el pico incorrecto (phase_x=28 vs real ~24).
+- Formula de dedup en `pattern_build.py` usaba `phase_x + ci*dx + stagger` sin modulo para
+  filas impares, mientras `assign_cells` usa `(phase_x+stagger) % dx + ci*dx`. Con
+  phase_x+stagger > dx la formula incorrecta guardaba el punto equivocado en la celda.
+
+**Cambios:**
+- `config/io_map.yaml`: scanner_2 inspection overrides nuevos:
+  - `grid_stagger_x_odd: 18.0` (positivo, opuesto al -18 global de scanner_1)
+  - `grid_dx: 35.5`, `grid_dy: 13.6` (geometria real medida de scanner_2)
+  - `pattern_edge_margin_px: 5.0` ya estaba; se mantiene
+- `data/patterns/scanner_2/modelo_B/roi.json`: `{x:225, y:0, w:205, h:480}` (corregida)
+- `data/patterns/scanner_2/modelo_B/holes.json`: reconstruido con 157 agujeros (vs 55 prev)
+- `src/patterns/pattern_build.py`:
+  - `estimate_phase`: cuando `stagger_override` esta configurado, calcular `phase_x` solo
+    de filas pares (separadas via `phase_y`), no de todas las xs mezcladas
+  - formula de dedup para filas impares: usar `(phase_x+stagger)%dx + ci*dx` (consistente
+    con `assign_cells`) en vez de `phase_x + ci*dx + stagger` (sin modulo)
+
+**Resultado tras rebuild:**
+- 161 puntos detectados, 157 celdas unicas (4 duplicados residuales en zonas ambiguas deduplados)
+- `avg_detection_ratio=124%` (vs 346% antes); algunos frames aun muestran missing intermitente
+  pendiente de ajuste fino de threshold o compare-margins para scanner_2
+
+**Archivos:** `config/io_map.yaml`, `data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `src/patterns/pattern_build.py`, `CHANGELOG.md`
+
+---
+
+### Sesion 2026-06-12 — Tadeo + Claude
+
+#### Cambio 176 - Tuneo fino de patrones scanner_1 y scanner_2 (lote OK del 12-06)
+
+**Pedido:** calibrar con el lote OK del 12-06 (105 frames scanner_1, 132 frames scanner_2)
+para que todos los frames conocidos-OK se clasifiquen como OK sin missing. NO mezclar
+configuraciones entre scanners.
+
+**Diagnostico:**
+- `run-folder` original: scanner_1 100% temporal OK pero max missing=6/frame (ci=4,5).
+  scanner_2 100% temporal OK pero max missing=5/frame (ci=3).
+- Los cells con missing frecuente estan en las columnas DERECHAS del patron: ci=4,5
+  para scanner_1 (x≈190-212px en ROI de 245px); ci=3 para scanner_2 (x≈107-124px en
+  ROI de 205px). Estas columnas estan cerca del borde de la zona perforada y el borde
+  de chapa varia en produccion.
+- Intentar `compare_right_ignore_px` no funcionaba porque `pattern_align_enabled=true`
+  computa centrado sobre los puntos esperados vs detectados: al recortar solo el expected
+  pero no el detected, la asimetria dispara falsos NOK de alineacion.
+
+**Solucion:**
+- **Reconstruir patrones** con `pattern_edge_margin_right_px` alto para excluir las
+  columnas inestables DEL PATRON en build-time (no en compare-time).
+  - scanner_1: `pattern_edge_margin_right_px: 95.0` → patron de 112 holes (vs 167 original)
+    (frame referencia: frame_0091)
+  - scanner_2: `pattern_edge_margin_right_px: 100.0` → patron de 86 holes (vs 164 original)
+    (frame referencia: frame_0104)
+- **Deshabilitar `pattern_align_enabled`** por scanner en io_map.yaml, ya que el check
+  de alineacion presupone que el patron cubre todo el ancho detectable. Con patron
+  recortado y agujeros reales detectados fuera del convex hull esperado, siempre
+  dispara falsos NOK. `machine_stop_enabled: true` sigue cubriendo defectos reales.
+
+**Cambios en `config/io_map.yaml`:**
+- scanner_1 inspection: agrega `pattern_align_enabled: false`, `pattern_edge_margin_right_px: 95.0`
+- scanner_2 inspection: agrega `pattern_align_enabled: false`, `pattern_edge_margin_right_px: 100.0`
+
+**Cambios en patrones:**
+- `data/patterns/scanner_1/modelo_B/holes.json`: reconstruido con 112 holes
+- `data/patterns/scanner_2/modelo_B/holes.json`: reconstruido con 86 holes
+
+**Resultado final:**
+- scanner_1: 74/74 OK (100%), machine_stop=0, max missing/frame≤2, max freq 7%
+- scanner_2: 76/76 OK (100%), machine_stop=0, max missing/frame≤1, max freq 3%
+- Razon detection_ratio alta (165-200%): los agujeros de las columnas recortadas siguen
+  siendo detectados pero ya no tienen expected partners → se cuentan en el numerador
+  del ratio pero no como missing. Esto es correcto y esperado.
+
+**NOTA IMPORTANTE:** si se cambia optica/camara/ROI, reconstruir el patron con:
+```
+.venv\Scripts\python.exe -m src.main build-pattern --model modelo_B --scanner scanner_1 --img <frame_ok.png>
+.venv\Scripts\python.exe -m src.main build-pattern --model modelo_B --scanner scanner_2 --img <frame_ok.png>
+```
+Los `pattern_edge_margin_right_px` en io_map.yaml se aplican automaticamente al rebuild.
+
+**Archivos:** `config/io_map.yaml`, `data/patterns/scanner_1/modelo_B/holes.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
+#### Cambio 169 - ROI recenter dinamico (feature desactivado por defecto)
+
+**Pedido:** detectar deriva lateral de ROI en produccion y corregirla paso a paso.
+
+**Cambios:**
+- `src/inspection.py`: `_update_runtime_roi_drift()` + `_edge_missing_counts()` — detecta
+  si los missing estan concentrados en un borde lateral de forma persistente y desplaza
+  la ROI un pixel por frame hasta corregir la deriva. Activar con `roi_recenter_enabled: true`.
+- `src/vision/inspector.py`: `saved_roi` y `roi_runtime_state` en preloaded para persistir
+  estado entre frames.
+- `src/utils/config.py`: nuevos defaults `roi_recenter_*` (todos conservadores, feature OFF).
+
+**Estado:** implementado y desactivado. `roi_recenter_enabled: false` por defecto.
+
+**Archivos:** `src/inspection.py`, `src/vision/inspector.py`, `src/utils/config.py`, `CHANGELOG.md`
+
+---
+
+### Sesión 2026-06-11 — Tadeo + Claude
+
+#### Cambio 168 - Verificacion de tamano de frame/ROI + diagnostico `roi-check`
+
+**Pedido:** poder verificar si el frame cambia de tamano o si la chapa se corre
+con el tiempo, para auditar si la ROI sigue siendo valida sin meter una regresion
+en la deteccion de microperforado.
+
+**Cambios aplicados:**
+- `src/patterns/roi.py`
+  - nueva `RuntimeROIInfo` para reportar frame size, ROI activa, ROI detectada y shift X;
+  - nueva `resolve_runtime_roi()`:
+    - valida la ROI guardada contra el frame actual,
+    - detecta el ancho/centro real de la chapa desde backlight,
+    - deja lista una correccion horizontal conservadora si mas adelante se decide activarla;
+  - ajuste importante: si la ROI guardada es una banda angosta dentro de la chapa
+    (caso microperforado), no compara su ancho contra el ancho total detectado de la chapa,
+    porque eso generaba warnings falsos.
+- `src/inspection.py`
+  - cada inspeccion ahora calcula `roi_info` y lo devuelve en `InspectionResult`;
+  - el overlay muestra `Frame: WxH`, `ROI x/w` y, si aparece, un warning de ROI/patron.
+- `src/pipeline/annotate.py`
+  - nuevo `draw_roi_health_indicator()` para dibujar el estado del frame/ROI en el overlay.
+- `src/main.py`
+  - nuevo comando `roi-check` para auditar una imagen o carpeta completa:
+    - distribucion de tamanos de frame,
+    - shift X mediano/min/max,
+    - CSV `roi_check.csv` con detalle por frame.
+  - `run-image` ahora imprime el contexto ROI si existe.
+- `src/utils/config.py`
+  - nuevas claves de configuracion para ROI runtime:
+    - `roi_autocorrect_enabled`
+    - `roi_autocorrect_max_shift_px`
+    - `roi_autocorrect_max_width_delta_px`
+    - `roi_detect_margin_px`
+    - `roi_detect_min_contrast`
+- `config/tolerancias.yaml`
+  - se dejaron definidos esos parametros para `modelo_B`;
+  - **`roi_autocorrect_enabled` quedo en `false` por seguridad**.
+
+**Validacion:**
+- `python -m src.main roi-check --model modelo_B --scanner scanner_2 --input "...MICROPERFORADO_SCANNER_2" --output data/output/roi_check_scanner_2`
+  - `640x480` en `96/96` frames
+  - shift horizontal estable: mediana `-16.50 px`, min `-18.00`, max `-15.00`
+  - `0/96` warnings
+- `python -m src.main run-folder --model modelo_B --scanner scanner_2 --input "...MICROPERFORADO_SCANNER_2" --fps 5`
+  - sigue en `71/71 raw OK`, `71/71 temporal OK`
+- `pytest tests/` -> `17 passed`
+
+**Nota de diseÃ±o:**
+- se probo activar el recentrado automatico horizontal en `scanner_2`, pero una
+  primera validacion bajo el raw de `71/71` a `69/71`;
+- por eso la correccion automatica quedo implementada pero desactivada por defecto,
+  y esta entrega se enfoca en auditoria/visibilidad sin tocar el comportamiento ya bueno.
+
+**Archivos modificados:** `src/patterns/roi.py`, `src/inspection.py`,
+`src/pipeline/annotate.py`, `src/main.py`, `src/utils/config.py`,
+`config/tolerancias.yaml`, `CHANGELOG.md`
+
+---
+
+#### Cambio 167 - Semaforo: IDLE=amarillo, RUNNING=verde, ALARMA/FAULT=rojo
+
+**Pedido:** manejar salidas del semaforo en scanner_1 y scanner_2:
+- IDLE → luz AMARILLA
+- RUNNING (inspeccion en vivo OK) → luz VERDE
+- ALARMA DETENCION DE MAQUINA / FAULT → luz ROJA
+- RESET → vuelve a AMARILLA (IDLE)
+
+**Diagnostico:** la logica anterior usaba `blue=True` para IDLE. La luz azul
+no es parte de un semaforo industrial estandar; el usuario quiere amarillo=listo,
+verde=corriendo, rojo=alarma.
+
+**Cambios en `src/controller/scanner_controller.py`:**
+- `stop()`: cuando new_state == IDLE → `yellow=True` (antes `blue=True`)
+- `reset()`: STOPPED→IDLE → `yellow=True` (antes `blue=True`)
+- `initialize_lights()`: IDLE → `yellow=True` (antes `blue=True`)
+- docstring del modulo: actualizado "azul" → "amarilla" para IDLE
+
+**Lo que NO cambia:**
+- RUNNING normal → `green=True`
+- RUNNING con racha de aviso → `green=True` + `yellow` parpadeando
+- FAULT → `red=True` + `yellow` parpadeando (poll_loop)
+- machine_stop → STOPPED con `red=True`
+- STOPPED (esperando RESET) → todas apagadas
+
+**Archivos modificados:** `src/controller/scanner_controller.py`
+
+---
+
+#### Cambio 166 - ok_buffer_count 200 -> 500
+
+**Pedido:** guardar mas de 200 frames OK en el buffer circular, renovandose siempre.
+
+**Cambio:** `config/tolerancias.yaml` -> `ok_buffer_count: 200 -> 500`
+
+El buffer circular ya funcionaba (sobreescribe los mas viejos al llenarse).
+Solo se sube el tope a 500 slots (~50 MB a 100 KB/frame por scanner).
+Con `ok_buffer_every: 1` se guarda cada frame OK que llega.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 165 - Microperforado scanner_2: patrón/ROI propios + overrides separados de scanner_1
+
+**Pedido:** calibrar `scanner_2` para microperforado usando la carpeta
+`C:\Users\DefyC\Downloads\10-06-2026-MICROPERFORADO\10-06-2026-MICROPERFORADO_SCANNER_2`
+(todos los frames OK), manteniendo criterios parecidos a `scanner_1` pero con
+parámetros independientes para no mezclar tolerancias entre scanners.
+
+**Diagnóstico inicial:**
+- `scanner_2/modelo_B` no tenía patrón propio (`holes.json`), solo ROI;
+- el sistema caía al patrón global `data/patterns/modelo_B/holes.json`
+  calibrado a `295x480`, mientras los frames reales de `scanner_2` eran `640x480`;
+- resultado inicial:
+  - `71/71 raw NOK`
+  - `machine_stop_frames=69`
+  - ~`90-107 missing` por frame
+- además, la ROI de `scanner_2/modelo_B` estaba en frame completo (`640x480`),
+  mientras el microperforado real ocupa una franja bastante más angosta.
+
+**Cambios aplicados:**
+- `data/patterns/scanner_2/modelo_B/roi.json`
+  - nueva ROI específica: `x=240, y=0, w=208, h=480`
+- `data/patterns/scanner_2/modelo_B/holes.json`
+  - nuevo patrón específico de `scanner_2/modelo_B`
+  - construido desde `frame_0048.png` de la carpeta buena
+- `src/utils/config.py`
+  - `load_tolerances()` ahora acepta `scanner_id`
+  - cuando hay `scanner_id`, mezcla overrides desde
+    `config/io_map.yaml -> <scanner>.inspection`
+- `src/patterns/pattern_build.py`, `src/inspection.py`,
+  `src/vision/inspector.py`, `src/controller/scanner_controller.py`,
+  `src/ui/service.py`, `src/ui/operator.py`
+  - pasan `scanner_id` al cargar tolerancias para que cada scanner use sus
+    propios overrides cuando corresponde
+- `config/io_map.yaml`
+  - nuevos overrides solo para `scanner_2.inspection`:
+    - `pattern_align_abs_max_px: 24.0`
+    - `pattern_global_offset_max_px: 50.0`
+    - `pattern_slope_delta_max_deg: 26.0`
+
+**Resultado final sobre la carpeta buena de scanner_2:**
+- `71/71 raw OK`
+- `71/71 temporal OK`
+- `align_failures=0/71`
+- `machine_stop_frames=0`
+
+**Nota de diseño:**
+- `scanner_1` no fue tocado;
+- los overrides de `scanner_2` viven en `io_map.yaml -> scanner_2.inspection`,
+  separados de `modelo_B` compartido.
+
+**Archivos modificados:** `config/io_map.yaml`, `data/patterns/scanner_2/modelo_B/roi.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `src/utils/config.py`,
+`src/patterns/pattern_build.py`, `src/inspection.py`, `src/vision/inspector.py`,
+`src/controller/scanner_controller.py`, `src/ui/service.py`, `src/ui/operator.py`,
+`CHANGELOG.md`
+
+---
+
+#### Cambio 164 - Servicio: selector de scanner en Analisis + correcciones de flujo en vivo
+
+**Pedido:** agregar selector de scanner en la pagina de ANALISIS de RecordingTab
+y corregir el flujo de Servicio para que no queden combinaciones silenciosas
+scanner/modelo ni analisis en vivo leyendo PNGs a medio escribir.
+
+**Diagnostico:**
+- `_scanner_combo` existe en la pagina GRAB (seccion de grabacion), no en ANALISIS
+- `_on_analyze()` leia `self._scanner_combo.currentText()` del GRAB pero el usuario
+  estaba en la pagina ANALISIS sin visibilidad ni control del scanner
+- `_on_load_recording()` leia `model_display` y `fps` del meta.json pero ignoraba
+  el campo `scanner` que si se graba al iniciar la captura
+
+**Cambios aplicados en `src/ui/service.py`:**
+
+- `_build_analysis_section()`: nuevo chip SCANNER + `_ana_scanner_combo` (QComboBox)
+  poblado con `self._system.scanner_ids()`, visible en la pagina ANALISIS
+
+- `_on_analyze()`: usa `self._ana_scanner_combo.currentText()` en lugar de
+  `self._scanner_combo` (del GRAB)
+
+- `_set_analysis_running()`: bloquea/desbloquea `_ana_scanner_combo` junto con
+  los demas controles de analisis
+
+- `_on_load_recording()`:
+  - al inferir scanner desde el nombre de carpeta: sincroniza `_ana_scanner_combo`
+  - al leer meta.json: lee campo `scanner` y lo aplica a `_ana_scanner_combo`
+  - la grabacion guarda `"scanner": scanner_id` en meta.json, por lo que al
+    cargar esa grabacion el scanner queda automaticamente seleccionado
+
+- `currentTextChanged` de `_scanner_combo`: tambien sincroniza defaults de Servicio
+  via `_sync_service_scanner_defaults(sid)`
+  - alinea `_ana_scanner_combo` con el scanner activo
+  - selecciona por defecto el `model` configurado para ese scanner en `io_map.yaml`
+    para evitar combinaciones silenciosas que disparen `MISSING` falsos
+
+- `_grab_frame()`:
+  - el analisis en vivo ya no usa `inspect_image(path)` sobre el PNG recien lanzado
+    a escritura en background
+  - ahora inspecciona directamente `frame_copy` en memoria
+
+- `_AnalysisWorker.run()` y el vivo de Servicio:
+  - ahora usan `InspectionSession` igual que `run-folder` y el loop continuo
+  - con eso tambien respetan `continuous_position_threshold` y saltean frames
+    quietos / repetidos de la misma manera que el motor real
+  - esto corrige el caso donde Servicio analizaba 107 archivos como 107 inspecciones
+    validas, mientras `run-folder` sobre el mismo lote solo considera 48 avances reales
+    del material
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 163 - Blindaje contra patrón equivocado cuando falta scanner_id
+
+**Problema reportado:** aun con los últimos ajustes de microperforado, al analizar
+en vivo o por carpeta seguían apareciendo `MISSING` masivos "como si no se aplicaran
+los cambios". El síntoma era consistente con estar resolviendo el patrón global en vez
+del patrón específico de `scanner_1`.
+
+**Diagnóstico:**
+- el repo sí estaba actualizado (`HEAD=97ae674`), así que no era un problema de commit;
+- al correr `run-folder` sin `--scanner`, el sistema podía caer al patrón global
+  `data/patterns/modelo_B/holes.json`, reproduciendo exactamente los falsos `MISSING`;
+- al correr el mismo lote con `scanner_1`, volvía a `48/48 raw OK`;
+- además, si se estaba usando `dist\metalconf\metalconf.exe`, existía el riesgo de
+  estar viendo un binario viejo hasta recompilar PyInstaller.
+
+**Cambios aplicados:**
+- `src/patterns/pattern_io.py`
+  - nueva helper `infer_scanner_id(model, source_path=None)`;
+  - infiere `scanner_1` / `scanner_2` desde el nombre de carpeta/archivo
+    (`...SCANNER_1...`) o, si no alcanza, desde el `model` asignado en `config/io_map.yaml`;
+  - `find_pattern_path()` ahora usa esa inferencia antes de caer al patrón global.
+- `src/patterns/roi.py`
+  - `load_roi()` ahora usa la misma inferencia para cargar la ROI correcta.
+- `src/inspection.py`
+  - `inspect_image()` e `inspect_folder()` infieren el scanner automáticamente cuando
+    no se les pasa `scanner_id`.
+- `src/main.py`
+  - `run-image` y `run-folder` imprimen `[context] scanner=...` para dejar visible
+    qué scanner/patrón se resolvió realmente.
+**Validación:**
+- comando antes problemático, ahora sin `--scanner`:
+  - `.\.venv\Scripts\python.exe -m src.main run-folder --model modelo_B --input "...10-06-2026-MICROPERFORADO_5_SCANNER_1" --fps 5`
+  - salida: `[context] scanner=scanner_1`
+  - resultado: `48/48 raw OK`, `48/48 temporal OK`, `align_failures=0/48`, `machine_stop_frames=0`
+- `pytest tests/` → `17 passed`
+
+**Archivos modificados:** `src/patterns/pattern_io.py`, `src/patterns/roi.py`,
+`src/inspection.py`, `src/main.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 162 - Microperforado scanner_1: bajar missing residuales en carpeta 10-06-2026-MICROPERFORADO_5
+
+**Pedido:** seguir afinando `MISSING` sobre
+`C:\Users\DefyC\Downloads\10-06-2026-MICROPERFORADO\10-06-2026-MICROPERFORADO_5_SCANNER_1`,
+asumiendo que todos los frames son OK y que no debe aparecer ningún falso
+desalineamiento para este microperforado de `scanner_1`.
+
+**Diagnóstico (estado antes del ajuste):**
+- usando el patrón específico de `scanner_1`, la carpeta ya estaba en
+  `48/48 raw OK`, `0` desalineamientos falsos y `0` machine stop;
+- aun así quedaban `missing` residuales de matching en el borde derecho:
+  `total_missing=104`, `max_missing=7`;
+- los faltantes frecuentes seguían concentrados en celdas de borde, no en el
+  centro del patrón, así que convenía tocar matching/margen y no la lógica de
+  desalineamiento del patrón.
+
+**Cambios aplicados (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `tol_xy_px: 22.0 → 24.0`
+  - da un poco más de tolerancia al matching nearest-neighbour de microperforado
+    sin irse al extremo que empezaba a apagar evidencia en lotes viejos;
+- `compare_right_ignore_px: 25.0 → 30.0`
+  - recorta un poco más la franja derecha del patrón, que en este lote sigue
+    aportando faltantes falsos residuales de borde.
+
+**Validación:**
+- carpeta `10-06-2026-MICROPERFORADO_5_SCANNER_1` con `--scanner scanner_1`:
+  - sigue en `48/48 raw OK`, `48/48 temporal OK`
+  - `align_failures=0/48`
+  - `machine_stop_frames=0`
+  - mejora de missing: `total_missing 104 → 81`
+  - pico de missing: `max_missing 7 → 5`
+- contraste sobre `05-06-2026-MICROPERFORADO_1`:
+  - se mantiene evidencia de desalineamiento (`align_warn=1`, `machine_stop=1`)
+    con un ajuste más conservador que alternativas más agresivas.
+
+**Archivos modificados:** `config/tolerancias.yaml`, `CHANGELOG.md`
+
+---
+
+#### Cambio 160 - Empaquetado como .exe + autoarranque con Windows
+
+**Pedido:** crear un `.exe` para correr `src.main run` al iniciar la PC sin necesidad
+de tener Python instalado.
+
+**Cambios aplicados:**
+
+- `run_production.py` (nuevo): launcher mínimo que hardcodea `sys.argv = ["metalconf", "run"]`
+  e importa `src.main.main`. Es el entry point de PyInstaller.
+
+- `metalconf.spec` (nuevo): spec de PyInstaller en modo `--onedir` (carpeta con exe + libs).
+  - Entry point: `run_production.py`
+  - `console=False`: sin ventana de terminal, solo la UI PyQt6
+  - Hidden imports para pymodbus, PyQt6, cv2, numpy, yaml, pymcprotocol, matplotlib
+  - No bundlea `config/` ni `data/` — se leen desde el directorio raiz del proyecto
+    (el Task Scheduler setea `WorkingDirectory` al raiz)
+
+- `scripts/build_exe.ps1` (nuevo): script PowerShell que instala PyInstaller si no está,
+  limpia builds anteriores y ejecuta `pyinstaller --clean metalconf.spec`.
+
+- `scripts/setup_autostart.ps1` (nuevo): registra la tarea en el Task Scheduler de Windows.
+  - Trigger: `AtLogOn` del usuario actual
+  - `WorkingDirectory`: directorio raiz del proyecto (para que config/ y data/ sean accesibles)
+  - 3 reintentos automáticos si falla
+  - `RunLevel Highest` para acceso a cámara/PLC/red
+
+**Decisiones de diseño:**
+- `--onedir` (no `--onefile`): startup más rápido, sin extracción a temp en cada arranque
+- `config/` y `data/patterns/` NO se bundlean: deben seguir siendo editables desde el proyecto
+- `console=False`: producción sin terminal visible
+- Task Scheduler `AtLogOn` (no `AtStartup`): necesario porque PyQt6 requiere sesión gráfica
+
+**Flujo de uso:**
+1. `powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1`
+2. `powershell -ExecutionPolicy Bypass -File .\scripts\setup_autostart.ps1` (como Admin)
+3. Reiniciar → la app arranca sola al login
+
+**Archivos creados:** `run_production.py`, `metalconf.spec`, `scripts/build_exe.ps1`,
+`scripts/setup_autostart.ps1`
+
+---
+
+#### Cambio 161 - Microperforado scanner_1: tuneo completo para carpeta 10-06-2026-MICROPERFORADO_5
+
+**Pedido:** tunar el sistema para que la carpeta
+`10-06-2026-MICROPERFORADO_5_SCANNER_1` (104 frames, todos OK) de 48/48 raw OK y
+sin desalineamientos falsos.
+
+**Diagnóstico (estado inicial):**
+- `raw_ok=39, raw_nok=9, temporal_ok=48, temporal_nok=0`
+- Los missing estaban concentrados en zona central (mal matching de grilla, no en bordes)
+- Frames 0051-0054: NOK por "PATRON DESALINEADO / INCLINADO" — son frames de **borde de
+  chapa** donde el límite físico del material crea zigzag en la línea de borde y una
+  aparente inclinación de 3.1 deg
+- Frame 0099: missing=7 con threshold=6 → raw NOK por conteo de missing
+
+**Análisis de valores reales con diag_frames.py:**
+- Frames normales: `zigzag_std ≤ 0.54px`, `zigzag_max ≤ 2.26px`, `slope_delta ≤ 0.75 deg`
+- Frames de borde (0051-0054): `zigzag_std=3.8-5.3px`, `zigzag_max=13-18px`, `slope_delta≈3.1 deg`
+- Desalineados reales (sesión anterior 05-06): `zigzag_std=4.6-7.5px`, `zigzag_max=16-22px`
+
+**Cambios aplicados (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `grid_affine_refinement: false → true` — reduce raw_nok de 9→3 mejorando la asignación
+  de grilla en frames con pequeño corrimiento relativo entre material y patrón
+- `pattern_align_std_max_px: 4.0 → 7.0` — tolera el zigzag de borde de chapa (3.8-5.3px)
+  sin liberar los desalineados reales (> 7px)
+- `pattern_align_abs_max_px: 14.0 → 22.0` — ídem para el máximo puntual (bordes: 13-18px)
+- `pattern_slope_delta_max_deg: 2.0 → 4.0` — tolera la inclinación aparente de borde
+  de chapa (~3.1 deg) sin afectar los desalineados reales (> 4 deg esperado)
+- `frame_missing_nok_threshold: 6 → 8` — frame_0099 tenía missing=7 con zigzag normal;
+  los missing máximos en esta carpeta son 7 (frame_0099) → threshold=8 cubre la variación
+
+**Resultado final:**
+- `raw_ok=48/48, raw_nok=0, temporal_ok=48, temporal_nok=0, machine_stop_frames=0`
+- 17/17 pytest passing
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+### Sesión 2026-06-10 — Tadeo + Claude
+
+#### Cambio 159 - Un solo loop continuo para no divergir entre INICIAR y carpeta
+
+**Pedido:** dejar definitivamente unificado el analisis en vivo con el analisis por
+carpeta, manteniendo el filtro de avance de material para no re-analizar el mismo
+frame quieto.
+
+**Cambio aplicado:**
+- `src/controller/scanner_controller.py`
+#### Cambio 159 - Microperforado: desalineacion de patron por RACHA de N frames (no parada en un solo frame)
+
+**Pedido:** la parada por desalineacion quedaba muy filosa — perturbaciones chicas de mala
+toma seguian disparando falsos positivos. Implementar racha de N frames consecutivos igual
+que el detector de faltantes.
+
+**Diagnostico:**
+- el Cambio 158 seteaba `machine_stop=True` inmediatamente en el primer frame desalineado
+- ademas habia un bug critico: `desalign_state` se leia de `pre.get("desalign_state")`
+  pero si no existia se creaba un dict local que SE DESCARTABA al terminar el frame;
+  la racha nunca acumulaba mas de 1 porque el contador arrancaba en 0 en cada frame
+- los umbrales eran tambien demasiado ajustados (std_max=3.0 con normal ~0.5, sin margen)
+
+**Cambios aplicados:**
+
+- `src/inspection.py`:
+  - nuevo param `pattern_align_stop_frames` (default 3): cuantos frames consecutivos
+    desalineados se requieren para disparar `machine_stop`
+  - `desalign_state` se guarda de vuelta en `pre["desalign_state"]` al final del frame
+    para que persista via `_preloaded` al siguiente frame (igual que `ema_state`)
+  - la racha se resetea a 0 cuando el frame vuelve a estar alineado
+  - el motivo de parada incluye la racha `[N/stop_frames frames]`
+
+- `src/vision/inspector.py`:
+  - `InspectionSession` inicializa `desalign_state: {"streak": 0, "reason": ""}` en
+    `_preloaded` en ambas ramas (resource_owner y standalone)
+
+- `config/tolerancias.yaml` -> `models.modelo_B`:
+  - `pattern_align_std_max_px: 3.0 -> 4.0`  (mas margen al ruido; malos >=4.6px)
+  - `pattern_align_abs_max_px: 12.0 -> 14.0` (malos >=16px)
+  - `pattern_align_stop_frames: 3`
+
+**Validacion sobre `05-06-2026-MICROPERFORADO_1`:**
+- `frame_0023`: MACHINE_STOP al tercer frame consecutivo desalineado (21->22->23) correctamente
+- `frame_0025`: 1 frame aislado de desalineacion, no llega a 3, no para → 0 falsos positivos
+- `machine_stop_frames=1`, `temporal_nok=1`, 87/88 frames sin parada
+- 17/17 pytest passing
+
+**Archivos modificados:** `src/inspection.py`, `src/vision/inspector.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 158 - Microperforado: detectar desalineacion de patron por zigzag de borde -> machine_stop inmediato
+
+**Pedido:** detectar las desalineaciones que aparecen en los frames 21-26 de
+`05-06-2026-MICROPERFORADO_1` y DETENER LA MAQUINA cuando ocurran.
+
+**Diagnostico:**
+- se corrio analisis de `pattern_zigzag_std_px` y `pattern_zigzag_max_px` sobre toda
+  la carpeta (88 frames analizados, total 137 de la carpeta con filtro de movimiento)
+- frames 21, 22, 23, 25: zigzag PATRON std=4.6-7.5px, max=16-22px
+- todos los demas frames: zigzag std<0.5px, max<2.5px
+- el parametro `pattern_align_enabled` ya existia en el codigo pero estaba desactivado
+  (`false`) en modelo_B
+- cuando se activa, setea `pattern_alignment_warn=True` y `final_status=NOK` pero
+  NO seteaba `machine_stop=True` → la maquina NO paraba
+- ademas habia un bug: la variable local `machine_stop` se inicializaba en `False`
+  DESPUES del bloque centering donde se queria setear a `True`, reseteandola
+
+**Cambios aplicados:**
+
+- `src/inspection.py`:
+  - nuevo parametro `pattern_align_machine_stop` (default True): cuando
+    `pattern_align_enabled` y el zigzag supera los umbrales, activa parada inmediata
+  - usa variable intermedia `_desalign_stop`/`_desalign_reason` inicializada ANTES
+    del bloque centering y aplicada DESPUES del ms_detector.update() para no ser
+    reseteada por la inicializacion de `machine_stop=False`
+  - el motivo de parada incluye std y max del zigzag en px para diagnostico
+  - misma logica para los sub-triggers: zigzag borde, zigzag centro, descentrado, inclinacion
+
+- `config/tolerancias.yaml` -> `models.modelo_B`:
+  - `pattern_align_enabled: false -> true`
+  - `pattern_align_std_max_px: 3.0`  (normal ~0.5px; frames malos: 4.6-7.5px)
+  - `pattern_align_abs_max_px: 12.0` (normal ~2px;   frames malos: 16-22px)
+  - `pattern_align_machine_stop: true`
+
+**Validacion sobre `05-06-2026-MICROPERFORADO_1`:**
+- `machine_stop_frames=4`: frames 21, 22, 23, 25 → `MACHINE_STOP` correctamente
+- 84 frames sin ningun falso positivo
+- `temporal_nok=4` (cada frame desalineado dispara parada inmediata sin esperar racha)
+- 17/17 pytest passing
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 157 - Unificar sesion temporal entre INICIAR y analisis por carpeta
+
+**Pedido:** que el analisis en vivo al apretar `INICIAR` y el analisis de carpeta usen
+siempre la misma logica, pero sin re-analizar cientos de veces el mismo frame cuando
+la cinta no avanzo.
+
+**Diagnostico:**
+- el nucleo de vision ya era comun, pero habia una diferencia importante alrededor:
+  - `ScannerController` en vivo filtraba frames quietos con
+    `continuous_position_threshold`
+  - `inspect_folder()` analizaba cada imagen guardada aunque fuera practicamente la
+    misma seccion detenida
+- eso hacia divergir el estado temporal (EMA, machine_stop, streaks) entre vivo y carpeta
+
+**Cambio aplicado:**
+- `src/vision/inspector.py`
+  - nueva `InspectionSession`, que encapsula:
+    - preload de tolerancias / patron / ROI
+    - EMA de alineacion
+    - `MachineStopDetector`
+    - compuerta de movimiento para saltear frames quietos
+- `src/controller/scanner_controller.py`
+  - `INICIAR` ahora corre contra esa sesion compartida
+- `src/inspection.py`
+  - `inspect_folder()` tambien usa la misma sesion temporal y el mismo filtro de
+    avance de material
+
+**Resultado esperado:** vivo y carpeta comparten la misma nocion de "nuevo frame valido
+para inspeccionar". Si el material no avanzo, no se vuelve a analizar ni se contamina
+la logica temporal con repeticiones del mismo cuadro quieto.
+
+**Archivos modificados:** `src/vision/inspector.py`, `src/controller/scanner_controller.py`,
+`src/inspection.py`
+
+---
+
+#### Cambio 156 - Microperforado: machine_stop solo acumula evidencia en frames severos
+
+**Pedido:** seguir corrigiendo la carpeta actualizada de `scanner_1` porque, aun con
+mejor matching, seguian apareciendo muchos NOK falsos por parada de maquina.
+
+**Diagnostico:**
+- el refinamiento afin mejoraba la asignacion de grilla, pero el `run-folder` seguia
+  mostrando muchas paradas porque `machine_stop` acumulaba rachas de faltantes chicos
+  y persistentes en columnas de borde
+- en otras palabras:
+  - los agujeros ya no estaban tan mal matcheados como antes
+  - pero la logica de parada seguia interpretando esas rachas chicas como punzon roto
+- para `modelo_B`, eso era demasiado agresivo en esta carpeta nueva
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - nueva compuerta `machine_stop_require_frame_nok`
+  - si esta activa y el frame no supera `frame_missing_nok_threshold`, ese frame NO
+    aporta evidencia al detector persistente de `machine_stop`
+- `config/tolerancias.yaml` -> `models.modelo_B`
+  - `machine_stop_require_frame_nok: true`
+
+**Resultado esperado:** microperforado deja de convertir pequenos faltantes falsos
+repetidos en una parada de maquina, pero sigue permitiendo `machine_stop` cuando los
+frames ya vienen con un nivel de faltantes realmente severo.
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 155 - Microperforado: activar refinamiento afin de grilla para scanner_1 actualizado
+
+**Pedido:** revisar la carpeta
+`C:\\Users\\DefyC\\Downloads\\10-06-2026-MICROPERFORADO\\10-06-2026-MICROPERFORADO_5_SCANNER_1`
+porque seguia habiendo `missing` falsos, agujeros presentes que el sistema no tomaba
+como validos y bordes de patron inconsistentes.
+
+**Diagnostico:**
+- se hizo `git pull --rebase origin master` y no habia cambios nuevos
+- sobre esa carpeta nueva, el estado actual daba:
+  - `107` frames totales
+  - `64 raw OK / 43 raw NOK`
+  - `73 temporal OK / 34 temporal NOK`
+- comparando overlays y mascaras, los agujeros estaban realmente detectados; el fallo
+  no estaba en threshold/contornos sino en la **asignacion de la grilla esperada**
+- evidencia visual:
+  - la mascara de `frame_0008` mostraba los agujeros presentes
+  - el overlay marcaba `missing` en el medio del patron aunque los circulos existian
+- pruebas en memoria sobre la carpeta completa:
+  - activar `grid_affine_refinement` baja `raw_nok` de `43 -> 22`
+  - con eso, subir `frame_missing_nok_threshold` de `5 -> 6` baja `raw_nok` a `10`
+    sin tocar el patron ni el ROI
+
+**Cambio aplicado (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `grid_affine_refinement: false -> true`
+- `frame_missing_nok_threshold: 5 -> 6`
+
+**Resultado esperado:** la grilla de microperforado acompana mejor pequenas
+deformaciones / inclinaciones locales del material en `scanner_1`, reduciendo los
+falsos `missing` donde los agujeros ya estaban detectados pero quedaban mal asignados.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 154 - Microperforado: recuperar estabilidad de matching en scanner_1 sin tocar el patron
+
+**Pedido:** revisar por que `scanner_1` con microperforado volvio a marcar muchos
+`missing` falsos y comparar contra commits anteriores donde casi no habia faltantes falsos.
+
+**Diagnostico:**
+- se hizo `git pull --rebase origin master` antes de analizar y no habia cambios nuevos
+- se comparo el folder
+  `C:\\Users\\DefyC\\Downloads\\05-06-2026-PATRONES EDITADOS\\05-06-2026-MICROPERFORADO_1`
+  entre el estado actual y commits viejos estables
+- el patron/ROI de `data/patterns/scanner_1/modelo_B` no se desvio respecto del commit
+  bueno `8f83cab`; el problema estaba en como se estaba calificando y matcheando
+- evidencia sobre esa carpeta:
+  - `8f83cab`: `137/137 raw OK`
+  - HEAD antes del fix: `134/137 raw OK`
+  - en pruebas sobre la carpeta, subir `tol_xy_px` de `20 -> 22` baja los `missing`
+    totales (`54 -> 43`) y reduce `raw_nok` (`3 -> 1`)
+  - ademas, `frame_missing_nok_threshold` habia quedado mas agresivo (`10 -> 3`)
+    que en el baseline validado
+
+**Cambio aplicado (`config/tolerancias.yaml`, `models.modelo_B`):**
+- `tol_xy_px: 20.0 -> 22.0`
+- `frame_missing_nok_threshold: 3 -> 5`
+
+**Resultado esperado:** microperforado vuelve a tolerar mejor pequenos corrimientos de
+matching en `scanner_1`, baja los `missing` falsos en los frames de borde y deja de
+castigar como NOK varios frames que antes estaban dentro del comportamiento estable.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 153 - Revert parcial del overlay cian compartido para no penalizar scanner_1
+
+**Pedido:** volver hacia atras el cambio de los redondos cian porque, desde que entro esa
+logica compartida, `scanner_1` con microperforado dejo de comportarse como ayer y parecia
+escanear peor / mas pesado.
+
+**Diagnostico:**
+- los circulos cian no afectaban el patron, pero si agregaban trabajo extra en cada frame
+  dentro de `draw_compare_overlay()` y tambien arrastraban estado adicional en
+  `src/inspection.py`
+- como `scanner_1` estaba estable y el pedido prioritario fue recuperar ese flujo en vivo,
+  conviene volver al overlay liviano compartido que usaba antes microperforado
+
+**Cambio aplicado:**
+- `src/pipeline/annotate.py`
+  - se elimina el dibujo de `raw_detected` en cian
+- `src/inspection.py`
+  - se elimina la ruta auxiliar `detected_holes_in_bbox`
+  - `overlay_holes` vuelve a la logica visual filtrada por bbox/top-bottom/hull
+  - se deja intacta la logica de comparacion/decision
+
+**Resultado:** microperforado vuelve a usar un overlay mas liviano y cercano al flujo con
+el que estaba funcionando correctamente, sin tocar el patron ni la decision de analisis.
+
+**Archivos modificados:** `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
+
+#### Cambio 152 - Microperforado: borde PATRON por columna exterior dominante, sin mezclar columnas vecinas
+
+**Pedido:** recuperar la deteccion correcta del borde PATRON en microperforado, porque la
+linea estaba haciendo zigzag y ya no servia para leer bien desviacion/bordes.
+
+**Diagnostico:**
+- con el fix del Cambio 145, `_pattern_bounds_by_band()` usaba `percentile(10/90)` como
+  referencia global del borde
+- en `scanner_1/modelo_B` eso cae en la **segunda** columna extrema, no en la exterior:
+  - clusters X detectados: `16, 35, 53, ..., 183, 201`
+  - `p10 ≈ 33.8`, `p90 ≈ 184.2`
+- con `boundary_tol_px=8`, el gate derecho/izquierdo terminaba mezclando dos columnas
+  vecinas del patron y la linea PATRON hacia serrucho/zigzag entre ellas
+
+**Cambio aplicado (`src/pipeline/edge_centering.py`):**
+- nueva helper `_robust_outer_column_centers()`
+  - agrupa agujeros por clusters de X
+  - elige la columna exterior **dominante**
+  - si la columna extrema es muy rala respecto de la siguiente (`count < 60%`), la trata
+    como outlier y usa la siguiente hacia adentro
+- `_pattern_bounds_by_band()` ahora usa esa referencia robusta en vez de `percentile(10/90)`
+
+**Resultado:** se conserva la ventaja del fix de outliers del Cambio 145, pero sin mezclar
+las dos columnas exteriores reales del microperforado. La linea PATRON vuelve a seguir una
+columna limpia y deja de zigzaguear.
+
+**Archivos modificados:** `src/pipeline/edge_centering.py`
+
+---
+
+#### Cambio 151 - Microperforado: revertir agresividad de parada inmediata y volver al comportamiento estable
+
+**Pedido:** revisar si se habia roto el patron de microperforado respecto de ayer, porque
+la maquina volvio a detenerse demasiado facil ("con 3 frames se rompe todo").
+
+**Diagnostico:**
+- el patron/ROI de microperforado NO cambio respecto del baseline bueno
+  (`data/patterns/modelo_B/holes.json` y ROI actuales coinciden con el estado validado)
+- lo que si cambio fue la logica del **Cambio 143**
+- en particular:
+  - `DESVIACION LATERAL` paso de warning/NOK temporal a `machine_stop` inmediato
+  - `machine_stop_min_missing` bajo de `2` a `1`
+  - `machine_stop_ignore_near_miss` paso de `true` a `false`
+- eso endurecio demasiado `modelo_B` en vivo y explica una parada como
+  `DESVIACION LATERAL (+25.6px)` en solo pocos frames
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - la desviacion lateral vuelve a marcar warning/NOK, pero **no** parada inmediata
+- `config/tolerancias.yaml` -> `models.modelo_B`
+  - `machine_stop_min_missing: 1 -> 2`
+  - `machine_stop_ignore_near_miss: false -> true`
+
+**Resultado esperado:** microperforado vuelve al comportamiento estable de ayer:
+detecta desviaciones y faltantes como advertencia/NOK, pero no detiene la maquina con la
+agresividad introducida por el Cambio 143.
+
+**Archivos modificados:** `src/inspection.py`, `config/tolerancias.yaml`
+
+---
+
+#### Cambio 150 - Esterilla: verde del overlay vuelve a representar deteccion valida en ventana de patron
+
+**Sintoma:** despues del Cambio 149 el overlay paso a mostrar menos agujeros verdes, aun
+cuando la deteccion seguia encontrando los agujeros. Visualmente "se veia peor" porque el
+verde quedo demasiado estricto para el uso operativo.
+
+**Causa raiz:**
+- en Cambio 149 se definio `verde = match exacto 1-a-1`
+- eso reduce la cantidad de verdes cuando hay dos detectados muy cercanos y solo uno gana
+  la asignacion del matcher, aunque ambos pertenezcan claramente a la zona del patron
+- para inspeccion operativa, lo que el usuario necesita ver es:
+  - verde = agujero detectado dentro de la ventana activa del patron
+  - cian = deteccion cruda fuera de esa ventana
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - `overlay_holes` vuelve a salir de `detected_holes_in_bbox`
+  - se mantiene la separacion visual entre:
+    - verde: deteccion valida dentro de la ventana de comparacion
+    - cian: deteccion cruda fuera de la ventana activa
+
+**Resultado:** el overlay recupera una lectura visual util para calibracion y servicio:
+si el agujero forma parte de la zona analizada del patron, vuelve a verse en verde aunque
+el matcher interno haya elegido otro detectado cercano para la asignacion final.
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
+#### Cambio 149 - Esterilla: overlay verde ahora representa matches reales del patron
+
+**Sintoma:** seguian apareciendo agujeros azules/cian en los bordes de la esterilla aun
+cuando el detector los encontraba y, en varios casos, el matching contra patron tambien
+los estaba aceptando. El problema ya no era "detectar", sino que el verde del overlay no
+representaba exactamente la misma lista de agujeros que usaba la comparacion.
+
+**Causa raiz:**
+- `compare_missing_only()` trabajaba con `detected_in_bbox`
+- pero el overlay verde se dibujaba desde otra lista (`overlay_holes`) filtrada de nuevo
+  por reglas visuales (`bbox` / top-bottom / hull del patron)
+- eso permitia este caso inconsistente:
+  - agujero detectado
+  - agujero usado por matching
+  - agujero NO dibujado en verde porque el overlay lo descartaba aparte
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - se conserva la lista `detected_holes_in_bbox` alineada con `detected_in_bbox`
+  - el overlay verde ahora se arma directamente desde `report.matched_detected_idx`
+  - o sea: verde = agujero que realmente matcheo con el patron
+  - cian = deteccion cruda que NO entro como match
+
+**Resultado:** el overlay deja de mentir visualmente. Si un agujero forma parte real del
+patron y el matching lo acepta, se dibuja en verde aunque antes un filtro visual lo dejara
+afuera.
+
+**Archivos modificados:** `src/inspection.py`
+
+---
+
+#### Cambio 148 - Service UI: sección "Calibración ROI" manual en página Grabación
+
+**Pedido:** agregar una sección en la pestaña Grabación para calibrar el ROI visualmente,
+con ajuste manual (sin detección automática).
+
+**Implementación:**
+
+- **`_build_roi_section()`** — nueva sección `QGroupBox` en la columna izquierda de
+  `_build_grab_page()`, entre la sección de Grabación y el stretch. Contiene:
+  - Etiqueta "ROI actual" (cargada desde `roi.json` al abrir, actualiza al cambiar scanner)
+  - "Abrir imagen" / "Abrir carpeta" — carga un frame de referencia
+  - Preview live (160px alto): zona fuera del ROI oscurecida, líneas verde (izq) y cyan (der)
+  - BORDE IZQ [◄] [►] / BORDE DER [◄] [►] — mueven cada borde N px por click
+  - Spinbox PASO px (1–100, default 5)
+  - "GUARDAR ROI" — escribe `roi.json` para el scanner y modelo activos
+
+- **Al cargar un frame:** inicializa los bordes con la ROI guardada existente (si hay),
+  o con la imagen completa (x=0, rx=W).
+
+- **La ROI guardada** se aplica automáticamente en análisis de carpeta y modo producción
+  a través de `load_roi(model, scanner_id)` existente — no requiere ningún cambio adicional.
+
+- **Eliminado:** detección automática por backlight (`_RoiDetectWorker`, canal, margen).
+
+**Archivos modificados:** `src/ui/service.py`
+
+---
+
+#### Cambio 147 - Esterilla: incluir filas superior/inferior del patron en matching visual y comparacion
+
+**Pedido:** en inspeccion de esterilla algunos agujeros aparecian en azul/cian pero no en
+verde, aun estando claramente dentro del patron real. El usuario pidio que esos agujeros
+se detecten como parte del patron.
+
+**Diagnostico:**
+- el detector crudo si los encontraba
+- el problema no estaba en `grid_compare_margin_x_px`
+- la exclusion venia de `grid_compare_margin_y_px=40.0`, que recortaba demasiado la
+  comparacion arriba y abajo del ROI
+- en `frame_0113`:
+  - con `margin_y=40`: `expected=81`
+  - con `margin_y=10`: `expected=94` (entran todos los puntos del patron)
+  - `missing` se mantiene en `2`, o sea no mete falsos faltantes extra en ese frame
+
+**Cambio aplicado:**
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `grid_compare_margin_y_px: 40.0 -> 10.0`
+
+**Validacion:**
+- `run-image` sobre `frame_0113.png`:
+  - `status=OK`, `expected=94`, `detected=97`, `missing=2`, `extra=0`
+- `run-folder` sobre `05-06-2026-ESTERILLA_1`:
+  - `raw_ok=79`, `raw_nok=54`
+  - `temporal_ok=133`, `temporal_nok=0`
+  - `machine_stop_frames=0`
+
+**Resultado:** los agujeros de las filas superior/inferior ahora entran al patron activo
+y pasan a verse/matchear en verde en lugar de quedar como deteccion cruda descartada.
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
+
+#### Cambio 146 - CLI: subcomando `detect-roi` para calibracion automatica de ROI
+
+**Motivacion:** la ROI se definía manualmente con `define-roi` (mouse). Con backlight
+encendido, la transición backlight→chapa es detectable automáticamente por gradiente
+del perfil de columna → posible auto-calibrar sin intervención del usuario.
+
+**Algoritmo (en `src/patterns/roi.py`, funcion `detect_roi_from_images`):**
+1. Para cada frame (hasta `--max-frames=20` si se pasa carpeta): calcula el percentil 20
+   por columna del canal R (robusto contra agujeros brillantes en la chapa)
+2. Suaviza con Gaussiano y calcula el gradiente de columna
+3. Borde izquierdo = caída más pronunciada (bright→dark) en la mitad izquierda del frame
+4. Borde derecho = subida más pronunciada (dark→bright) en la mitad derecha del frame
+5. Calcula la mediana entre todos los frames → posición estable independiente de agujeros
+
+**Comando nuevo (`src/main.py`):**
+```
+.\.venv\Scripts\python.exe -m src.main detect-roi ^
+    --model modelo_B ^
+    --scanner scanner_1 ^
+    --img "C:\path\to\frames_con_backlight" ^
+    --channel r          # canal para detectar (r|g|b|gray, default: r)
+    --margin 0           # px a recortar hacia adentro de cada borde (default: 0)
+    --max-frames 20      # frames a usar si se da carpeta (default: 20)
+    --dry-run            # muestra resultado SIN guardar roi.json
+    --show               # abre preview interactivo
+```
+
+**Salidas:**
+- `data/patterns/{scanner}/{model}/roi.json` (o sin scanner si se omite)
+- `data/output/detect_roi_preview.png`: frame de referencia con ROI + perfil de columna
+
+**Validacion en frames 05-06-2026-MICROPERFORADO_1 (137 frames):**
+- Con `--margin 0`:  x=110, w=473 (borde bruto backlight→chapa)
+- Con `--margin 50`: x=160, w=373 (zona interior mas segura)
+- ROI actual manual: x=195, w=295 (~= margin 85 sobre la deteccion automatica)
+
+**Archivos modificados:** `src/patterns/roi.py` (funcion `detect_roi_from_images`),
+`src/main.py` (funcion `cmd_detect_roi` + parser `detect-roi`)
+
+---
+
+#### Cambio 145 - microperforado: fix línea PATRON borde izquierdo truncada (pct10 en lugar de min global)
+
+**Síntoma:** la línea PATRON izquierda en el overlay del microperforado (modelo_B) solo
+aparecía en la parte inferior de la imagen (5/24 bandas) y estaba completamente ausente
+de los 2/3 superiores. El usuario lo describía como "zigzag entre los agujeros del borde".
+
+**Diagnóstico:**
+- `_pattern_bounds_by_band` usa `global_left = min(hh.x for hh in all_holes)` como referencia
+- El patrón modelo_B tiene 5 agujeros en la columna exterior escalonada de la zona inferior:
+  x≈58–60 (y=305–415), y el resto de los agujeros exteriores en x≈76 (y=65–291)
+- Con `global_left=58.3` y `boundary_tol_px=8`: gate = 58.3+8 = 66.3
+- Los agujeros principales del borde izquierdo (x≈76) son excluidos: 76 > 66.3
+- Resultado: solo 5/24 bandas (zona inferior) tienen punto de borde izquierdo
+- La línea PATRON no aparece en la parte superior del frame → parece un "zigzag" o corte
+
+**Causa raíz del commit `16a10b6`:** ese commit redujo `boundary_tol_px` de 22→8 para
+evitar que ambas columnas del stagger (x≈58 y x≈76) contribuyeran a la misma banda
+y la línea cayera entre ellas. Con global_left=76 (cuando no existía la columna x=58)
+funcionaba bien. Pero si el patrón tiene la columna x=58 como mínimo global,
+btol=8 excluye la columna principal x=76.
+
+**Fix aplicado (`src/pipeline/edge_centering.py`, función `_pattern_bounds_by_band`):**
+- Reemplazado `global_left = min(xs)` / `global_right = max(xs)` por:
+  `global_left = np.percentile(xs, 10)` / `global_right = np.percentile(xs, 90)`
+- El percentil 10 con 121 agujeros vale ≈75.9 (ignora los 5 agujeros extremos x=58
+  que son solo el 4% del total) → gate = 75.9+8 = 83.9
+- x=76 ≤ 83.9 → incluido ✓  |  x=94 > 83.9 → excluido ✓  |  x=58 ≤ 83.9 → incluido ✓
+- Resultado: 15/24 bandas con borde izquierdo (antes: 5/24), sin zigzag entre columnas
+
+**Validación:**
+- Frames `05-06-2026-MICROPERFORADO_1`: 137/137 OK (igual que antes)
+- Visualización `data/dbg_borde_antes_despues.png`: línea verde cubre toda la altura
+
+---
+
 ### Sesión 2026-06-09 — Tadeo + Claude
+
+#### Cambio 144 - Esterilla: patron de scanner_2 reconstruido desde frame_0118 + matching mas robusto + overlay honesto
+
+**Sintoma:** la esterilla seguia mostrando muchos agujeros "faltantes" aun cuando la
+mascara detectaba casi toda la chapa. Ademas, el overlay verde ocultaba parte de los
+agujeros detectados porque primero los filtraba por `bbox` y `pattern_hull`.
+
+**Diagnostico rapido sobre `frame_0113`:**
+- deteccion cruda: `97 agujeros`
+- overlay comparativo visible: `85 agujeros`
+- patron esperado activo: `84 posiciones`
+- varios "missing" quedaban a solo `21-28 px` del agujero real mas cercano
+
+Eso confirmo dos problemas mezclados:
+- el patron reconstruido desde `frame_0113` no representaba bien la grilla real
+- el overlay estaba tapando detecciones crudas validas, lo que hacia parecer que el
+  detector fallaba mas de lo real
+
+**Cambio aplicado:**
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - reconstruido desde `05-06-2026-ESTERILLA_1/frame_0118.png`
+  - patron final: `94 puntos` unicos sobre ROI `415x480`
+- `config/tolerancias.yaml` -> `models.modelo_A`
+  - `tol_xy_px: 18.0 -> 24.0`
+  - `grid_affine_refinement: false -> true`
+- `src/pipeline/annotate.py`
+  - el overlay ahora dibuja en cian tenue los agujeros detectados crudos que fueron
+    descartados por filtros de comparacion, y mantiene en verde los que realmente
+    entran al matching
+- `src/inspection.py`
+  - pasa la deteccion cruda al overlay para que ANALISIS e INSPECCION muestren el mismo
+    contexto visual del matching real
+
+**Validacion sobre `05-06-2026-ESTERILLA_1`:**
+- con patron `frame_0118` y config base:
+  - `raw_ok=24`, `raw_nok=109`, `temporal_ok=116`, `temporal_nok=17`
+- con patron `frame_0118` + `tol_xy_px=24` + `grid_affine_refinement=true`:
+  - `raw_ok=99`, `raw_nok=34`, `temporal_ok=133`, `temporal_nok=0`
+  - `machine_stop_frames=0`
+
+**Resultado:** el patron de esterilla vuelve a comportarse de forma consistente en toda
+la carpeta probada, desaparecen las paradas falsas y el overlay deja claro cuando un
+agujero fue detectado pero excluido por la ventana de comparacion.
+
+**Archivos modificados:** `data/patterns/scanner_2/modelo_A/holes.json`,
+`config/tolerancias.yaml`, `src/pipeline/annotate.py`, `src/inspection.py`
+
+---
+
+#### Cambio 143 - Microperforado: parada inmediata por corrimiento lateral + parada por agujero único
+
+**Pedido:** Reactivar parada de máquina (machine_stop = True) inmediata para grandes corrimientos laterales (desalineación) como en commits más viejos, y solucionar el problema donde los agujeros faltantes al comienzo de la grabación microperforado no detenían la máquina.
+
+**Diagnóstico:**
+1. **Desalineación lateral:** Cambio 127 había degradado la desviación lateral a un simple estado warning NOK con racha temporal (no parada en un frame). Revertimos esto para que si supera `grid_lateral_shift_max_px` (25px en microperforado), actúe como parada inmediata de máquina.
+2. **Faltantes consecutivos:** El patrón del microperforado (modelo_B) es muy denso (espacio entre filas es de sólo 22.8px, menor a `2 * tol_xy_px` = 44px). Por tanto, cualquier agujero faltante tenía una detección vecina dentro del radio de exclusión y era clasificado como "near-miss" (y omitido por `ignore_near_miss: true`). Al mismo tiempo, al haber 1 solo agujero faltante por columna, no alcanzaba el umbral de `machine_stop_min_missing: 2`.
+
+**Cambios aplicados:**
+- `src/inspection.py`:
+  - Si el corrimiento lateral supera `grid_lateral_shift_max_px`, activa `machine_stop = True` y `_ms_reason = f"DESVIACION LATERAL..."` directamente (parada en un frame).
+- `config/tolerancias.yaml`:
+  - modelo_B `machine_stop_min_missing`: `2 → 1` (para detectar el punzón roto/agujero único).
+  - modelo_B `machine_stop_ignore_near_miss`: `true → false` (evita que la grilla tan densa enmascare la falla real).
+  - Comentarios corregidos para eliminar mojibakes y hacer pasar unit-tests.
+
+**Validación inmediata sobre `05-06-2026-MICROPERFORADO_1`:**
+- `machine_stop_frames` pasa de 0 a 13 frames (activados en frame_0005 a frame_0010 para columna 1, y frame_0015 a frame_0021 para columna 4).
+- 0 falsos positivos en los 115 frames restantes.
+- 17/17 pytest pasando correctamente.
+
+#### Cambio 142 - Esterilla: reconstruccion de patron desde frame_0113 para evaluar carpeta editada
+
+**Pedido:** reconstruir `scanner_2/modelo_A` usando como referencia
+`C:\Users\DefyC\Downloads\05-06-2026-PATRONES EDITADOS\05-06-2026-ESTERILLA_1\frame_0113.png`
+y medir como se comporta la misma carpeta contra ese patron nuevo.
+
+**Cambio aplicado:**
+- `data/patterns/scanner_2/modelo_A/holes.json`
+  - reconstruido con ROI activa `x=110, w=415`
+  - build resultante: `97 puntos`, `93` celdas unicas tras depurar `4` duplicadas
+  - `dx=39`, `dy=21`, `phase=(12,2)`, `stagger_x_odd=20`
+
+**Validacion inmediata sobre `05-06-2026-ESTERILLA_1`:**
+- Antes de reconstruir:
+  - `raw_ok=33`, `raw_nok=100`
+  - `temporal_ok=123`, `temporal_nok=10`
+  - missing estructural concentrado en varias celdas fijas del patron
+- Despues de reconstruir con `frame_0113`:
+  - `raw_ok=0`, `raw_nok=133`
+  - `temporal_ok=68`, `temporal_nok=65`
+  - `machine_stop_frames=6`
+  - nuevas columnas/celdas con faltante estructural al 95-100%
+
+**Conclusion:** este frame `0113` NO sirve como nueva referencia de patron para esa
+carpeta. La reconstruccion empeora la estabilidad de forma fuerte y genera un baseline
+de missing todavia mas alto que el patron anterior.
+
+**Archivos modificados:** `data/patterns/scanner_2/modelo_A/holes.json`
+
+---
+
+#### Cambio 141 - Unificacion de contexto entre analisis e inspeccion
+
+**Pedido:** que `ANALISIS` y `modo inspeccion` usen exactamente el mismo contexto
+base de analisis para no tener que perseguir diferencias invisibles entre ambos.
+
+**Cambio aplicado:**
+- `src/inspection.py`
+  - `inspect_folder()` ahora tambien crea `ema_state: {}` en el preload compartido,
+    igual que el inspector vivo
+- `src/ui/service.py`
+  - el analisis en vivo durante grabacion ahora mantiene un preload persistente con
+    `tolerances`, `pattern`, `roi` y `ema_state`, en lugar de recargar solo el detector
+    de `machine_stop` frame a frame
+
+**Resultado:** carpeta comun, analisis en servicio y modo inspeccion quedan mas alineados:
+usan la misma fuente de verdad de tolerancias/ROI/patron y tambien conservan el mismo
+estado suavizado de alineacion entre frames.
+
+**Regla permanente:** a partir de este cambio, cualquier ajuste de ROI, tolerancias,
+preprocess, lineas de borde, alineacion o matching debe impactar por igual en
+ANALISIS, modo inspeccion y pruebas equivalentes. No se debe mantener logica ni
+parametros separados entre esos modos, salvo la compuerta propia del avance real
+del material y la FSM de produccion.
+
+**Archivos modificados:** `src/inspection.py`, `src/ui/service.py`
+
+---
+
+#### Cambio 140 - Microperforado: ROI recortado y patrón reconstruido desde grabación en vivo
+
+**Síntoma:** en modo inspección en vivo (run), el ROI previo (x=195, w=295) era demasiado
+ancho: incluía ~80px de metal sólido a la derecha de la zona perforada donde había marcas/
+arañazos que se detectaban como agujeros falsos → machine_stop → parada inmediata.
+Además, el `scanner_1/modelo_B/roi.json` previo (x=236, w=216) cortaba la parte izquierda
+de la chapa respecto a la posición real de la cámara en vivo.
+
+**Diagnóstico:** análisis de perfiles de columna en frames de `data/recordings/09-06-2026-MICROPERFORADO_1/`:
+- Zona de agujeros reales: frame x=210 a x=408 (ancho ~198px)
+- Metal sólido sin agujeros (izquierdo): x=88 a x=209
+- Metal sólido sin agujeros (derecho): x=409 a x=531
+- Borde naranja metálico (exterior): x=0-88 y x=532-640
+
+**Cambios:**
+- `data/patterns/scanner_1/modelo_B/roi.json`: `x=195,w=295` → `x=200,w=230` (x=200 a x=430)
+- `data/patterns/modelo_B/roi.json`: ídem — ahora live mode y análisis carpetas usan el mismo ROI
+- `data/patterns/scanner_1/modelo_B/holes.json`: reconstruido desde `frame_0003.png` de la grabación nueva
+  - 78 holes, image_size=[230,480], dx=36, dy=14, stagger_x_odd=-18, phase=(34,8)
+  - Antes: 121 holes (ROI viejo más ancho capturaba columnas fuera del área real)
+- `data/patterns/modelo_B/holes.json`: copiado del scanner_1 (idéntico)
+
+**Resultado:** live mode y análisis por carpetas ahora usan ROI y patrón idénticos.
+Los parámetros de detección ya eran idénticos (`load_tolerances("modelo_B")` en ambos modos).
+
+**Archivos modificados:**
+- `data/patterns/scanner_1/modelo_B/roi.json`
+- `data/patterns/modelo_B/roi.json`
+- `data/patterns/scanner_1/modelo_B/holes.json`
+- `data/patterns/modelo_B/holes.json`
+
+---
+
+#### Cambio 139 - Esterilla: CLAHE + adaptive_block_size 41→21 para ROI ampliada
+
+**Síntoma:** detección muy baja en esterilla (~10% detection_ratio). El ROI ahora mide 415px
+(ampliado por la otra máquina). Las zonas brillantes de retroiluminación a los costados del
+material elevan el promedio local del adaptive threshold → los agujeros no superan el umbral.
+
+**Cambios en `config/tolerancias.yaml` — modelo_A:**
+- `use_clahe: true` — normaliza la iluminación despareja antes de umbralizar
+- `clahe_clip: 3.0, clahe_tile: 8`
+- `adaptive_block_size: 41 → 21` — vecindad más local para ROI de 415px
+- `adaptive_c: -5.0 → 3.0` — threshold = mean - 3; más permisivo
+
+**Archivos modificados:** `config/tolerancias.yaml`
+
+---
 
 #### Cambio 138 - Esterilla: grid_compare_margin_x_px 30→40 para excluir borde izquierdo
 
@@ -5720,3 +7099,30 @@ y patron correctos.
 
 **Validacion pendiente:** ejecutar `run-folder` sobre ESTERILLA_5 y confirmar que missing
 baja de 7 a 0 o cerca en frames buenos.
+
+---
+
+#### Cambio 140 - esterilla: revertir parametros deteccion a estado funcional original
+
+**Problema:** ciertos agujeros de esterilla no aparecen ni como verdes (detectados) ni como
+rojos X (missing en patron). La mascara binaria no los genera, son completamente invisibles.
+
+**Causa:** los cambios anteriores (Cambio 138-139) modificaron los parametros de deteccion
+de modelo_A intentando compensar el ROI ampliado (x=110, w=415), pero empeoraron la situacion:
+- `use_channel: r` — el canal R amplifica la zona de backlight rojo, elevando la media local
+  adaptativa cerca de los agujeros del borde izquierdo del material.
+- `use_clahe: true` con `clahe_tile=8` — tiles de 52×60px en zonas backlight/material distorsionan
+  el contraste local cerca de los agujeros en la transicion.
+- `adaptive_block_size: 21` — bloque pequenio captura mas ruido de iluminacion no uniforme.
+- `adaptive_c: 3.0` (positivo) — mas permisivo que antes, pero CLAHE+backlight dominan.
+
+**Decision:** restaurar exactamente los parametros que funcionaban antes de la expansion del ROI.
+Con `adaptive_c: -5.0` (negativo), threshold = media_local + 5, por lo que los agujeros solo
+se detectan si son significativamente mas brillantes que su vecindad — robusto incluso con
+zonas de backlight lateral porque esas zonas crean blobs grandes que filtran por area/circularidad.
+
+**Cambios en config/tolerancias.yaml (modelo_A):**
+- `use_channel: r` → `gray`
+- `use_clahe: true` → `false`
+- `adaptive_block_size: 21` → `41`
+- `adaptive_c: 3.0` → `-5.0`

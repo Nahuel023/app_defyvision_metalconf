@@ -117,6 +117,7 @@ def draw_compare_overlay(
     detected: Sequence[Hole],
     missing_points: Sequence[Tuple[float, float]],
     status: str,
+    raw_detected: Sequence[Hole] = (),
     extra_points: Sequence[Tuple[float, float]] = (),
     near_miss_pairs: Sequence[Tuple[Tuple[float, float], Tuple[float, float]]] = (),
     nok_reasons: List[str] = (),
@@ -142,7 +143,20 @@ def draw_compare_overlay(
         cv2.line(out, (int(ex), int(ey)), (int(dx), int(dy)),
                  (255, 220, 0), 1, cv2.LINE_AA)
 
-    # Detectados: verde
+    # Detectados crudos fuera del overlay comparativo: cian tenue.
+    # Permite distinguir "no detectado" de "detectado pero descartado por
+    # filtros del patron/bbox/hull", evitando diagnosticos engañosos.
+    detected_keys = {
+        (round(float(h.x), 2), round(float(h.y), 2), round(float(h.r), 2))
+        for h in detected
+    }
+    for h in raw_detected:
+        key = (round(float(h.x), 2), round(float(h.y), 2), round(float(h.r), 2))
+        if key in detected_keys:
+            continue
+        cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (255, 255, 0), 1)
+
+    # Detectados usados en la comparación: verde
     for h in detected:
         cv2.circle(out, (int(h.x), int(h.y)), int(h.r), (0, 255, 0), 2)
 
@@ -316,6 +330,42 @@ def draw_blur_indicator(
         cv2.rectangle(img, (bx, by), (bx + tw + 10, by + th + bl + 8), (0, 0, 255), 2)
         cv2.putText(img, badge, (bx + 5, by + th + 4),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2, cv2.LINE_AA)
+    return img
+
+
+def draw_roi_health_indicator(
+    img: np.ndarray,
+    roi_info,
+    y: int = 102,
+) -> np.ndarray:
+    """Draw compact frame/ROI health text under the blur indicator."""
+    if roi_info is None:
+        return img
+
+    line_1 = (
+        f"Frame: {roi_info.frame_w}x{roi_info.frame_h}   "
+        f"ROI x={roi_info.effective_roi.x} w={roi_info.effective_roi.w}"
+    )
+    cv2.putText(img, line_1, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(img, line_1, (10, y), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (160, 220, 220), 1, cv2.LINE_AA)
+
+    if roi_info.auto_corrected:
+        line_2 = f"ROI auto-corr: {roi_info.shift_x:+.1f}px"
+        color = (80, 220, 80)
+    elif roi_info.warning:
+        line_2 = roi_info.warning
+        color = (0, 200, 255)
+    elif roi_info.detected_roi is not None:
+        line_2 = (
+            f"ROI detectada x={roi_info.detected_roi.x} w={roi_info.detected_roi.w}  "
+            f"dx={roi_info.shift_x:+.1f}px"
+        )
+        color = (120, 170, 255)
+    else:
+        return img
+
+    cv2.putText(img, line_2, (10, y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.40, (0, 0, 0), 3, cv2.LINE_AA)
+    cv2.putText(img, line_2, (10, y + 18), cv2.FONT_HERSHEY_SIMPLEX, 0.40, color, 1, cv2.LINE_AA)
     return img
 
 

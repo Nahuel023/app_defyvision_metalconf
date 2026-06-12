@@ -99,6 +99,29 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pattern_center_align_enabled": False,
     "pattern_center_zigzag_std_max_px": 4.0,
     "pattern_center_zigzag_abs_max_px": 6.5,
+    "roi_autocorrect_enabled": False,
+    "roi_autocorrect_max_shift_px": 0.0,
+    "roi_autocorrect_max_width_delta_px": 0.0,
+    "roi_detect_margin_px": 0,
+    "roi_detect_min_contrast": 30.0,
+    "roi_recenter_enabled": False,
+    "roi_recenter_warmup_frames": 20,
+    "roi_recenter_trigger_delta_px": 6.0,
+    "roi_recenter_edge_missing_min": 3,
+    "roi_recenter_edge_band_px": 28.0,
+    "roi_recenter_streak_frames": 6,
+    "roi_recenter_step_px": 1.0,
+    "roi_recenter_max_total_shift_px": 40.0,
+    # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
+    # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
+    "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides
+    "roi_slow_ema_alpha": 0.002,         # EMA α — converge en ~500 frames (~100s a 5fps)
+    "roi_slow_ema_threshold_px": 15.0,   # drift mínimo (px) para arrancar confirmación
+    "roi_slow_ema_confirm_frames": 500,  # frames sostenidos antes de escribir 1px (~100s)
+    "roi_slow_ema_cooldown_frames": 1500,# frames de pausa entre correcciones (~5min a 5fps)
+    "roi_slow_ema_max_total_px": 40,     # máximo ±40px desde la ROI original del archivo
+    "roi_slow_ema_save_every": 300,      # guardar estado en disco cada N frames (~60s)
+    "roi_slow_ema_warmup_frames": 300,   # frames iniciales para establecer baseline estatico (~60s)
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
     "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron
@@ -116,7 +139,7 @@ def tolerances_path() -> Path:
     return Path("config/tolerancias.yaml")
 
 
-def load_tolerances(model: str | None = None) -> dict[str, Any]:
+def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> dict[str, Any]:
     """Load tolerances, optionally merging per-model overrides.
 
     tolerancias.yaml structure:
@@ -149,6 +172,19 @@ def load_tolerances(model: str | None = None) -> dict[str, Any]:
     if model:
         model_overrides = (data.get("models") or {}).get(model) or {}
         cfg.update({k: v for k, v in model_overrides.items() if v is not None})
+
+    # Apply per-scanner inspection overrides from io_map.yaml.
+    if scanner_id:
+        io_map_path = Path("config") / "io_map.yaml"
+        if io_map_path.exists():
+            try:
+                with io_map_path.open("r", encoding="utf-8") as f:
+                    io_data = yaml.safe_load(f) or {}
+                scanner_cfg = (io_data.get(scanner_id) or {})
+                insp_cfg = scanner_cfg.get("inspection") or {}
+                cfg.update({k: v for k, v in insp_cfg.items() if v is not None})
+            except Exception:
+                pass
 
     return cfg
 

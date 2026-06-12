@@ -1,4 +1,4 @@
-﻿threshold: 175
+threshold: 175
 use_channel: r
 polarity: bright
 min_area: 80.0
@@ -18,14 +18,16 @@ clahe_tile: 8
 use_otsu: true
 continuous_position_threshold: 0.0
 max_inspection_hz: 15
-# â”€â”€ Buffer circular de frames OK â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-# Guarda las Ãºltimas ok_buffer_count inspecciones correctas (con overlay verde)
-# en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mÃ¡s viejas.
-# Ãštil para ver cÃ³mo estÃ¡ funcionando la detecciÃ³n sin errores.
+# ---------------- Buffer circular de frames OK ----------------
+# Guarda las ultimas ok_buffer_count inspecciones correctas (con overlay verde)
+# en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mas viejas.
+# Util para ver como esta funcionando la deteccion sin errores.
 ok_buffer_enabled: true
-ok_buffer_count: 200          # frames a mantener por scanner (~20 MB a 100 KB/frame)
+ok_buffer_count: 500          # frames a mantener por scanner (~50 MB a 100 KB/frame)
 ok_buffer_every: 1            # guardar todos los frames OK
 ok_buffer_jpeg_quality: 75    # calidad JPEG
+timeline_buffer_enabled: true
+timeline_buffer_count: 500    # ultimos 500 frames cronologicos (OK+NOK+LQ+STOP) por scanner
 
 events_enabled: true
 events_max_disk_gb: 10.0
@@ -41,6 +43,9 @@ models:
     threshold: 180
     use_channel: gray
     use_otsu: false
+    use_clahe: false
+    clahe_clip: 3.0
+    clahe_tile: 8
     use_adaptive: true
     open_ksize: 1
     close_ksize: 3
@@ -82,7 +87,7 @@ models:
     grid_max_missing: 80
     bbox_filter_margin_px: 60.0
     pattern_hull_margin_px: 10.0
-    grid_affine_refinement: false
+    grid_affine_refinement: true
     extra_min_dist_factor: 2.0
     compare_top_ignore_px: 0.0
     compare_bottom_ignore_px: 0.0
@@ -118,14 +123,14 @@ models:
     min_area: 15.0
     circularity_min: 0.2
     aspect_ratio_max: 3.5
-    tol_xy_px: 20.0
+    tol_xy_px: 24.0
     align_match_tol_px: 120.0
     min_match_count: 5
     edge_margin_px: 0.0
     grid_compare_margin_px: 5.0
-    grid_compare_margin_x_px: 22.0   # excluye col 6 (x≈197-203) que nunca detecta la camara en este ROI
-    grid_compare_margin_y_px: 55.0   # excluye filas borde superior (cj=3, y=52px) e inferior (cj=30, y=430px)
-    pattern_edge_margin_px: 50.0
+    grid_compare_margin_x_px: 22.0   # excluye ci=6 even rows (x=218) fuera de zona de agujeros
+    grid_compare_margin_y_px: 55.0   # excluye filas borde superior e inferior
+    pattern_edge_margin_px: 22.0
     grid_max_missing: 60
     bbox_filter_margin_px: 45.0
     quality_ratio_min: 0.0
@@ -135,15 +140,56 @@ models:
     grid_dy: 14.0
     grid_stagger_x_odd: -18.0
     grid_derotate: false
-    grid_affine_refinement: false
+    grid_affine_refinement: false   # affine desplazaba expected ~20px creando falsos missing — fase sola es precisa
     center_offset_tol_px: 0.0
     extra_min_dist_factor: 2.0
     continuous_position_threshold: 4.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 3
-    machine_stop_min_missing: 3
+    machine_stop_min_missing: 2
     machine_stop_same_zone_px: 35.0
     machine_stop_ignore_near_miss: true
     machine_stop_track_by_grid: true
     machine_stop_same_column_tol_cells: 0
-grid_lateral_shift_max_px: 0.0   # deshabilitado: offset constante ~+5px (calibraciÃ³n, no desviaciÃ³n real)
+    machine_stop_require_frame_nok: true
+    grid_lateral_shift_max_px: 0.0   # desactivado — reactivar cuando la alineacion este corregida
+    use_hungarian_matching: true    # evita stealing cuando dos expected compiten por mismo detected
+    blur_score_min: 200.0          # frames borrosos por vibracion → LOW_QUALITY → no acumula machine stop
+    verticality_quality_enabled: false
+    chapa_zigzag_std_max_px: 4.0
+    chapa_zigzag_abs_max_px: 10.0
+    chapa_no_line_min_used_lines: 1
+    chapa_no_line_abs_max_px: 4.5
+    pattern_align_enabled: true
+    pattern_align_std_max_px: 7.0    # normal ~0.4px; bordes de chapa: 3.8-5.3px; desalineados reales: >7px
+    pattern_align_abs_max_px: 22.0   # normal ~2px; bordes de chapa: 13-18px; desalineados reales: >22px
+    pattern_align_machine_stop: true # activar parada por racha
+    pattern_align_stop_frames: 3     # frames consecutivos desalineados para parar la maquina
+    pattern_global_offset_max_px: 10.0
+    pattern_slope_delta_max_deg: 4.0  # frames de borde de chapa miden ~3.1 deg; desalineados reales > 4 deg
+    roi_autocorrect_enabled: false
+    roi_autocorrect_max_shift_px: 18.0
+    roi_autocorrect_max_width_delta_px: 20.0
+    roi_detect_margin_px: 0
+    roi_detect_min_contrast: 25.0
+    roi_recenter_enabled: true
+    roi_recenter_warmup_frames: 24
+    roi_recenter_trigger_delta_px: 5.0
+    roi_recenter_edge_missing_min: 3
+    roi_recenter_edge_band_px: 30.0
+    roi_recenter_streak_frames: 8
+    roi_recenter_step_px: 1.0
+    roi_recenter_max_total_shift_px: 24.0
+    pattern_center_align_enabled: false
+    pattern_center_zigzag_std_max_px: 2.2
+    pattern_center_zigzag_abs_max_px: 6.0
+    edge_centering_bands: 24
+    pattern_edge_min_holes_per_band: 1
+    pattern_edge_smooth_window: 2
+    pattern_edge_boundary_tol_px: 8.0
+    compare_top_ignore_px: 46.0
+    compare_bottom_ignore_px: 42.0
+    compare_left_ignore_px: 40.0    # excluye ci=0 (x≈16) y ci=1 (x≈18-36) del patron — borde izq no detectable
+    compare_right_ignore_px: 30.0   # excluye un poco mas del borde der, donde este lote mantiene faltantes falsos residuales
+    frame_missing_nok_threshold: 8
+    tilt_warn_deg: 0.0

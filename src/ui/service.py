@@ -1057,11 +1057,8 @@ class _AnalysisWorker(QThread):
         self._cancel = True
 
     def run(self) -> None:
-        from src.inspection import inspect_image
-        from src.patterns.pattern_io import load_pattern, find_pattern_path
-        from src.patterns.roi import load_roi
         from src.utils.config import load_tolerances
-        from src.pipeline.machine_stop import MachineStopDetector
+        from src.vision.inspector import InspectionSession
 
         try:
             n = len(self._paths)
@@ -1069,45 +1066,30 @@ class _AnalysisWorker(QThread):
                 self.finished.emit([])
                 return
 
-            tols = load_tolerances(self._model)
-
-            # Pre-cargar recursos estáticos una sola vez para evitar N lecturas de disco.
-            # ema_state se inicializa por worker (no se comparte entre frames).
-            _pre: dict = {
-                "tolerances": tols,
-                "pattern":    load_pattern(find_pattern_path(self._model, self._scanner_id)),
-                "roi":        load_roi(self._model, self._scanner_id),
-                "ema_state":  {},   # estado de suavizado de ángulo, se actualiza por frame
-            }
-
-            machine_stop_enabled = bool(tols.get("machine_stop_enabled", False))
-            if machine_stop_enabled:
-                _pre["machine_stop_detector"] = MachineStopDetector(
-                    enabled=True,
-                    missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
-                    min_missing=int(tols.get("machine_stop_min_missing", 1)),
-                    same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
-                    ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
-                    track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
-                    same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
-                )
+            tols = load_tolerances(self._model, scanner_id=self._scanner_id)
+            movement_threshold = float(tols.get("continuous_position_threshold", 0.0))
+            session = InspectionSession(
+                self._model,
+                scanner_id=self._scanner_id,
+                movement_threshold=movement_threshold,
+                min_interval_sec=0.0,
+            )
 
             results: list = []
             for i, path in enumerate(self._paths):
                 if self._cancel:
                     self.cancelled.emit(i)
                     return
-                results.append(inspect_image(
-                    self._model, path,
-                    scanner_id=self._scanner_id,
-                    _preloaded=_pre,
-                ))
+                result = session.inspect_path(path)
+                if result is not None:
+                    results.append(result)
                 # Emitir progreso en cada frame para que la UI muestre avance en vivo.
                 self.progress.emit(i + 1, n)
 
             self.finished.emit(results)
         except Exception as exc:
             self.error.emit(str(exc))
+
 
 
 class ZoomableImageView(QWidget):
@@ -1447,6 +1429,18 @@ class RecordingTab(QWidget):
         self._current_idx: int        = 0
         self._worker: Optional[_AnalysisWorker] = None
         self._live_ms_detector = None
+        self._live_pre: dict | None = None
+        self._live_session = None
+
+        # ROI manual calibration state
+        self._roi_frame                     = None   # BGR ndarray del frame de referencia
+        self._roi_lx:        int            = 0      # borde izquierdo actual
+        self._roi_rx:        int            = 0      # borde derecho actual
+        self._roi_live_active: bool         = False  # True = preview en vivo desde cámara
+        self._roi_live_frame_count: int    = 0       # contador para throttle de health check
+        self._roi_live_timer               = QTimer(self)
+        self._roi_live_timer.setInterval(120)        # ~8 fps, no saturar main thread
+        self._roi_live_timer.timeout.connect(self._roi_grab_live)
 
         # Timer-based analysis state (runs in main thread, no cross-thread signal issues)
         self._ana_running:    bool          = False
@@ -1500,6 +1494,7 @@ class RecordingTab(QWidget):
         # que ServiceWindow monta dentro del tab "Cámara".
         self._grab_page = self._build_grab_page()
         self._ana_page  = self._build_ana_page()
+        self._cal_page  = self._build_cal_page()
 
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
@@ -1522,6 +1517,17 @@ class RecordingTab(QWidget):
         self._spin_to.valueChanged.connect(self._update_export_label)
         self._overlay_toggle.toggled.connect(self._on_overlay_toggled)
         self._model_combo.currentTextChanged.connect(self._update_model_chip)
+
+        # ROI section
+        self._btn_roi_pick_img.clicked.connect(self._on_roi_pick_image)
+        self._btn_roi_pick_dir.clicked.connect(self._on_roi_pick_folder)
+        self._btn_roi_live.clicked.connect(self._on_roi_toggle_live)
+        self._btn_lx_left.clicked.connect(lambda: self._roi_move("lx", -1))
+        self._btn_lx_right.clicked.connect(lambda: self._roi_move("lx", +1))
+        self._btn_rx_left.clicked.connect(lambda: self._roi_move("rx", -1))
+        self._btn_rx_right.clicked.connect(lambda: self._roi_move("rx", +1))
+        self._btn_roi_save.clicked.connect(self._on_roi_save)
+        self._refresh_current_roi_label()
 
         self._update_nav_state()
         self._sync_model_buttons()   # sincroniza grab + ana después de construir ambas páginas
@@ -1590,6 +1596,37 @@ class RecordingTab(QWidget):
 
         return page
 
+    def _build_cal_page(self) -> QWidget:
+        """Página CALIBRACIÓN: sección de ajuste manual de ROI con scroll."""
+        page = QWidget()
+        page.setStyleSheet(f"background:{_DARK};")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        content = QWidget()
+        content.setStyleSheet(f"background:{_DARK};")
+        content_lay = QVBoxLayout(content)
+        content_lay.setContentsMargins(14, 14, 14, 14)
+        content_lay.setSpacing(10)
+        content_lay.addWidget(self._build_roi_section())
+        content_lay.addStretch()
+
+        _scroll_style = (
+            f"QScrollArea {{ background:{_DARK};border:none; }}"
+            f"QScrollBar:vertical {{ background:{_DARK};width:8px;border-radius:4px; }}"
+            f"QScrollBar::handle:vertical {{ background:#334155;border-radius:4px;min-height:24px; }}"
+            f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height:0; }}"
+        )
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(_scroll_style)
+        scroll.setWidget(content)
+        outer.addWidget(scroll)
+
+        return page
+
     def _build_recording_section(self) -> QGroupBox:
         grp = QGroupBox("GRABACIÓN")
         grp.setStyleSheet(self._grp_style())
@@ -1612,6 +1649,7 @@ class RecordingTab(QWidget):
         row1.addWidget(_chip("SCANNER"))
         self._scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=100)
         self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+        self._scanner_combo.currentTextChanged.connect(self._sync_service_scanner_defaults)
         row1.addWidget(self._scanner_combo)
         row1.addSpacing(12)
 
@@ -1758,6 +1796,490 @@ class RecordingTab(QWidget):
 
         lay.addLayout(act)
         return grp
+
+    # ------------------------------------------------------------------ ROI section
+
+    def _build_roi_section(self) -> QGroupBox:
+        grp = QGroupBox("CALIBRACIÓN ROI")
+        grp.setStyleSheet(self._grp_style())
+        lay = QVBoxLayout(grp)
+        lay.setContentsMargins(14, 20, 14, 14)
+        lay.setSpacing(8)
+
+        BTN_SS = (
+            f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+            f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
+        )
+        ARROW_SS = (
+            f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:14px;font-weight:700;min-width:32px;min-height:32px; }}"
+            f"QPushButton:hover {{ border-color:{_ACCENT};color:{_ACCENT}; }}"
+            "QPushButton:pressed { background:#0f172a; }"
+        )
+        CHIP_SS = (
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;"
+        )
+
+        # ── Selector de scanner ──────────────────────────────────────
+        sc_row = QHBoxLayout()
+        sc_row.setSpacing(8)
+        sc_chip = QLabel("SCANNER")
+        sc_chip.setStyleSheet(CHIP_SS)
+        sc_row.addWidget(sc_chip)
+        self._roi_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
+        self._roi_scanner_combo.currentTextChanged.connect(self._on_roi_scanner_changed)
+        sc_row.addWidget(self._roi_scanner_combo)
+        sc_row.addStretch()
+        lay.addLayout(sc_row)
+
+        # ── ROI actual (cargada del archivo) ─────────────────────────
+        self._roi_current_lbl = QLabel("ROI actual: —")
+        self._roi_current_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;"
+        )
+        lay.addWidget(self._roi_current_lbl)
+
+        # ── Fuente ───────────────────────────────────────────────────
+        src_row = QHBoxLayout()
+        src_row.setSpacing(6)
+        self._btn_roi_pick_img = QPushButton("Abrir imagen")
+        self._btn_roi_pick_img.setStyleSheet(BTN_SS)
+        self._btn_roi_pick_dir = QPushButton("Abrir carpeta")
+        self._btn_roi_pick_dir.setStyleSheet(BTN_SS)
+        self._btn_roi_live = QPushButton("▶ Cámara en vivo")
+        self._btn_roi_live.setStyleSheet(BTN_SS)
+        self._btn_roi_live.setCheckable(True)
+        src_row.addWidget(self._btn_roi_pick_img)
+        src_row.addWidget(self._btn_roi_pick_dir)
+        src_row.addWidget(self._btn_roi_live)
+        src_row.addStretch()
+        lay.addLayout(src_row)
+
+        # ── Preview ───────────────────────────────────────────────────
+        self._roi_preview_lbl = QLabel("Cargar una imagen para comenzar")
+        self._roi_preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._roi_preview_lbl.setFixedHeight(160)
+        self._roi_preview_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:6px;border:1px solid {_BORDER};"
+            f"color:{_MUTED};font-size:11px;"
+        )
+        lay.addWidget(self._roi_preview_lbl)
+
+        # ── Salud ROI ─────────────────────────────────────────────────
+        health_chip = QLabel("SALUD ROI")
+        health_chip.setStyleSheet(CHIP_SS)
+        lay.addWidget(health_chip)
+
+        self._roi_health_lbl = QLabel("—")
+        self._roi_health_lbl.setWordWrap(True)
+        self._roi_health_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+            f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;"
+            "padding:6px 8px;"
+        )
+        lay.addWidget(self._roi_health_lbl)
+
+        # ── Controles borde izquierdo ────────────────────────────────
+        lx_row = QHBoxLayout()
+        lx_row.setSpacing(6)
+        lx_chip = QLabel("BORDE IZQ")
+        lx_chip.setStyleSheet(CHIP_SS)
+        lx_row.addWidget(lx_chip)
+        self._btn_lx_left  = QPushButton("◄")
+        self._btn_lx_right = QPushButton("►")
+        self._btn_lx_left.setStyleSheet(ARROW_SS)
+        self._btn_lx_right.setStyleSheet(ARROW_SS)
+        lx_row.addWidget(self._btn_lx_left)
+        lx_row.addWidget(self._btn_lx_right)
+        lx_row.addStretch()
+        self._roi_lx_lbl = QLabel("x=—")
+        self._roi_lx_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;"
+        )
+        lx_row.addWidget(self._roi_lx_lbl)
+        lay.addLayout(lx_row)
+
+        # ── Controles borde derecho ──────────────────────────────────
+        rx_row = QHBoxLayout()
+        rx_row.setSpacing(6)
+        rx_chip = QLabel("BORDE DER")
+        rx_chip.setStyleSheet(CHIP_SS)
+        rx_row.addWidget(rx_chip)
+        self._btn_rx_left  = QPushButton("◄")
+        self._btn_rx_right = QPushButton("►")
+        self._btn_rx_left.setStyleSheet(ARROW_SS)
+        self._btn_rx_right.setStyleSheet(ARROW_SS)
+        rx_row.addWidget(self._btn_rx_left)
+        rx_row.addWidget(self._btn_rx_right)
+        rx_row.addStretch()
+        self._roi_rx_lbl = QLabel("x=—")
+        self._roi_rx_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;"
+        )
+        rx_row.addWidget(self._roi_rx_lbl)
+        lay.addLayout(rx_row)
+
+        # ── Paso + resultado ─────────────────────────────────────────
+        bot_row = QHBoxLayout()
+        bot_row.setSpacing(8)
+        paso_chip = QLabel("PASO px")
+        paso_chip.setStyleSheet(CHIP_SS)
+        bot_row.addWidget(paso_chip)
+        self._spin_roi_step = QSpinBox()
+        self._spin_roi_step.setRange(1, 100)
+        self._spin_roi_step.setValue(5)
+        self._spin_roi_step.setStyleSheet(
+            f"QSpinBox {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:4px 22px 4px 6px;font-size:12px;max-width:66px; }"
+            f"QSpinBox::up-button {{ subcontrol-origin:border;subcontrol-position:top right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-bottom:1px solid {_BORDER};"
+            f"border-top-right-radius:5px;background:{_DARK}; }}"
+            f"QSpinBox::down-button {{ subcontrol-origin:border;subcontrol-position:bottom right;"
+            f"width:18px;border-left:1px solid {_BORDER};border-top:1px solid {_BORDER};"
+            f"border-bottom-right-radius:5px;background:{_DARK}; }}"
+        )
+        bot_row.addWidget(self._spin_roi_step)
+        bot_row.addStretch()
+        self._roi_result_lbl = QLabel("w=—")
+        self._roi_result_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:11px;font-family:Consolas,monospace;"
+        )
+        bot_row.addWidget(self._roi_result_lbl)
+        lay.addLayout(bot_row)
+
+        # ── Guardar + estado ─────────────────────────────────────────
+        save_row = QHBoxLayout()
+        save_row.setSpacing(10)
+        self._btn_roi_save = self._mk_btn("GUARDAR ROI", "#15803d", h=36, fs=12)
+        self._btn_roi_save.setEnabled(False)
+        save_row.addWidget(self._btn_roi_save, stretch=1)
+        lay.addLayout(save_row)
+
+        self._roi_status_lbl = QLabel("")
+        self._roi_status_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;"
+        )
+        self._roi_status_lbl.setWordWrap(True)
+        lay.addWidget(self._roi_status_lbl)
+
+        return grp
+
+    # ------------------------------------------------------------------ ROI handlers
+
+    def _on_roi_scanner_changed(self) -> None:
+        """Al cambiar el scanner: actualiza la etiqueta y recarga bordes sobre la imagen actual."""
+        self._refresh_current_roi_label()
+        # Si hay live activo, reiniciarlo con el nuevo scanner
+        if self._roi_live_active:
+            self._roi_stop_live()
+            self._roi_frame = None
+            return
+        if self._roi_frame is None:
+            return
+        from src.patterns.roi import load_roi
+        from src.utils.model_names import to_internal as _to_int
+        scanner_id = self._roi_scanner_combo.currentText() or None
+        roi = load_roi(_to_int(self._model_combo.currentText()), scanner_id)
+        W = self._roi_frame.shape[1]
+        if roi:
+            self._roi_lx = roi.x
+            self._roi_rx = roi.x + roi.w
+        else:
+            self._roi_lx = 0
+            self._roi_rx = W
+        self._roi_redraw()
+
+    def _refresh_current_roi_label(self) -> None:
+        from src.patterns.roi import load_roi
+        from src.utils.model_names import to_internal as _to_int
+        scanner_id = self._roi_scanner_combo.currentText() or None if hasattr(self, "_roi_scanner_combo") else None
+        model      = self._model_combo.currentText() if hasattr(self, "_model_combo") else ""
+        roi = load_roi(_to_int(model), scanner_id)
+        if roi:
+            self._roi_current_lbl.setText(
+                f"ROI actual:  x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}"
+            )
+        else:
+            self._roi_current_lbl.setText("ROI actual: — (sin ROI guardada)")
+
+    def _roi_load_frame(self, path: Path) -> None:
+        import cv2
+        img = cv2.imread(str(path))
+        if img is None:
+            self._roi_status_lbl.setText(f"No se pudo leer: {path.name}")
+            return
+        self._roi_frame = img
+        H, W = img.shape[:2]
+        # Inicializar bordes con ROI guardada si existe, o imagen completa
+        from src.patterns.roi import load_roi
+        from src.utils.model_names import to_internal as _to_int
+        scanner_id = self._roi_scanner_combo.currentText() or None
+        roi = load_roi(_to_int(self._model_combo.currentText()), scanner_id)
+        if roi:
+            self._roi_lx = roi.x
+            self._roi_rx = roi.x + roi.w
+        else:
+            self._roi_lx = 0
+            self._roi_rx = W
+        self._roi_status_lbl.setText(f"Frame: {path.name}  ({W}x{H})")
+        self._btn_roi_save.setEnabled(True)
+        self._roi_redraw()
+        self._roi_refresh_health()
+
+    _ROI_DEFAULT_DIR = Path(r"C:\DEFYVISION - Metalconf\app_defyvision_metalconf\data\recordings")
+
+    def _roi_start_dir(self) -> str:
+        if self._rec_dir and self._rec_dir.exists():
+            return str(self._rec_dir)
+        if self._ROI_DEFAULT_DIR.exists():
+            return str(self._ROI_DEFAULT_DIR)
+        return ""
+
+    def _on_roi_pick_image(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Seleccionar imagen",
+            self._roi_start_dir(),
+            "Imágenes (*.png *.jpg *.jpeg *.bmp)"
+        )
+        if path:
+            self._roi_load_frame(Path(path))
+
+    def _on_roi_pick_folder(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Seleccionar carpeta de frames",
+            self._roi_start_dir()
+        )
+        if not folder:
+            return
+        exts = {".png", ".jpg", ".jpeg", ".bmp"}
+        frames = sorted(p for p in Path(folder).iterdir() if p.suffix.lower() in exts)
+        if not frames:
+            self._roi_status_lbl.setText("La carpeta no tiene imágenes")
+            return
+        # Mostrar el primer frame
+        self._roi_load_frame(frames[0])
+
+    def _roi_move(self, edge: str, direction: int) -> None:
+        if self._roi_frame is None:
+            return
+        step = self._spin_roi_step.value() * direction
+        W = self._roi_frame.shape[1]
+        if edge == "lx":
+            self._roi_lx = max(0, min(self._roi_rx - 1, self._roi_lx + step))
+        else:
+            self._roi_rx = max(self._roi_lx + 1, min(W, self._roi_rx + step))
+        self._roi_redraw()
+
+    def _roi_redraw(self) -> None:
+        if self._roi_frame is None:
+            return
+        import cv2
+        lx, rx = self._roi_lx, self._roi_rx
+        H, W   = self._roi_frame.shape[:2]
+
+        # Etiquetas de posición
+        self._roi_lx_lbl.setText(f"x={lx}")
+        self._roi_rx_lbl.setText(f"x={rx}")
+        self._roi_result_lbl.setText(f"w={rx - lx}")
+
+        # Preview con líneas de borde
+        vis = self._roi_frame.copy()
+        # Área fuera del ROI oscurecida
+        mask = vis.copy()
+        mask[:, :lx]  = (mask[:, :lx]  * 0.3).astype("uint8")
+        mask[:, rx:]  = (mask[:, rx:]  * 0.3).astype("uint8")
+        vis = mask
+        cv2.line(vis, (lx, 0), (lx, H - 1), (0, 255, 100), 2)
+        cv2.line(vis, (rx, 0), (rx, H - 1), (0, 200, 255), 2)
+        cv2.rectangle(vis, (lx, 2), (rx, H - 3), (255, 255, 255), 1)
+
+        thumb_w = max(self._roi_preview_lbl.width(), 280)
+        scale   = thumb_w / W
+        thumb   = cv2.resize(vis, (thumb_w, int(H * scale)), interpolation=cv2.INTER_AREA)
+        th, tw  = thumb.shape[:2]
+        rgb     = cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB)
+        qimg    = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888)
+        pix     = QPixmap.fromImage(qimg)
+        self._roi_preview_lbl.setPixmap(
+            pix.scaled(
+                self._roi_preview_lbl.width(),
+                self._roi_preview_lbl.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    def _on_roi_save(self) -> None:
+        if self._roi_frame is None:
+            return
+        lx, rx = self._roi_lx, self._roi_rx
+        if rx <= lx:
+            return
+        H = self._roi_frame.shape[0]
+        scanner_id = self._roi_scanner_combo.currentText() or None
+        model_disp = self._model_combo.currentText()
+        from src.utils.model_names import to_internal as _to_int
+        from src.patterns.roi import roi_path
+        import json
+        internal = _to_int(model_disp)
+        path = roi_path(internal, scanner_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
+        self._roi_status_lbl.setText(f"Guardado: {path}")
+        self._refresh_current_roi_label()
+
+    # ------------------------------------------------------------------ ROI live camera
+
+    def _roi_refresh_health(self) -> None:
+        """Corre resolve_runtime_roi sobre el frame actual y actualiza el panel de salud."""
+        if self._roi_frame is None:
+            self._roi_health_lbl.setText("—")
+            self._roi_health_lbl.setStyleSheet(
+                f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+                f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+            )
+            return
+        from src.patterns.roi import load_roi, resolve_runtime_roi, detect_roi_from_images
+        from src.utils.model_names import to_internal as _to_int
+        sid        = self._roi_scanner_combo.currentText() or None
+        saved_roi  = load_roi(_to_int(self._model_combo.currentText()), sid)
+        H, W = self._roi_frame.shape[:2]
+
+        if saved_roi is None:
+            detected = detect_roi_from_images([self._roi_frame])
+            if detected:
+                lines = [
+                    f"Frame:          {W}×{H}",
+                    f"Sin ROI guardada",
+                    f"ROI detectada:  x={detected.x}  w={detected.w}",
+                ]
+                color = _MUTED
+            else:
+                lines = [f"Frame: {W}×{H}", "Sin ROI guardada  |  No detectada"]
+                color = _MUTED
+            self._roi_health_lbl.setText("\n".join(lines))
+            self._roi_health_lbl.setStyleSheet(
+                f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+                f"color:{color};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+            )
+            return
+
+        try:
+            _, info = resolve_runtime_roi(self._roi_frame, saved_roi)
+        except Exception:
+            return
+
+        drift_abs = abs(info.shift_x)
+        if info.warning:
+            border_color = "#ef4444"
+            text_color   = "#fca5a5"
+            status       = f"⚠  {info.warning}"
+        elif drift_abs > 10:
+            border_color = "#f59e0b"
+            text_color   = "#fcd34d"
+            status       = f"Drift moderado"
+        else:
+            border_color = "#16a34a"
+            text_color   = "#86efac"
+            status       = "OK"
+
+        lines = [
+            f"Frame:          {info.frame_w}×{info.frame_h}",
+            f"ROI guardada:   x={info.saved_roi.x}  w={info.saved_roi.w}",
+        ]
+        if info.detected_roi:
+            lines.append(f"ROI detectada:  x={info.detected_roi.x}  w={info.detected_roi.w}")
+            lines.append(f"Drift X:        {info.shift_x:+.1f} px")
+        else:
+            lines.append("ROI detectada:  —  (backlight no encontrado)")
+        lines.append(f"Estado:         {status}")
+
+        self._roi_health_lbl.setText("\n".join(lines))
+        self._roi_health_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:5px;border:1px solid {border_color};"
+            f"color:{text_color};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+        )
+
+    def _on_roi_toggle_live(self) -> None:
+        if self._roi_live_active:
+            self._roi_stop_live()
+        else:
+            self._roi_start_live()
+
+    _ROI_BTN_SS = (
+        f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+        "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+        f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
+    )
+    _ROI_BTN_LIVE_SS = (
+        f"QPushButton {{ background:#15803d;color:#ffffff;border:1px solid #16a34a;"
+        "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+        "QPushButton:hover { background:#166534; }"
+    )
+
+    def _roi_start_live(self) -> None:
+        sid = self._roi_scanner_combo.currentText()
+        try:
+            cam = self._system.camera(sid)
+        except Exception:
+            self._roi_status_lbl.setText("No hay cámara disponible para este scanner")
+            self._btn_roi_live.setChecked(False)
+            return
+        self._roi_live_active = True
+        self._roi_live_frame_count = 0
+        self._btn_roi_live.setText("⏹ Detener live")
+        self._btn_roi_live.setStyleSheet(self._ROI_BTN_LIVE_SS)
+        self._btn_roi_pick_img.setEnabled(False)
+        self._btn_roi_pick_dir.setEnabled(False)
+        self._roi_status_lbl.setText(f"Cámara en vivo: {sid}")
+        self._roi_live_timer.start()
+
+    def _roi_stop_live(self) -> None:
+        self._roi_live_active = False
+        self._roi_live_timer.stop()
+        self._btn_roi_live.setText("▶ Cámara en vivo")
+        self._btn_roi_live.setChecked(False)
+        self._btn_roi_live.setStyleSheet(self._ROI_BTN_SS)
+        self._btn_roi_pick_img.setEnabled(True)
+        self._btn_roi_pick_dir.setEnabled(True)
+        if self._roi_frame is not None:
+            self._roi_status_lbl.setText("Live detenido — frame congelado")
+        else:
+            self._roi_status_lbl.setText("")
+
+    def _roi_grab_live(self) -> None:
+        sid = self._roi_scanner_combo.currentText()
+        try:
+            cam = self._system.camera(sid)
+            frame = cam.get_frame()
+        except Exception:
+            frame = None
+        if frame is None:
+            return
+        # Si es el primer frame, inicializar bordes con ROI guardada
+        if self._roi_frame is None:
+            from src.patterns.roi import load_roi
+            from src.utils.model_names import to_internal as _to_int
+            roi = load_roi(_to_int(self._model_combo.currentText()), sid or None)
+            W = frame.shape[1]
+            if roi:
+                self._roi_lx = roi.x
+                self._roi_rx = roi.x + roi.w
+            else:
+                self._roi_lx = 0
+                self._roi_rx = W
+            self._btn_roi_save.setEnabled(True)
+        self._roi_frame = frame
+        self._roi_redraw()
+        # Refrescar salud cada ~15 frames (~2 s a 8 fps) para no saturar CPU
+        self._roi_live_frame_count += 1
+        if self._roi_live_frame_count % 15 == 1:
+            self._roi_refresh_health()
+
+    # ------------------------------------------------------------------
 
     def _build_ip_camera_section(self) -> QGroupBox:
         grp = QGroupBox("CÁMARA IP EN VIVO")
@@ -1960,6 +2482,25 @@ class RecordingTab(QWidget):
         model_row.addWidget(self._btn_model_microperf_ana)
         model_row.addStretch()
         lay.addLayout(model_row)
+
+        # ── Fila 0b: selector de scanner ──────────────────────────────
+        scanner_row = QHBoxLayout()
+        scanner_row.setSpacing(8)
+
+        scanner_chip = QLabel("SCANNER")
+        scanner_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 8px;margin-right:4px;"
+        )
+        scanner_row.addWidget(scanner_chip)
+
+        self._ana_scanner_combo = self._make_combo(self._system.scanner_ids(), min_w=120)
+        if hasattr(self, "_scanner_combo"):
+            self._ana_scanner_combo.setCurrentText(self._scanner_combo.currentText())
+        scanner_row.addWidget(self._ana_scanner_combo)
+        scanner_row.addStretch()
+        lay.addLayout(scanner_row)
 
         # ── Fila 1: botones de acción ─────────────────────────────────
         btn_row = QHBoxLayout()
@@ -2302,7 +2843,7 @@ class RecordingTab(QWidget):
 
         from datetime import datetime as _dt
         rec_date = _dt.now().strftime("%d-%m-%Y")
-        rec_name = self._build_recording_folder_name(rec_date)
+        rec_name = self._build_recording_folder_name(rec_date, sid)
         self._rec_dir = self._unique_recording_dir(rec_name)
         self._rec_dir.mkdir(parents=True, exist_ok=True)
         self._frame_paths.clear()
@@ -2371,6 +2912,8 @@ class RecordingTab(QWidget):
         self._rec_timer.stop()
         self._recording = False
         self._live_ms_detector = None
+        self._live_pre = None
+        self._live_session = None
         if self._write_executor is not None:
             self._write_executor.shutdown(wait=True)   # flush pending PNG writes
             self._write_executor = None
@@ -2416,33 +2959,28 @@ class RecordingTab(QWidget):
 
         if self._live_chk.isChecked():
             try:
-                from src.inspection import inspect_image
+                from src.vision.inspector import InspectionSession
                 from src.utils.config import load_tolerances
-                from src.pipeline.machine_stop import MachineStopDetector
 
                 model      = self._active_model()
                 scanner_id = self._scanner_combo.currentText() or None
 
-                # Create a persistent detector once per recording session.
-                if self._live_ms_detector is None:
-                    tols = load_tolerances(model)
-                    if bool(tols.get("machine_stop_enabled", False)):
-                        self._live_ms_detector = MachineStopDetector(
-                            enabled=True,
-                            missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
-                            min_missing=int(tols.get("machine_stop_min_missing", 1)),
-                            same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
-                            ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
-                            track_by_grid=bool(tols.get("machine_stop_track_by_grid", True)),
-                            same_column_tol_cells=int(tols.get("machine_stop_same_column_tol_cells", 0)),
-                        )
+                if self._live_session is None:
+                    tols = load_tolerances(model, scanner_id=scanner_id)
+                    self._live_session = InspectionSession(
+                        model,
+                        scanner_id=scanner_id,
+                        movement_threshold=float(tols.get("continuous_position_threshold", 0.0)),
+                        min_interval_sec=0.0,
+                    )
 
-                _pre_live: dict = {}
-                if self._live_ms_detector is not None:
-                    _pre_live["machine_stop_detector"] = self._live_ms_detector
-
-                result = inspect_image(model, path, scanner_id=scanner_id,
-                                       _preloaded=_pre_live if _pre_live else None)
+                result = self._live_session.inspect_frame(
+                    frame_copy,
+                    frame_id=path.stem,
+                    force=False,
+                )
+                if result is None:
+                    return
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -2467,6 +3005,8 @@ class RecordingTab(QWidget):
             self._btn_model_microperf_ana.setEnabled(not running)
         if hasattr(self, "_scanner_combo"):
             self._scanner_combo.setEnabled(not running)
+        if hasattr(self, "_ana_scanner_combo"):
+            self._ana_scanner_combo.setEnabled(not running)
 
     def _on_analyze(self) -> None:
         if not self._frame_paths:
@@ -2482,7 +3022,7 @@ class RecordingTab(QWidget):
         self._export_status_lbl.setText("")
 
         model      = self._active_model()
-        scanner_id = self._scanner_combo.currentText() or None
+        scanner_id = self._ana_scanner_combo.currentText() or None
         n          = len(self._frame_paths)
         if self._worker is not None and self._worker.isRunning():
             return
@@ -2521,7 +3061,7 @@ class RecordingTab(QWidget):
             from src.patterns.roi import load_roi
             from src.utils.config import load_tolerances
             from src.pipeline.machine_stop import MachineStopDetector
-            tols = load_tolerances(model)
+            tols = load_tolerances(model, scanner_id=scanner_id)
             self._ana_pre = {
                 "tolerances": tols,
                 "pattern":    load_pattern(find_pattern_path(model, scanner_id)),
@@ -2703,7 +3243,7 @@ class RecordingTab(QWidget):
         from src.inspection import _apply_temporal_rule
         from src.utils.config import load_tolerances
         model  = self._active_model()
-        tols   = load_tolerances(model)
+        tols   = load_tolerances(model, scanner_id=self._ana_scanner_id)
         consec = int(tols.get("consecutive_nok_frames", 5))
         temporal = _apply_temporal_rule(results, consec)
         t_ok  = sum(1 for t in temporal if t.decision_status == "OK")
@@ -3047,9 +3587,10 @@ class RecordingTab(QWidget):
         label = re.sub(r"[^A-Z0-9]+", "_", name).strip("_")
         return label or "SIN_MODELO"
 
-    def _build_recording_folder_name(self, date_str: str) -> str:
+    def _build_recording_folder_name(self, date_str: str, scanner_id: str = "") -> str:
         root = Path("data/recordings")
         model_label = self._recording_model_label()
+        scanner_label = re.sub(r"[^A-Z0-9]+", "_", scanner_id.upper()).strip("_") if scanner_id else ""
         prefix = f"{date_str}-{model_label}_"
         next_idx = 1
 
@@ -3059,10 +3600,14 @@ class RecordingTab(QWidget):
                     continue
                 if not path.name.startswith(prefix):
                     continue
+                # suffix may be "N" (old format) or "N_SCANNER_X" (new format)
                 suffix = path.name[len(prefix):]
-                if suffix.isdigit():
-                    next_idx = max(next_idx, int(suffix) + 1)
+                num_part = suffix.split("_")[0]
+                if num_part.isdigit():
+                    next_idx = max(next_idx, int(num_part) + 1)
 
+        if scanner_label:
+            return f"{date_str}-{model_label}_{next_idx}_{scanner_label}"
         return f"{date_str}-{model_label}_{next_idx}"
 
     def _unique_recording_dir(self, base_name: str) -> Path:
@@ -3124,13 +3669,40 @@ class RecordingTab(QWidget):
         self._model_combo.blockSignals(False)
         self._sync_model_buttons()
         self._update_model_chip(name)
+        # Forzar recarga del patrón/ROI en el próximo frame de análisis en vivo
+        self._live_pre = None
+        self._live_ms_detector = None
+        self._live_session = None
 
     def _on_scanner_changed(self, sid: str) -> None:
         # El modelo NO cambia automáticamente al cambiar de scanner.
         # El operador puede elegir cualquier combinación de scanner + modelo,
         # por ejemplo analizar Esterilla grabada desde scanner_1.
+        # Forzar recarga del patrón/ROI del nuevo scanner en el próximo frame
+        self._live_pre = None
+        self._live_ms_detector = None
+        self._live_session = None
         self._auto_connect_scanner_camera(sid)
         self._update_fps_cap()
+
+    def _sync_service_scanner_defaults(self, sid: str) -> None:
+        """Align service model/scanner defaults with the active scanner config."""
+        try:
+            model_internal = str(self._system.io.scanner_config(sid).get("model", "")).strip()
+            if model_internal:
+                display = to_display(model_internal)
+                if self._model_combo.currentText() != display:
+                    self._model_combo.blockSignals(True)
+                    self._model_combo.setCurrentText(display)
+                    self._model_combo.blockSignals(False)
+                    self._sync_model_buttons()
+                    self._update_model_chip(display)
+        except Exception:
+            pass
+        if hasattr(self, "_ana_scanner_combo") and self._ana_scanner_combo.currentText() != sid:
+            self._ana_scanner_combo.blockSignals(True)
+            self._ana_scanner_combo.setCurrentText(sid)
+            self._ana_scanner_combo.blockSignals(False)
 
     def _update_fps_cap(self) -> None:
         """Limita el máximo del spinbox de FPS al FPS real medido de la cámara."""
@@ -3183,6 +3755,8 @@ class RecordingTab(QWidget):
 
     def _on_load_recording(self) -> None:
         """Load an existing recording folder for analysis."""
+        from src.patterns.pattern_io import infer_scanner_id
+
         base = str(Path("data/recordings").resolve())
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar grabación", base,
@@ -3200,6 +3774,15 @@ class RecordingTab(QWidget):
 
         self._rec_dir      = folder_path
         self._frame_paths  = frames
+
+        inferred_scanner = infer_scanner_id(self._active_model(), folder_path)
+        if inferred_scanner:
+            if hasattr(self, "_scanner_combo") and self._scanner_combo.currentText() != inferred_scanner:
+                self._scanner_combo.setCurrentText(inferred_scanner)
+            if hasattr(self, "_ana_scanner_combo") and self._ana_scanner_combo.currentText() != inferred_scanner:
+                self._ana_scanner_combo.setCurrentText(inferred_scanner)
+            logger.info(f"[Grabación] scanner inferido desde carpeta: {inferred_scanner}")
+
         self._results.clear()
         self._nok_indices  = []
         self._current_idx  = 0
@@ -3230,6 +3813,12 @@ class RecordingTab(QWidget):
                 fps_saved = meta.get("fps")
                 if fps_saved:
                     self._fps_spin.setValue(fps_saved)
+                scanner_saved = meta.get("scanner", "")
+                if scanner_saved and hasattr(self, "_ana_scanner_combo"):
+                    idx = self._ana_scanner_combo.findText(scanner_saved)
+                    if idx >= 0:
+                        self._ana_scanner_combo.setCurrentIndex(idx)
+                        logger.info(f"[Grabación] scanner desde meta.json: {scanner_saved}")
                 logger.info(f"[Grabación] meta cargada: {meta}")
             except Exception as exc:
                 logger.warning(f"[Grabación] no se pudo leer meta.json: {exc}")
@@ -5606,6 +6195,7 @@ class ServiceWindow(QMainWindow):
         cam_tabs.setStyleSheet(_sub_style)
         cam_tabs.addTab(self._rec_tab._grab_page, "  GRABACIÓN  ")
         cam_tabs.addTab(self._rec_tab._ana_page,  "  ANÁLISIS  ")
+        cam_tabs.addTab(self._rec_tab._cal_page,  "  CALIBRACIÓN  ")
         cam_tabs.addTab(self._cam_tab,             "  CONEXIÓN  ")
 
         self._tabs.addTab(self._plc_tab,    "  PLC I/O  ")
