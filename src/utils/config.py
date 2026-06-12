@@ -118,6 +118,10 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_recenter_cooldown_frames": 15,      # frames de pausa tras primera correccion (~3s a 5fps)
     "roi_recenter_cooldown_max_frames": 120, # techo del cooldown (~24s a 5fps)
     "roi_recenter_cooldown_mult": 2.0,       # multiplicador del cooldown por cada correccion
+    "roi_precal_enabled": True,              # pre-calibrar ROI antes de iniciar el loop de inspeccion
+    "roi_precal_frames": 8,                  # frames a capturar por iteracion de pre-cal
+    "roi_precal_max_iters": 4,               # maximas iteraciones de correccion pre-inicio
+    "roi_precal_threshold_px": 6.0,         # shift medio (px) que dispara correccion en pre-cal
     # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
     # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
     "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides
