@@ -48,6 +48,41 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 172 - Nombres de grabaciones incluyen scanner
+
+**Pedido:** al guardar grabaciones, incluir el scanner en el nombre de carpeta.
+**Formato:** `DD-MM-YYYY-MODELO_N_SCANNER_X` (ej: `11-06-2026-MICROPERFORADO_9_SCANNER_2`).
+
+**Cambios en `src/ui/service.py`:**
+- `_build_recording_folder_name(date_str, scanner_id)`: acepta `scanner_id`, lo
+  normaliza a mayusculas (ej: `scanner_2` → `SCANNER_2`) y lo agrega al final del nombre.
+  El parsing de `next_idx` ahora soporta ambos formatos (viejo sin scanner, nuevo con scanner).
+- `_on_start`: pasa `sid` (scanner seleccionado) a `_build_recording_folder_name`.
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 171 - ROI calibracion: preview en vivo desde camara del scanner
+
+**Pedido:** en la pantalla de calibracion ROI, poder ver la imagen en tiempo real
+del scanner 1 o 2 seleccionado, ademas de poder abrir imagen o carpeta.
+
+**Cambios en `src/ui/service.py`:**
+- Nuevo estado: `_roi_live_active`, `_roi_live_timer` (QTimer, 120ms ≈ 8fps).
+- Nuevo botón "▶ Cámara en vivo" (checkable) en la fila de fuente del grupo ROI.
+  Al activar: verde, deshabilita los otros botones de fuente, inicia el timer.
+  Al desactivar o cambiar de scanner: restaura a estado normal, congela el frame.
+- `_roi_grab_live()`: obtiene frame via `self._system.camera(sid).get_frame()` y
+  llama a `_roi_redraw()`. En el primer frame inicializa bordes con ROI guardada.
+- `_on_roi_scanner_changed()`: si live está activo al cambiar scanner, lo detiene.
+- Clases de estilo `_ROI_BTN_SS` / `_ROI_BTN_LIVE_SS` como atributos de clase
+  (BTN_SS es local a `_build_roi_section` y no accesible en handlers).
+
+**Archivos:** `src/ui/service.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 170 - scanner_2 microperforado: correccion completa de ROI, patron y grid
 
 **Pedido:** el scanner_2 en modo MICROPERFORADO tomaba muy mal los agujeros (patron de
