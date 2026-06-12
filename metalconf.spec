@@ -86,7 +86,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='metalconf',
-    icon='assets\\defyvision_logo.ico',
+    icon='assets\\logo_defy.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
