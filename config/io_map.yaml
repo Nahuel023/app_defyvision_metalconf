@@ -28,6 +28,11 @@ scanner_1:
     # Incluye la columna del penultimo nivel (x~150 even, x~168 odd) que el usuario
     # necesita ver en el overlay. ci=4 even y ci=5 odd quedan dentro del patron.
     pattern_edge_margin_right_px: 65.0
+    # La segunda columna izq del patron (x=37-42) quedaba excluida del compare cuando
+    # la alineacion de grilla derivaba 2-5px a la izquierda en live mode, porque el
+    # umbral global compare_left_ignore_px=40 la cortaba. Con 28px se excluye solo
+    # la columna mas izquierda (x=18-24, max=24) y se incluye siempre la segunda (x=37-42).
+    compare_left_ignore_px: 28.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:

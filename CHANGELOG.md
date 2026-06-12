@@ -48,6 +48,52 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 181 - Inspector thread: wrapper try/except de último recurso
+
+**Bug:** si cualquier excepción no capturada ocurría en `_continuous_loop` (durante
+`inspect_frame`, `_handle_result`, `_run_roi_precalibration` o cualquier otro punto),
+el thread `scanner_N-inspector` moría silenciosamente. El scanner quedaba atascado
+para siempre: no transicionaba a ERROR, no paraba el solenoide y la UI no lo notificaba.
+
+**Causa raíz:** `_continuous_loop` era el target del thread sin ningún `try/except` de
+nivel superior. Python imprime "Exception in thread …" y continúa sin tomar acción.
+
+**Fix en `src/controller/scanner_controller.py`:**
+- `_continuous_loop` ahora es un wrapper con `try/except Exception` total.
+- El body anterior se movió a `_continuous_loop_impl`.
+- Si cualquier excepción sube: se logea con `exc_info=True`, se para el solenoide,
+  se ponen luces en rojo, se transiciona a `ScannerState.ERROR` y se dispara
+  `_fire_state_changed()` para notificar a la UI.
+- Aplica a todos los scanners; no se puede volver a quedar atascado silenciosamente.
+
+**Archivos:** `src/controller/scanner_controller.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 180 - Fix scanner_1: compare_left_ignore_px 40→28 para incluir segunda columna
+
+**Bug:** en modo live, el scanner_1 no detectaba una columna de agujeros que sí
+aparecía correctamente en análisis de carpeta.
+
+**Causa raíz:** el patrón tiene dos grupos de columnas izquierdas:
+- Columna A: x=18-24px (borde, no detectable en live — debe excluirse).
+- Columna B: x=37-42px (detectable, debe compararse).
+
+Con `compare_left_ignore_px: 40.0` del modelo_B global, la Columna B era borderline.
+Cuando la alineación de grilla en live derivaba 2-5px a la izquierda (comportamiento
+normal de la cámara real vs frames grabados), todos los expected de la Columna B
+caían por debajo de 40px → excluidos del compare → invisible en el overlay de live.
+En análisis de carpeta los frames tenían la chapa 2-3px más a la izquierda, por lo
+que algunos expected de Columna B quedaban en x≥40 y aparecían.
+
+**Fix en `config/io_map.yaml` (scanner_1 inspection override):**
+- `compare_left_ignore_px: 28.0` — excluye Columna A (max x=24, margen 4px) e
+  incluye siempre Columna B (min x=37, margen 9px contra deriva de la grilla).
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 179 - Fix MetricsRecorder: 21 placeholders para 22 columnas
 
 **Bug:** `MetricsRecorder write error: 21 values for 22 columns` cada minuto en producción.

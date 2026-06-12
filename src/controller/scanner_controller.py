@@ -726,6 +726,26 @@ class ScannerController:
 
     def _continuous_loop(self) -> None:
         """Modo continuo AUTO con la misma sesion/criterios que run-folder."""
+        try:
+            self._continuous_loop_impl()
+        except Exception as exc:
+            logger.critical(
+                "[%s] inspector thread crashed — transicionando a ERROR: %s",
+                self._id, exc, exc_info=True,
+            )
+            try:
+                self._io.write(f"{self._id}.solenoid", False)
+                self._set_lights(red=True)
+            except Exception:
+                pass
+            with self._lock:
+                self._state = ScannerState.ERROR
+            try:
+                self._fire_state_changed()
+            except Exception:
+                pass
+
+    def _continuous_loop_impl(self) -> None:
         frame_counter = 0
 
         with self._lock:
