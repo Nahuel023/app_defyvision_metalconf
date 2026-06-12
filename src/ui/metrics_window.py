@@ -20,6 +20,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 from PyQt6.QtWidgets import (
     QComboBox,
+    QFrame,
     QGroupBox,
     QGridLayout,
     QHBoxLayout,
@@ -59,6 +60,10 @@ _ACCENT = "#38bdf8"
 _OK     = "#4ade80"
 _NOK    = "#f87171"
 _WARN   = "#fbbf24"
+_SURFACE = "#111827"
+_SURFACE_2 = "#172033"
+_CHIP = "#243247"
+_HEADER_LINE = "#67e8f9"
 
 _HEADER_WING_W = 310
 
@@ -164,22 +169,32 @@ class _MetricCard(QWidget):
                  parent=None) -> None:
         super().__init__(parent)
         self.setToolTip(tooltip)
+        self.setMinimumHeight(118)
         self.setStyleSheet(
-            f"QWidget {{ background:{_PANEL};border-radius:8px;"
-            f"border:1px solid {_BORDER}; }}"
+            f"QWidget {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+            f"stop:0 {_SURFACE_2}, stop:1 {_PANEL});"
+            f"border-radius:14px;border:1px solid {_BORDER}; }}"
         )
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(10, 8, 10, 8)
-        lay.setSpacing(2)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(5)
+
+        top_line = QFrame()
+        top_line.setFixedHeight(4)
+        top_line.setStyleSheet(
+            f"background:{_HEADER_LINE};border:none;border-radius:2px;"
+        )
+        lay.addWidget(top_line)
 
         lbl = QLabel(label.upper())
         lbl.setStyleSheet(
-            f"font-size:8px;color:{_MUTED};letter-spacing:0.5px;background:transparent;"
+            f"font-size:9px;color:{_MUTED};letter-spacing:1.4px;"
+            "font-weight:700;background:transparent;"
         )
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self._val = QLabel("—")
-        self._val.setFont(QFont("Segoe UI", 17, QFont.Weight.Bold))
+        self._val.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         self._val.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._val.setStyleSheet(f"color:{_MUTED};background:transparent;")
 
@@ -188,7 +203,7 @@ class _MetricCard(QWidget):
         if unit:
             u = QLabel(unit)
             u.setStyleSheet(
-                f"font-size:8px;color:{_MUTED};background:transparent;"
+                f"font-size:9px;color:{_MUTED};background:transparent;"
             )
             u.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lay.addWidget(u)
@@ -197,7 +212,7 @@ class _MetricCard(QWidget):
         self._val.setText(text)
         self._val.setStyleSheet(
             f"color:{color};background:transparent;"
-            "font-size:17px;font-weight:700;"
+            "font-size:22px;font-weight:800;"
         )
 
 
@@ -220,26 +235,36 @@ class _RealTimeTab(QWidget):
     def _build_ui(self) -> None:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
-        scroll.setStyleSheet(f"QScrollArea {{ border:none; background:{_DARK}; }}")
+        scroll.setStyleSheet(
+            f"QScrollArea {{ border:none; background:{_DARK}; }}"
+            f"QScrollBar:vertical {{ background:{_DARK}; width:10px; margin:0; }}"
+            f"QScrollBar::handle:vertical {{ background:{_BORDER}; border-radius:5px; min-height:30px; }}"
+        )
 
         content = QWidget()
         content.setStyleSheet(f"background:{_DARK};")
         lay = QVBoxLayout(content)
-        lay.setContentsMargins(14, 14, 14, 14)
-        lay.setSpacing(14)
+        lay.setContentsMargins(18, 18, 18, 18)
+        lay.setSpacing(18)
 
         for sid in self._system.scanner_ids():
             num = sid.split("_")[-1]
-            grp = QGroupBox(f"SCANNER {num}   ·   BAL {num}")
+            try:
+                from src.utils.model_names import to_display
+                model_txt = to_display(self._system.io.scanner_config(sid).get("model", ""))
+            except Exception:
+                model_txt = self._system.io.scanner_config(sid).get("model", "")
+            grp = QGroupBox(f"SCANNER {num}   ·   {model_txt or '—'}")
             grp.setStyleSheet(self._grp_style())
             grid = QGridLayout(grp)
-            grid.setContentsMargins(10, 16, 10, 10)
-            grid.setSpacing(8)
+            grid.setContentsMargins(14, 22, 14, 14)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(12)
 
             cards: dict[str, _MetricCard] = {}
             for i, (mid, label, unit, tip) in enumerate(_METRICS_DEF):
                 card = _MetricCard(label, unit, tip)
-                card.setMinimumWidth(110)
+                card.setMinimumWidth(150)
                 row, col = divmod(i, 4)
                 grid.addWidget(card, row, col)
                 cards[mid] = card
@@ -363,10 +388,12 @@ class _RealTimeTab(QWidget):
 
     def _grp_style(self) -> str:
         return (
-            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
-            f"border-radius:8px;margin-top:12px;padding-top:10px;"
-            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
-            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+            f"QGroupBox {{ background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+            f"stop:0 {_SURFACE}, stop:1 {_PANEL});border:1px solid {_BORDER};"
+            f"border-radius:18px;margin-top:14px;padding-top:14px;"
+            f"font-size:14px;font-weight:800;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:18px;padding:0 10px;"
+            f"background:{_DARK};border-radius:8px; }}"
         )
 
     def stop(self) -> None:
@@ -392,29 +419,29 @@ class _HistoricalTab(QWidget):
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(10, 10, 10, 10)
-        root.setSpacing(8)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(12)
 
         # ── barra superior ────────────────────────────────────────
         top = QHBoxLayout()
         top.setSpacing(10)
 
         sc_lbl = QLabel("Scanner:")
-        sc_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        sc_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:700;")
         top.addWidget(sc_lbl)
 
         self._sc_combo = QComboBox()
         self._sc_combo.addItems(self._system.scanner_ids())
         self._sc_combo.setStyleSheet(
-            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:4px;padding:2px 8px;font-size:11px;"
+            f"background:{_CHIP};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;"
         )
         self._sc_combo.currentTextChanged.connect(self._on_scanner_changed)
         top.addWidget(self._sc_combo)
 
         top.addSpacing(16)
         rng_lbl = QLabel("Rango:")
-        rng_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        rng_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;font-weight:700;")
         top.addWidget(rng_lbl)
 
         for label, hours in _TIME_RANGES:
@@ -430,10 +457,10 @@ class _HistoricalTab(QWidget):
         top.addStretch()
 
         ref_btn = QPushButton("Actualizar")
-        ref_btn.setFixedHeight(28)
+        ref_btn.setFixedHeight(36)
         ref_btn.setStyleSheet(
-            f"background:{_ACCENT};color:#000;font-weight:700;"
-            "border-radius:5px;padding:0 16px;border:none;font-size:11px;"
+            f"background:{_ACCENT};color:#03121f;font-weight:800;"
+            "border-radius:10px;padding:0 18px;border:none;font-size:12px;"
         )
         ref_btn.clicked.connect(self._update_charts)
         top.addWidget(ref_btn)
@@ -441,7 +468,7 @@ class _HistoricalTab(QWidget):
 
         # ── área de gráficos ──────────────────────────────────────
         if _MPL:
-            self._fig = Figure(figsize=(12, 6), facecolor=_DARK)
+            self._fig = Figure(figsize=(12, 6), facecolor=_SURFACE)
             self._axes = []
             n_plots = len(_CHART_DEF)
             for i in range(n_plots):
@@ -450,7 +477,7 @@ class _HistoricalTab(QWidget):
             self._fig.tight_layout(pad=2.5)
 
             self._canvas = FigureCanvas(self._fig)
-            self._canvas.setStyleSheet(f"background:{_DARK};")
+            self._canvas.setStyleSheet(f"background:{_SURFACE};")
             root.addWidget(self._canvas, stretch=1)
             self._update_charts()
         else:
@@ -469,8 +496,8 @@ class _HistoricalTab(QWidget):
         fg = "#000000" if active else _TEXT
         return (
             f"background:{bg};color:{fg};border:1px solid {_BORDER};"
-            "border-radius:4px;font-size:11px;padding:0 10px;"
-            "font-weight:700;"
+            "border-radius:9px;font-size:11px;padding:4px 12px;"
+            "font-weight:800;"
         )
 
     def _on_scanner_changed(self, sid: str) -> None:
@@ -493,13 +520,13 @@ class _HistoricalTab(QWidget):
 
         for ax, (col, lbl, color, ylabel) in zip(self._axes, _CHART_DEF):
             ax.cla()
-            ax.set_facecolor(_PANEL)
-            ax.set_title(lbl, fontsize=9, pad=5, color=_TEXT)
+            ax.set_facecolor(_SURFACE_2)
+            ax.set_title(lbl, fontsize=10, pad=8, color=_TEXT, fontweight="bold")
             ax.set_ylabel(ylabel, fontsize=8, color=_MUTED)
             ax.tick_params(colors=_MUTED, labelsize=7)
             for spine in ax.spines.values():
                 spine.set_color(_BORDER)
-            ax.grid(True, color=_BORDER, linewidth=0.4, linestyle="--", alpha=0.6)
+            ax.grid(True, color=_BORDER, linewidth=0.5, linestyle="--", alpha=0.55)
 
             if not rows:
                 ax.text(
@@ -513,9 +540,9 @@ class _HistoricalTab(QWidget):
             xs = [datetime.fromtimestamp(r["ts"]) for r in rows]
             ys = [r.get(col) or 0.0 for r in rows]
 
-            ax.plot(xs, ys, color=color, linewidth=1.5,
-                    marker=".", markersize=3, zorder=3)
-            ax.fill_between(xs, ys, alpha=0.10, color=color)
+            ax.plot(xs, ys, color=color, linewidth=2.0,
+                    marker="o", markersize=3.2, zorder=3)
+            ax.fill_between(xs, ys, alpha=0.14, color=color)
 
             ax.xaxis.set_major_formatter(mdates.DateFormatter("%H:%M"))
             ax.xaxis.set_major_locator(mdates.AutoDateLocator())
@@ -565,14 +592,16 @@ class MetricsWindow(QMainWindow):
         self._tabs = QTabWidget()
         self._tabs.setStyleSheet(f"""
             QTabWidget::pane {{
-                background:{_PANEL};border:1px solid {_BORDER};border-radius:8px;
+                background:{_PANEL};border:1px solid {_BORDER};border-radius:14px;
             }}
             QTabBar::tab {{
-                background:{_DARK};color:{_MUTED};
-                padding:8px 22px;font-size:12px;border-radius:5px;margin-right:3px;
+                background:{_SURFACE};color:{_MUTED};
+                padding:10px 24px;font-size:12px;border-radius:10px;margin-right:6px;
+                border:1px solid {_BORDER};font-weight:700;
             }}
             QTabBar::tab:selected {{
-                background:{_PANEL};color:{_TEXT};font-weight:700;
+                background:{_ACCENT};color:#03121f;font-weight:800;
+                border:1px solid {_ACCENT};
             }}
         """)
 
@@ -586,14 +615,14 @@ class MetricsWindow(QMainWindow):
 
     def _build_header(self) -> QWidget:
         header = QWidget()
-        header.setFixedHeight(84)
+        header.setFixedHeight(98)
         header.setStyleSheet(
             "QWidget { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            "stop:0 #05101f, stop:0.5 #0c2340, stop:1 #05101f);"
-            "border-radius:10px; }"
+            "stop:0 #05101f, stop:0.35 #0c2340, stop:0.7 #0f3b5f, stop:1 #05101f);"
+            "border-radius:16px; border:1px solid #164e63; }"
         )
         outer = QHBoxLayout(header)
-        outer.setContentsMargins(18, 0, 18, 0)
+        outer.setContentsMargins(22, 0, 22, 0)
         outer.setSpacing(0)
 
         # Ala izquierda
@@ -616,13 +645,13 @@ class MetricsWindow(QMainWindow):
         t = QLabel("DEFYVISION")
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         t.setStyleSheet(
-            "color:#f1f5f9;font-size:26px;font-weight:700;"
-            "letter-spacing:4px;background:transparent;"
+            "color:#f1f5f9;font-size:28px;font-weight:800;"
+            "letter-spacing:5px;background:transparent;"
         )
-        s = QLabel("Panel de Métricas  ·  Diagnóstico")
+        s = QLabel("PANEL DE METRICAS  ·  MONITOREO Y DIAGNOSTICO")
         s.setAlignment(Qt.AlignmentFlag.AlignCenter)
         s.setStyleSheet(
-            "color:#475569;font-size:10px;letter-spacing:1.5px;"
+            "color:#cbd5e1;font-size:10px;font-weight:700;letter-spacing:2px;"
             "background:transparent;"
         )
         cl.addWidget(t)

@@ -48,7 +48,7 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
-#### Cambio 178 - Fix MetricsRecorder: 21 placeholders para 22 columnas
+#### Cambio 179 - Fix MetricsRecorder: 21 placeholders para 22 columnas
 
 **Bug:** `MetricsRecorder write error: 21 values for 22 columns` cada minuto en producción.
 
@@ -58,6 +58,36 @@ PLC (Modbus TCP) ←→ InspectionSystem
 **Fix:** agregado el `?` faltante al final de la cláusula `VALUES`.
 
 **Archivos:** `src/metrics/recorder.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 178 - Ventana de métricas: rediseño estético general
+
+**Pedido:** dejar la pantalla de `METRICAS` lo más estética posible, con una
+apariencia más cuidada y legible.
+
+**Cambios en `src/ui/metrics_window.py`:**
+- Nueva dirección visual más consistente con la UI moderna:
+  - superficies con gradientes oscuros más ricos;
+  - tarjetas con bordes más suaves, más aire y mejor jerarquía;
+  - cabecera superior más grande y con más presencia.
+- `Tiempo Real`:
+  - cards más altas y legibles;
+  - franja superior en color acento para dar jerarquía;
+  - tipografía del valor principal más grande;
+  - grupos por scanner más elegantes y con mejor separación visual;
+  - título del scanner ahora muestra también el modelo activo.
+- `Historial`:
+  - controles superiores más prolijos;
+  - selector y botón `Actualizar` con estilo más moderno;
+  - gráficos con fondo más cuidado, líneas más limpias y mejor contraste.
+- `Tabs`:
+  - pestañas más redondeadas, más claras visualmente y con selección más fuerte.
+
+**Validación:**
+- `python -m py_compile src/ui/metrics_window.py` OK
+
+**Archivos:** `src/ui/metrics_window.py`, `CHANGELOG.md`
 
 ---
 

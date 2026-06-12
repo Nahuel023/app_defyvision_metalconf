@@ -24,10 +24,10 @@ scanner_1:
     # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
     # deriva fina sin introducir extras en las pruebas de carpeta.
     tol_xy_px: 38.0
-    # Excluye columnas derechas (ci=4,5, x>=150px) al CONSTRUIR el patron: estas
-    # columnas quedan cerca del borde de chapa y son inestables en deteccion.
-    # El patron resultante no las incluye, evitando falsos missing en produccion.
-    pattern_edge_margin_right_px: 95.0
+    # Excluye solo la columna MAS derecha (x>=180px) al construir el patron.
+    # Incluye la columna del penultimo nivel (x~150 even, x~168 odd) que el usuario
+    # necesita ver en el overlay. ci=4 even y ci=5 odd quedan dentro del patron.
+    pattern_edge_margin_right_px: 65.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -40,7 +40,7 @@ scanner_1:
 
 scanner_2:
   camera_source: "http://192.168.1.2/oneshotimage.jpg"
-  model: "modelo_A"
+  model: "modelo_B"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X2 no llega al PLC
   inspection:
