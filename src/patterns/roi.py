@@ -146,6 +146,31 @@ def detect_roi_from_images(
     return ROI(x=lx, y=0, w=rx - lx, h=H)
 
 
+def roi_drift_state_path(model: str, scanner_id: str | None = None) -> Path:
+    if scanner_id:
+        return Path("data") / "patterns" / scanner_id / model / "roi_drift_state.json"
+    return Path("data") / "patterns" / model / "roi_drift_state.json"
+
+
+def load_roi_drift_state(model: str, scanner_id: str | None = None) -> dict:
+    p = roi_drift_state_path(model, scanner_id)
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_roi_drift_state(state: dict, model: str, scanner_id: str | None = None) -> None:
+    p = roi_drift_state_path(model, scanner_id)
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        _log.warning("No se pudo guardar estado EMA ROI (%s/%s): %s", scanner_id, model, exc)
+
+
 def apply_roi(img: np.ndarray, roi: ROI) -> np.ndarray:
     if img is None or img.ndim < 2:
         raise ValueError("apply_roi: imagen invalida")
