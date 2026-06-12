@@ -71,10 +71,9 @@ scanner_2:
     # Matching mas permisivo solo para scanner_2 en microperforado; reduce
     # missing residuales del lote OK sin afectar scanner_1.
     tol_xy_px: 42.0
-    # Excluye ci=3 y ci=4 (x>=105px en ROI 205px) al CONSTRUIR el patron:
-    # ci=3 y ci=4 quedan cerca del borde derecho de la zona microperforada y
-    # generan falsos missing en produccion. Solo ci=0,1,2 son estables.
-    pattern_edge_margin_right_px: 100.0
+    # Incluye hasta ci=4 odd (x~190px en ROI 235px) para cubrir las dos columnas
+    # derechas que el usuario necesita ver. Corte en 200px excluye solo el borde extremo.
+    pattern_edge_margin_right_px: 35.0
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:

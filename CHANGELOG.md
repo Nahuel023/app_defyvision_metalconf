@@ -48,7 +48,7 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
-#### Cambio 181 - Inspector thread: wrapper try/except de último recurso
+#### Cambio 182 - Inspector thread: wrapper try/except de último recurso
 
 **Bug:** si cualquier excepción no capturada ocurría en `_continuous_loop` (durante
 `inspect_frame`, `_handle_result`, `_run_roi_precalibration` o cualquier otro punto),
@@ -70,7 +70,7 @@ nivel superior. Python imprime "Exception in thread …" y continúa sin tomar a
 
 ---
 
-#### Cambio 180 - Fix scanner_1: compare_left_ignore_px 40→28 para incluir segunda columna
+#### Cambio 181 - Fix scanner_1: compare_left_ignore_px 40→28 para incluir segunda columna
 
 **Bug:** en modo live, el scanner_1 no detectaba una columna de agujeros que sí
 aparecía correctamente en análisis de carpeta.
@@ -94,7 +94,7 @@ que algunos expected de Columna B quedaban en x≥40 y aparecían.
 
 ---
 
-#### Cambio 179 - Fix MetricsRecorder: 21 placeholders para 22 columnas
+#### Cambio 180 - Fix MetricsRecorder: 21 placeholders para 22 columnas
 
 **Bug:** `MetricsRecorder write error: 21 values for 22 columns` cada minuto en producción.
 
@@ -104,6 +104,46 @@ que algunos expected de Columna B quedaban en x≥40 y aparecían.
 **Fix:** agregado el `?` faltante al final de la cláusula `VALUES`.
 
 **Archivos:** `src/metrics/recorder.py`, `CHANGELOG.md`
+
+---
+
+#### Cambio 179 - Historial de metricas: correccion funcional y mejora visual
+
+**Pedido:** arreglar la pestaña de `Historial`, que no estaba funcionando
+correctamente, y dejarla mas estetica.
+
+**Hallazgo:**
+- la base `data/metrics/metrics.db` si tenia datos de ambos scanners, pero no
+  habia muestras dentro de los rangos cortos seleccionados en pantalla;
+- como la UI solo consultaba por ventana temporal fija, el historial quedaba
+  vacio y parecia roto aunque existieran registros anteriores.
+
+**Cambios en `src/ui/metrics_window.py`:**
+- el bloque de graficos ahora vive dentro de un contenedor visual dedicado, con
+  mejor marco, fondo y jerarquia;
+- se agrego una banda de estado arriba de los graficos para informar claramente:
+  - cuando se muestran datos del rango elegido;
+  - cuando no hay datos recientes y se hace fallback a los ultimos registros
+    guardados;
+  - cuando todavia no existe historial para ese scanner.
+- se ampliaron los rangos disponibles para consulta rapida y se mejoro la
+  lectura temporal del eje X cuando se muestran datos historicos mas viejos.
+- se ajusto el mensaje vacio de los graficos para que sea mas claro y no de la
+  sensacion de falla tecnica.
+
+**Cambios en `src/metrics/recorder.py`:**
+- se agrego `query_recent()` para recuperar los ultimos snapshots disponibles
+  de un scanner;
+- se agrego `latest_timestamp()` para saber si existe historial aunque el rango
+  temporal seleccionado no tenga muestras.
+
+**Validacion:**
+- `python -m py_compile src/ui/metrics_window.py src/metrics/recorder.py` OK
+- prueba directa sobre `metrics.db`:
+  - `scanner_1`: `query(168h)=0`, `query_recent(5)=5`
+  - `scanner_2`: `query(168h)=0`, `query_recent(5)=5`
+
+**Archivos:** `src/ui/metrics_window.py`, `src/metrics/recorder.py`, `CHANGELOG.md`
 
 ---
 
