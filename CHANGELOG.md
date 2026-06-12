@@ -48,6 +48,52 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 180 - Microperforado SCANNER 2: estabilizacion de blobs falsos y borde derecho
+
+**Pedido:** revisar el microperforado de `SCANNER 2`, que estaba muy inestable:
+- detectaba agujeros grandes ficticios;
+- llevaba mal la cuenta tanto en `RUN` en vivo como en analisis;
+- el patron/limites del ROI se desplazaban hacia el centro de la chapa.
+
+**Hallazgos sobre el lote OK** `C:\Users\DefyC\Downloads\IMAGENES-VIERNES-12\12-06-2026-MICROPERFORADO_2_SCANNER_2`:
+- los falsos `NOK` residuales se concentraban casi siempre en las columnas mas
+  derechas del patron (`ci=4` y `ci=5`);
+- en `SCANNER 2` aparecian blobs espurios mucho mas grandes que en `SCANNER 1`
+  (areas de hasta ~`989 px²` en pruebas previas), consistentes con uniones
+  falsas/reflejos del borde;
+- el recentrado dinamico del ROI contribuia a que la zona de comparacion se
+  sintiera corridas hacia el centro.
+
+**Cambios en `config/io_map.yaml` (solo `scanner_2.inspection`):**
+- `threshold: 128`
+  - separa mejor microagujeros vecinos y reduce blobs unidos;
+- `max_area: 450.0`
+  - descarta agujeros ficticios demasiado grandes;
+- `compare_right_ignore_px: 75.0`
+  - deja fuera del matching la franja derecha mas inestable, sin tocar
+    `SCANNER 1`;
+- `roi_recenter_enabled: false`
+  - evita que el patron/ROI se recentren solos durante corrida.
+
+**Calibracion validada con patron/ROI actuales de `scanner_2/modelo_B`:**
+- con la configuracion final, sobre el lote OK completo:
+  - `NOK = 0`
+  - `missing avg = 0.44`
+  - `missing max = 3`
+  - `max_area avg/max = 300.7 / 449.5`
+  - `max_rad avg/max = 16.06 / 21.78`
+
+**Resultado esperado:**
+- `SCANNER 2` deja de inventar agujeros gigantes;
+- baja fuertemente el ruido del borde derecho;
+- el ROI deja de correrse solo en vivo;
+- el comportamiento queda mas cercano al de `SCANNER 1`, pero manteniendo
+  tolerancias propias y separadas.
+
+**Archivos:** `config/io_map.yaml`, `data/patterns/scanner_2/modelo_B/roi.json`, `data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
 #### Cambio 179 - Historial de metricas: correccion funcional y mejora visual
 
 **Pedido:** arreglar la pestaña de `Historial`, que no estaba funcionando
