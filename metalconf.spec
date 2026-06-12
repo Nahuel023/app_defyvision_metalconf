@@ -15,6 +15,8 @@ a = Analysis(
     datas=[
         ('config',           'config'),
         ('data\\patterns',   'data\\patterns'),
+        ('assets',           'assets'),
+        ('logos',            'logos'),
     ],
     hiddenimports=[
         'src.main',

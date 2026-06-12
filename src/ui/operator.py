@@ -730,9 +730,11 @@ class OperatorWindow(QMainWindow):
         self._stop_alert_dlg: Optional[MachineStopDialog] = None
         self._errors_win = None
         self.setWindowTitle("DEFYVISION")
-        icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
-        if not icon_pix.isNull():
-            self.setWindowIcon(QIcon(icon_pix))
+        _ico = _ROOT / "assets" / "defyvision_logo.ico"
+        _jpg = _ROOT / "logos" / "logo_ventana.jpg"
+        _win_pix = QPixmap(str(_ico)) if _ico.exists() else QPixmap(str(_jpg))
+        if not _win_pix.isNull():
+            self.setWindowIcon(QIcon(_win_pix))
         self.setStyleSheet(
             "QToolTip { background:#1e293b; color:#f1f5f9; border:none; }"
         )
@@ -1057,10 +1059,13 @@ def launch_operator_ui(system: InspectionSystem) -> None:
         pass
 
     app = QApplication.instance() or QApplication(sys.argv)
-    icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
+    # Usar el mismo .ico embebido en el exe para que barra de título y barra de
+    # tareas muestren el mismo ícono. Fallback al .jpg si el .ico no existe.
+    _ico = _ROOT / "assets" / "defyvision_logo.ico"
+    _jpg = _ROOT / "logos" / "logo_ventana.jpg"
+    icon_pix = QPixmap(str(_ico)) if _ico.exists() else QPixmap(str(_jpg))
     if not icon_pix.isNull():
-        icon = QIcon(icon_pix)
-        app.setWindowIcon(icon)
+        app.setWindowIcon(QIcon(icon_pix))
     win = OperatorWindow(system)
     win.showMaximized()
     win.raise_()

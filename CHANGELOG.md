@@ -48,6 +48,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 184 - Fix ícono barra de tareas en exe: usar .ico en vez de .jpg
+
+**Bug:** el ícono que aparece en la barra de tareas al correr el exe no coincidía
+con el ícono embebido en el `.exe`.
+
+**Causa:** `operator.py` cargaba `logos/logo_ventana.jpg` para la ventana, pero el
+exe embebe `assets/defyvision_logo.ico`. Además `assets/` y `logos/` no estaban en
+el `datas` del spec, por lo que el `.jpg` ni siquiera se cargaba dentro del exe.
+
+**Fix:**
+- `metalconf.spec` — agregados `assets/` y `logos/` en la sección `datas`.
+- `src/ui/operator.py` — `launch_operator_ui` y `OperatorWindow.__init__` ahora
+  prefieren `assets/defyvision_logo.ico`; fallback a `logos/logo_ventana.jpg` si
+  el `.ico` no existe.
+
+
+
 #### Cambio 183 - Fix scanner_1: restaurar roi.json y deshabilitar roi_recenter
 
 **Bug:** warning en producción `[modelo_B] Patrón calibrado a 241x480 pero frame actual
