@@ -48,6 +48,19 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-12 — Tadeo + Claude
 
+#### Cambio 178 - Fix MetricsRecorder: 21 placeholders para 22 columnas
+
+**Bug:** `MetricsRecorder write error: 21 values for 22 columns` cada minuto en producción.
+
+**Causa:** `_INSERT` en `src/metrics/recorder.py` tenía 22 columnas listadas pero solo
+21 `?` en el `VALUES (...)`. La tupla construida en `_snapshot()` sí tenía 22 valores.
+
+**Fix:** agregado el `?` faltante al final de la cláusula `VALUES`.
+
+**Archivos:** `src/metrics/recorder.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 177 - Detención de máquina: cartel grande con scanner dominante y foco operario
 
 **Pedido:** hacer más estética la pantalla grande de detención de máquina y
