@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
 )
@@ -36,7 +35,7 @@ class LoginDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Modo Servicio — Autenticación")
-        self.setFixedSize(380, 210)
+        self.setFixedSize(380, 230)
         self.setModal(True)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
@@ -96,6 +95,14 @@ class LoginDialog(QDialog):
 
         root.addLayout(form)
 
+        self._error_lbl = QLabel("")
+        self._error_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._error_lbl.setStyleSheet(
+            "color:#f87171;font-size:11px;background:transparent;"
+        )
+        self._error_lbl.hide()
+        root.addWidget(self._error_lbl)
+
         btn_row = QHBoxLayout()
         cancel_btn = QPushButton("Cancelar")
         cancel_btn.setFixedHeight(32)
@@ -127,7 +134,7 @@ class LoginDialog(QDialog):
                 and pwd == self._creds.get("password", "")):
             self.accept()
         else:
-            QMessageBox.warning(self, "Acceso denegado",
-                                "Usuario o contraseña incorrectos.")
+            self._error_lbl.setText("Usuario o contraseña incorrectos.")
+            self._error_lbl.show()
             self._pass_edit.clear()
             self._pass_edit.setFocus()
