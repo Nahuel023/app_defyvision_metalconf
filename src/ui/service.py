@@ -1436,6 +1436,10 @@ class RecordingTab(QWidget):
         self._roi_frame                     = None   # BGR ndarray del frame de referencia
         self._roi_lx:        int            = 0      # borde izquierdo actual
         self._roi_rx:        int            = 0      # borde derecho actual
+        self._roi_live_active: bool         = False  # True = preview en vivo desde cámara
+        self._roi_live_timer               = QTimer(self)
+        self._roi_live_timer.setInterval(120)        # ~8 fps, no saturar main thread
+        self._roi_live_timer.timeout.connect(self._roi_grab_live)
 
         # Timer-based analysis state (runs in main thread, no cross-thread signal issues)
         self._ana_running:    bool          = False
@@ -1516,6 +1520,7 @@ class RecordingTab(QWidget):
         # ROI section
         self._btn_roi_pick_img.clicked.connect(self._on_roi_pick_image)
         self._btn_roi_pick_dir.clicked.connect(self._on_roi_pick_folder)
+        self._btn_roi_live.clicked.connect(self._on_roi_toggle_live)
         self._btn_lx_left.clicked.connect(lambda: self._roi_move("lx", -1))
         self._btn_lx_right.clicked.connect(lambda: self._roi_move("lx", +1))
         self._btn_rx_left.clicked.connect(lambda: self._roi_move("rx", -1))
@@ -1843,8 +1848,12 @@ class RecordingTab(QWidget):
         self._btn_roi_pick_img.setStyleSheet(BTN_SS)
         self._btn_roi_pick_dir = QPushButton("Abrir carpeta")
         self._btn_roi_pick_dir.setStyleSheet(BTN_SS)
+        self._btn_roi_live = QPushButton("▶ Cámara en vivo")
+        self._btn_roi_live.setStyleSheet(BTN_SS)
+        self._btn_roi_live.setCheckable(True)
         src_row.addWidget(self._btn_roi_pick_img)
         src_row.addWidget(self._btn_roi_pick_dir)
+        src_row.addWidget(self._btn_roi_live)
         src_row.addStretch()
         lay.addLayout(src_row)
 
@@ -1948,6 +1957,11 @@ class RecordingTab(QWidget):
     def _on_roi_scanner_changed(self) -> None:
         """Al cambiar el scanner: actualiza la etiqueta y recarga bordes sobre la imagen actual."""
         self._refresh_current_roi_label()
+        # Si hay live activo, reiniciarlo con el nuevo scanner
+        if self._roi_live_active:
+            self._roi_stop_live()
+            self._roi_frame = None
+            return
         if self._roi_frame is None:
             return
         from src.patterns.roi import load_roi
@@ -2100,6 +2114,79 @@ class RecordingTab(QWidget):
         path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
         self._roi_status_lbl.setText(f"Guardado: {path}")
         self._refresh_current_roi_label()
+
+    # ------------------------------------------------------------------ ROI live camera
+
+    def _on_roi_toggle_live(self) -> None:
+        if self._roi_live_active:
+            self._roi_stop_live()
+        else:
+            self._roi_start_live()
+
+    _ROI_BTN_SS = (
+        f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+        "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+        f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
+    )
+    _ROI_BTN_LIVE_SS = (
+        f"QPushButton {{ background:#15803d;color:#ffffff;border:1px solid #16a34a;"
+        "border-radius:5px;font-size:11px;padding:0 10px;min-height:28px; }}"
+        "QPushButton:hover { background:#166534; }"
+    )
+
+    def _roi_start_live(self) -> None:
+        sid = self._roi_scanner_combo.currentText()
+        try:
+            cam = self._system.camera(sid)
+        except Exception:
+            self._roi_status_lbl.setText("No hay cámara disponible para este scanner")
+            self._btn_roi_live.setChecked(False)
+            return
+        self._roi_live_active = True
+        self._btn_roi_live.setText("⏹ Detener live")
+        self._btn_roi_live.setStyleSheet(self._ROI_BTN_LIVE_SS)
+        self._btn_roi_pick_img.setEnabled(False)
+        self._btn_roi_pick_dir.setEnabled(False)
+        self._roi_status_lbl.setText(f"Cámara en vivo: {sid}")
+        self._roi_live_timer.start()
+
+    def _roi_stop_live(self) -> None:
+        self._roi_live_active = False
+        self._roi_live_timer.stop()
+        self._btn_roi_live.setText("▶ Cámara en vivo")
+        self._btn_roi_live.setChecked(False)
+        self._btn_roi_live.setStyleSheet(self._ROI_BTN_SS)
+        self._btn_roi_pick_img.setEnabled(True)
+        self._btn_roi_pick_dir.setEnabled(True)
+        if self._roi_frame is not None:
+            self._roi_status_lbl.setText("Live detenido — frame congelado")
+        else:
+            self._roi_status_lbl.setText("")
+
+    def _roi_grab_live(self) -> None:
+        sid = self._roi_scanner_combo.currentText()
+        try:
+            cam = self._system.camera(sid)
+            frame = cam.get_frame()
+        except Exception:
+            frame = None
+        if frame is None:
+            return
+        # Si es el primer frame, inicializar bordes con ROI guardada
+        if self._roi_frame is None:
+            from src.patterns.roi import load_roi
+            from src.utils.model_names import to_internal as _to_int
+            roi = load_roi(_to_int(self._model_combo.currentText()), sid or None)
+            W = frame.shape[1]
+            if roi:
+                self._roi_lx = roi.x
+                self._roi_rx = roi.x + roi.w
+            else:
+                self._roi_lx = 0
+                self._roi_rx = W
+            self._btn_roi_save.setEnabled(True)
+        self._roi_frame = frame
+        self._roi_redraw()
 
     # ------------------------------------------------------------------
 
@@ -2665,7 +2752,7 @@ class RecordingTab(QWidget):
 
         from datetime import datetime as _dt
         rec_date = _dt.now().strftime("%d-%m-%Y")
-        rec_name = self._build_recording_folder_name(rec_date)
+        rec_name = self._build_recording_folder_name(rec_date, sid)
         self._rec_dir = self._unique_recording_dir(rec_name)
         self._rec_dir.mkdir(parents=True, exist_ok=True)
         self._frame_paths.clear()
@@ -3409,9 +3496,10 @@ class RecordingTab(QWidget):
         label = re.sub(r"[^A-Z0-9]+", "_", name).strip("_")
         return label or "SIN_MODELO"
 
-    def _build_recording_folder_name(self, date_str: str) -> str:
+    def _build_recording_folder_name(self, date_str: str, scanner_id: str = "") -> str:
         root = Path("data/recordings")
         model_label = self._recording_model_label()
+        scanner_label = re.sub(r"[^A-Z0-9]+", "_", scanner_id.upper()).strip("_") if scanner_id else ""
         prefix = f"{date_str}-{model_label}_"
         next_idx = 1
 
@@ -3421,10 +3509,14 @@ class RecordingTab(QWidget):
                     continue
                 if not path.name.startswith(prefix):
                     continue
+                # suffix may be "N" (old format) or "N_SCANNER_X" (new format)
                 suffix = path.name[len(prefix):]
-                if suffix.isdigit():
-                    next_idx = max(next_idx, int(suffix) + 1)
+                num_part = suffix.split("_")[0]
+                if num_part.isdigit():
+                    next_idx = max(next_idx, int(num_part) + 1)
 
+        if scanner_label:
+            return f"{date_str}-{model_label}_{next_idx}_{scanner_label}"
         return f"{date_str}-{model_label}_{next_idx}"
 
     def _unique_recording_dir(self, base_name: str) -> Path:
