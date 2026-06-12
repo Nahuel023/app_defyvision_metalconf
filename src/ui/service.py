@@ -1437,6 +1437,7 @@ class RecordingTab(QWidget):
         self._roi_lx:        int            = 0      # borde izquierdo actual
         self._roi_rx:        int            = 0      # borde derecho actual
         self._roi_live_active: bool         = False  # True = preview en vivo desde cámara
+        self._roi_live_frame_count: int    = 0       # contador para throttle de health check
         self._roi_live_timer               = QTimer(self)
         self._roi_live_timer.setInterval(120)        # ~8 fps, no saturar main thread
         self._roi_live_timer.timeout.connect(self._roi_grab_live)
@@ -1867,6 +1868,20 @@ class RecordingTab(QWidget):
         )
         lay.addWidget(self._roi_preview_lbl)
 
+        # ── Salud ROI ─────────────────────────────────────────────────
+        health_chip = QLabel("SALUD ROI")
+        health_chip.setStyleSheet(CHIP_SS)
+        lay.addWidget(health_chip)
+
+        self._roi_health_lbl = QLabel("—")
+        self._roi_health_lbl.setWordWrap(True)
+        self._roi_health_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+            f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;"
+            "padding:6px 8px;"
+        )
+        lay.addWidget(self._roi_health_lbl)
+
         # ── Controles borde izquierdo ────────────────────────────────
         lx_row = QHBoxLayout()
         lx_row.setSpacing(6)
@@ -2012,6 +2027,7 @@ class RecordingTab(QWidget):
         self._roi_status_lbl.setText(f"Frame: {path.name}  ({W}x{H})")
         self._btn_roi_save.setEnabled(True)
         self._roi_redraw()
+        self._roi_refresh_health()
 
     _ROI_DEFAULT_DIR = Path(r"C:\DEFYVISION - Metalconf\app_defyvision_metalconf\data\recordings")
 
@@ -2117,6 +2133,76 @@ class RecordingTab(QWidget):
 
     # ------------------------------------------------------------------ ROI live camera
 
+    def _roi_refresh_health(self) -> None:
+        """Corre resolve_runtime_roi sobre el frame actual y actualiza el panel de salud."""
+        if self._roi_frame is None:
+            self._roi_health_lbl.setText("—")
+            self._roi_health_lbl.setStyleSheet(
+                f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+                f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+            )
+            return
+        from src.patterns.roi import load_roi, resolve_runtime_roi, detect_roi_from_images
+        from src.utils.model_names import to_internal as _to_int
+        sid        = self._roi_scanner_combo.currentText() or None
+        saved_roi  = load_roi(_to_int(self._model_combo.currentText()), sid)
+        H, W = self._roi_frame.shape[:2]
+
+        if saved_roi is None:
+            detected = detect_roi_from_images([self._roi_frame])
+            if detected:
+                lines = [
+                    f"Frame:          {W}×{H}",
+                    f"Sin ROI guardada",
+                    f"ROI detectada:  x={detected.x}  w={detected.w}",
+                ]
+                color = _MUTED
+            else:
+                lines = [f"Frame: {W}×{H}", "Sin ROI guardada  |  No detectada"]
+                color = _MUTED
+            self._roi_health_lbl.setText("\n".join(lines))
+            self._roi_health_lbl.setStyleSheet(
+                f"background:#0a0f1a;border-radius:5px;border:1px solid {_BORDER};"
+                f"color:{color};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+            )
+            return
+
+        try:
+            _, info = resolve_runtime_roi(self._roi_frame, saved_roi)
+        except Exception:
+            return
+
+        drift_abs = abs(info.shift_x)
+        if info.warning:
+            border_color = "#ef4444"
+            text_color   = "#fca5a5"
+            status       = f"⚠  {info.warning}"
+        elif drift_abs > 10:
+            border_color = "#f59e0b"
+            text_color   = "#fcd34d"
+            status       = f"Drift moderado"
+        else:
+            border_color = "#16a34a"
+            text_color   = "#86efac"
+            status       = "OK"
+
+        lines = [
+            f"Frame:          {info.frame_w}×{info.frame_h}",
+            f"ROI guardada:   x={info.saved_roi.x}  w={info.saved_roi.w}",
+        ]
+        if info.detected_roi:
+            lines.append(f"ROI detectada:  x={info.detected_roi.x}  w={info.detected_roi.w}")
+            lines.append(f"Drift X:        {info.shift_x:+.1f} px")
+        else:
+            lines.append("ROI detectada:  —  (backlight no encontrado)")
+        lines.append(f"Estado:         {status}")
+
+        self._roi_health_lbl.setText("\n".join(lines))
+        self._roi_health_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:5px;border:1px solid {border_color};"
+            f"color:{text_color};font-size:11px;font-family:Consolas,monospace;padding:6px 8px;"
+        )
+
     def _on_roi_toggle_live(self) -> None:
         if self._roi_live_active:
             self._roi_stop_live()
@@ -2143,6 +2229,7 @@ class RecordingTab(QWidget):
             self._btn_roi_live.setChecked(False)
             return
         self._roi_live_active = True
+        self._roi_live_frame_count = 0
         self._btn_roi_live.setText("⏹ Detener live")
         self._btn_roi_live.setStyleSheet(self._ROI_BTN_LIVE_SS)
         self._btn_roi_pick_img.setEnabled(False)
@@ -2187,6 +2274,10 @@ class RecordingTab(QWidget):
             self._btn_roi_save.setEnabled(True)
         self._roi_frame = frame
         self._roi_redraw()
+        # Refrescar salud cada ~15 frames (~2 s a 8 fps) para no saturar CPU
+        self._roi_live_frame_count += 1
+        if self._roi_live_frame_count % 15 == 1:
+            self._roi_refresh_health()
 
     # ------------------------------------------------------------------
 
