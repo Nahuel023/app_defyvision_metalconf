@@ -38,7 +38,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.utils.paths import app_root
+_ROOT = app_root()
 
 # ── Paleta ────────────────────────────────────────────────────────────────────
 _BG      = "#0d1117"

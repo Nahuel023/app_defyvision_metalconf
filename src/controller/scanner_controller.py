@@ -38,6 +38,7 @@ from pathlib import Path
 from src.inspection import InspectionResult, save_result_images
 from src.plc.io_map import IOMap
 from src.utils.config import load_tolerances
+from src.utils.paths import app_root
 from src.utils.state import OperationMode, ScannerState
 from src.vision.camera import Camera
 from src.vision.inspector import Inspector, InspectionSession
@@ -106,7 +107,7 @@ class ScannerController:
         self._ok_buf_max      = max(10, int(tols.get("ok_buffer_count", 200)))
         self._ok_buf_every    = max(1,  int(tols.get("ok_buffer_every", 3)))
         self._ok_buf_quality  = int(tols.get("ok_buffer_jpeg_quality", 75))
-        self._ok_buf_dir      = Path("data/output/ok_buffer") / scanner_id
+        self._ok_buf_dir      = app_root() / "data/output/ok_buffer" / scanner_id
         self._ok_seen: int    = 0   # frames OK vistos (para throttle)
         self._ok_write: int   = 0   # posición de escritura en el pool
 
@@ -114,7 +115,7 @@ class ScannerController:
         self._tl_enabled  = bool(tols.get("timeline_buffer_enabled", True))
         self._tl_max      = max(10, int(tols.get("timeline_buffer_count", 500)))
         self._tl_quality  = int(tols.get("ok_buffer_jpeg_quality", 75))
-        self._tl_dir      = Path("data/output/timeline") / scanner_id
+        self._tl_dir      = app_root() / "data/output/timeline" / scanner_id
         self._tl_write: int = 0   # posición de escritura circular
 
         self._lock          = threading.Lock()
@@ -131,7 +132,7 @@ class ScannerController:
                 from src.pipeline.event_recorder import EventRecorder
                 self._recorder = EventRecorder(
                     scanner_id=scanner_id,
-                    events_dir=Path("data/events"),
+                    events_dir=app_root() / "data/events",
                     max_disk_gb=float(tols.get("events_max_disk_gb", 10.0)),
                     pre_seconds=float(tols.get("pre_event_seconds", 60.0)),
                     post_seconds=float(tols.get("post_event_seconds", 30.0)),

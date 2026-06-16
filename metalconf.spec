@@ -41,6 +41,7 @@ a = Analysis(
         'src.patterns.roi',
         'src.utils.config',
         'src.utils.logger',
+        'src.utils.paths',
         'src.utils.state',
         'src.utils.model_names',
         'src.utils.camera_config',

@@ -44,7 +44,8 @@ from src.controller.system import InspectionSystem
 from src.inspection import InspectionResult
 from src.utils.state import OperationMode, ScannerState
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.utils.paths import app_root
+_ROOT = app_root()
 
 # ------------------------------------------------------------------
 # Constantes

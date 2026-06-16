@@ -66,7 +66,8 @@ from src.utils.state import OperationMode, ScannerState
 
 logger = logging.getLogger(__name__)
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.utils.paths import app_root
+_ROOT = app_root()
 
 # Ancho fijo de cada ala del header - igualar ambos lados centra el título
 _HEADER_WING_W = 310

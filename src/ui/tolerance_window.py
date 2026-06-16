@@ -36,7 +36,8 @@ from src.controller.system import InspectionSystem
 from src.utils.config import load_tolerances, save_model_overrides
 from src.utils.model_names import to_display
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.utils.paths import app_root
+_ROOT = app_root()
 
 # ------------------------------------------------------------------
 # Paleta (coherente con metrics_window.py / service.py)

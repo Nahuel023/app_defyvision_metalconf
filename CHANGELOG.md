@@ -48,6 +48,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 190 - Fix exe: frames OK y timeline no se guardaban en producción
+
+**Problema:** Al correr el `.exe` en modo producción (`run`), no se guardaba ningún
+frame OK en el buffer circular (`data/output/ok_buffer/`) ni en el timeline cronológico
+(`data/output/timeline/`). La UI de visor de frames no mostraba nada.
+
+**Causa raíz:** Todos los módulos que resuelven rutas usaban:
+```python
+_ROOT = Path(__file__).resolve().parent.parent.parent
+```
+En desarrollo esto sube desde `src/ui/xxx.py` al root del proyecto. En el `.exe`
+congelado por PyInstaller, `__file__` resuelve a `_MEIPASS/_internal/src/ui/xxx.py`,
+y subir 3 niveles da `_MEIPASS` (el directorio temporal de PyInstaller), **no** el
+directorio donde está instalada la aplicación.
+
+**Solución:**
+1. Nuevo módulo `src/utils/paths.py` con `app_root()` que en modo frozen devuelve
+   `Path.cwd().resolve()` (ya correcto porque `run_production.py` ejecuta
+   `os.chdir(project_root)` antes de importar cualquier módulo `src`), y en desarrollo
+   sube 3 niveles desde `__file__`.
+2. Todos los archivos afectados reemplazados:
+   - `src/ui/frame_viewer.py`
+   - `src/ui/service.py`
+   - `src/ui/operator.py`
+   - `src/ui/metrics_window.py`
+   - `src/ui/tolerance_window.py`
+   - `src/controller/scanner_controller.py` (rutas `ok_buffer`, `timeline`, `events`)
+3. `metalconf.spec`: agregado `'src.utils.paths'` a `hiddenimports`.
+
+**Archivos:** `src/utils/paths.py` (nuevo), `src/ui/frame_viewer.py`,
+`src/ui/service.py`, `src/ui/operator.py`, `src/ui/metrics_window.py`,
+`src/ui/tolerance_window.py`, `src/controller/scanner_controller.py`,
+`metalconf.spec`, `CHANGELOG.md`
+
+---
+
 #### Cambio 189 - Scanner 1 microperforado: corrección de columna derecha fantasma
 
 **Pedido:** el `scanner_1` en modo microperforado saltaba una columna (la derecha),

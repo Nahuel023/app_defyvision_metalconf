@@ -37,7 +37,8 @@ from src.controller.system import InspectionSystem
 
 logger = logging.getLogger(__name__)
 
-_ROOT = Path(__file__).resolve().parent.parent.parent
+from src.utils.paths import app_root
+_ROOT = app_root()
 
 try:
     from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
