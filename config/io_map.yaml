@@ -22,7 +22,7 @@ scanner_1:
     pattern_align_enabled: true
     pattern_global_offset_max_px: 8.0
     pattern_slope_delta_max_deg: 1.0
-    pattern_align_stop_frames: 3
+    pattern_align_stop_frames: 5
     # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
     # deriva fina sin introducir extras en las pruebas de carpeta.
     tol_xy_px: 38.0
@@ -102,7 +102,7 @@ scanner_2:
     tol_xy_px: 42.0
     # Los frames editados con agujeros faltantes reales hoy quedan en 6-9 missing:
     # con umbral 5 pasan a NOK y permiten acumular la racha de machine_stop.
-    frame_missing_nok_threshold: 5
+    frame_missing_nok_threshold: 2
     # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0
