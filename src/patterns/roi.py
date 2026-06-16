@@ -252,6 +252,10 @@ def resolve_runtime_roi(
         else:
             if max_shift_px > 0.0 and not within_shift:
                 warning_parts.append(f"ROI drift X {shift_x:+.1f}px")
+            if max_width_delta_px > 0.0 and not comparable_width:
+                warning_parts.append(
+                    f"ROI width ratio {detected_roi.w / max(float(fitted_roi.w), 1.0):.2f}x"
+                )
             if max_width_delta_px > 0.0 and comparable_width and not within_width:
                 warning_parts.append(f"ROI width {width_delta_px:+.1f}px")
     elif auto_correct_enabled:

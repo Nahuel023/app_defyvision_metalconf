@@ -50,11 +50,17 @@ scanner_2:
     # Overrides especificos para microperforado en scanner_2.
     # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
     # la inspeccion corre con scanner_id=scanner_2.
-    # Ajuste fino del 12-06:
-    # - subir apenas el threshold limpia uniones falsas entre agujeros;
-    # - limitar el area maxima corta blobs grandes ficticios;
-    # - desactivar el recentrado evita que el patron derive hacia el centro.
-    threshold: 128
+    # Ajuste fino del 16-06:
+    # - pasar a gray + sin CLAHE separa mejor microagujeros vecinos;
+    # - blur/open/close chicos limpian ruido sin volver a unir filas;
+    # - bajar max_area corta blobs fusionados grandes en la zona baja;
+    # - reducir chapa_edge_inner_px estabiliza la toma de borde de chapa.
+    threshold: 145
+    use_channel: gray
+    use_clahe: false
+    blur_ksize: 3
+    open_ksize: 3
+    close_ksize: 2
     roi_recenter_enabled: false
     # El patron recortado (sin columna derecha inestable) hace que los agujeros
     # detectados en el borde derecho caigan fuera del convex hull esperado.
@@ -79,8 +85,10 @@ scanner_2:
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0
     compare_right_ignore_px: 75.0
-    # Filtra blobs mayores a 450px2 (agujeros ficticios/reflejo del borde de chapa).
-    max_area: 450.0
+    # Filtra blobs fusionados/reflejos: con gray quedan agujeros reales ~160-185px2
+    # y los falsos unificados pasan claramente por arriba.
+    max_area: 250.0
+    chapa_edge_inner_px: 40
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:

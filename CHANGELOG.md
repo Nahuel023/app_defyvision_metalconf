@@ -46,6 +46,73 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### SesiÃ³n 2026-06-16 â€” Tadeo + Codex
+
+#### Cambio 181 - Scanner 2 microperforado: separacion de agujeros fusionados + warning real de ancho de chapa
+
+**Pedido:** correr pruebas sobre `C:\Users\DefyC\Downloads\LUNES-16-06` para mejorar
+la calibracion de `scanner_2` en microperforado, porque en grabacion habia:
+- agujeros detectados demasiado grandes;
+- pares de agujeros pegados que se tomaban como uno;
+- bordes de chapa mal tomados en algunos frames.
+
+**Hallazgo de Codex:**
+- el pipeline actual seguia dando `0 missing / 0 extra`, pero las mascaras mostraban
+  blobs fusionados fuertes en la zona baja y un `detection_ratio` inflado (~`119%`);
+- en pruebas frame-a-frame, pasar `scanner_2/modelo_B` a `gray` sin `CLAHE` y con
+  morfologia chica (`blur=3`, `open=3`, `close=2`) separo mucho mejor los microagujeros;
+- la ROI guardada de `scanner_2` (`x=218, w=265`) sigue siendo bastante mas angosta
+  que la chapa detectada por backlight (`ratio ~1.68x .. 1.72x`), pero antes ese
+  descalce quedaba silenciado porque `resolve_runtime_roi()` no advertia anchos
+  fuera de la banda "comparable".
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/io_map.yaml` (`scanner_2.inspection`):
+  - `threshold: 128 -> 145`
+  - `use_channel: gray`
+  - `use_clahe: false`
+  - `blur_ksize: 3`
+  - `open_ksize: 3`
+  - `close_ksize: 2`
+  - `max_area: 450.0 -> 250.0`
+  - `chapa_edge_inner_px: 40`
+- `src/patterns/roi.py`:
+  - `resolve_runtime_roi()` ahora agrega warning explicito cuando la chapa detectada
+    queda con ancho no comparable respecto de la ROI guardada
+    (ej: `ROI width ratio 1.71x`), en vez de esconder ese caso.
+- `data/patterns/scanner_2/modelo_B/holes.json`:
+  - reconstruido desde
+    `C:\Users\DefyC\Downloads\LUNES-16-06\16-06-2026-MICROPERFORADO_1_SCANNER_2\frame_0071.png`
+  - build bruto: `194 puntos`, `15` duplicadas
+  - patron final depurado: `179 puntos`
+
+**Validacion en los dos lotes del 16-06:**
+- `16-06-2026-MICROPERFORADO_1_SCANNER_2`
+  - antes: `raw_ok=87/87`, `avg_detection_ratio=119%`
+  - ahora: `raw_ok=87/87`, `avg_detection_ratio=113%`
+- `16-06-2026-MICROPERFOADO_2_SCANNER_2`
+  - antes: `raw_ok=75/75`, `avg_detection_ratio=119%`
+  - ahora: `raw_ok=75/75`, `avg_detection_ratio=114%`
+- `roi-check` despues del cambio:
+  - lote 1: `shift_x` mediana `-15.00 px`, advertencias `102/102`
+  - lote 2: `shift_x` mediana `-14.75 px`, advertencias `84/84`
+  - warning nuevo visible en produccion/CLI:
+    `ROI width ratio ~1.68x .. 1.72x`
+
+**Riesgos / oportunidades:**
+- la segmentacion de agujeros quedo mucho mas limpia visualmente, pero el nuevo
+  warning confirma que la ROI de `scanner_2` todavia no representa el ancho real
+  de la chapa; el siguiente paso sano es recalibrar ROI/bordes sobre captura viva
+  del scanner y luego volver a decidir si conviene abrir la zona de comparacion.
+- el patron nuevo (`179 puntos`) mejora cobertura respecto del anterior (`170`),
+  pero todavia conviene revisar manualmente las filas extremas donde el build
+  informo duplicadas.
+
+**Archivos:** `config/io_map.yaml`, `src/patterns/roi.py`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
 ### Sesión 2026-06-12 — Tadeo + Claude
 
 #### Cambio 180 - Microperforado SCANNER 2: estabilizacion de blobs falsos y borde derecho
