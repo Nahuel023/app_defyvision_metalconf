@@ -285,6 +285,7 @@ def _inspect_bgr(
     chapa_no_line_abs_max_px = float(tolerances.get("chapa_no_line_abs_max_px", 0.0))
     # PATRON edge zigzag → DETENER MAQUINA (mechanical misalignment, does not skip decisions)
     pattern_align_enabled     = bool(tolerances.get("pattern_align_enabled", False))
+    pattern_align_min_missing = int(tolerances.get("pattern_align_min_missing", 0))
     pattern_align_std_max_px  = float(tolerances.get("pattern_align_std_max_px", 6.0))
     pattern_align_abs_max_px  = float(tolerances.get("pattern_align_abs_max_px", 15.0))
     # Cuando True, pattern_alignment_warn acumula una racha de frames desalineados antes de parar.
@@ -773,8 +774,13 @@ def _inspect_bgr(
                 frame_quality = "LOW_QUALITY"  # weak external edge + sheet zigzag
 
         if pattern_align_enabled and frame_geometry_quality != "UNSTABLE":
-            if (pattern_zigzag_std_px > pattern_align_std_max_px
-                    or pattern_zigzag_max_px > pattern_align_abs_max_px):
+            _pattern_align_missing_ok = (
+                pattern_align_min_missing <= 0
+                or report.missing >= pattern_align_min_missing
+            )
+            if (_pattern_align_missing_ok
+                    and (pattern_zigzag_std_px > pattern_align_std_max_px
+                         or pattern_zigzag_max_px > pattern_align_abs_max_px)):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # desalineamiento mecánico del patron → NOK
                 if pattern_align_machine_stop:
@@ -797,7 +803,8 @@ def _inspect_bgr(
                         f"({centering.offset_px:+.1f}px)"
                     )
             if (
-                pattern_slope_delta_max_deg > 0.0
+                _pattern_align_missing_ok
+                and pattern_slope_delta_max_deg > 0.0
                 and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0)
                 > pattern_slope_delta_max_deg
             ):
@@ -812,8 +819,13 @@ def _inspect_bgr(
                     )
 
         if pattern_center_align_enabled and frame_geometry_quality != "UNSTABLE":
-            if (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
-                    or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max):
+            _pattern_center_missing_ok = (
+                pattern_align_min_missing <= 0
+                or report.missing >= pattern_align_min_missing
+            )
+            if (_pattern_center_missing_ok
+                    and (pattern_center_zigzag_std_px > pattern_center_zigzag_std_max
+                         or pattern_center_zigzag_max_px > pattern_center_zigzag_abs_max)):
                 pattern_alignment_warn = True
                 final_status = "NOK"   # zigzag interno del patrón → NOK
                 if pattern_align_machine_stop:

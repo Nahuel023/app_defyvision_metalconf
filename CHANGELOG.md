@@ -64,6 +64,63 @@ Sin cambios de lógica; el comportamiento correcto ya estaba implementado.
 ---
 
 
+#### Cambio 193 - Desalineamiento de patron: volver a detectarlo y parar maquina
+
+**Pedido:** en la misma carpeta editada, los frames ~70-76 de ambos scanners
+estan desalineados a proposito. Habia que volver a detectar ese corrimiento del
+patron y usarlo para detener la maquina.
+
+**Hallazgos de Codex:**
+- La logica ya existia en `src/inspection.py`, pero ambos scanners la tenian
+  desactivada en `config/io_map.yaml` (`pattern_align_enabled: false`).
+- `scanner_1` tiene una firma clara de desalineamiento: entre `frame_0070` y
+  `frame_0074` el `offset_px` del patron se va a ~`-9 .. -11px`, con picos de
+  zigzag de borde (`std=6.6`, `max=18.3`).
+- `scanner_2` no deriva tanto en offset global; el desalineamiento aparece como
+  zigzag/inclinacion local del patron junto con `missing>=3`. Esa combinacion
+  separa bien los frames editados (`0072`, `0074`, `0075`) de los picos sanos
+  del lote que tenian zigzag alto pero `missing=0`.
+
+**Cambios:**
+1. `src/utils/config.py`
+   - nuevo default `pattern_align_min_missing: 0`.
+2. `src/inspection.py`
+   - `pattern_align_min_missing` ahora puede exigir un minimo de `missing`
+     antes de considerar desalineamiento por zigzag de borde, zigzag central o
+     `pattern_sheet_slope_delta_max_deg`.
+   - el gate NO se aplica al corrimiento global (`pattern_global_offset_max_px`),
+     para que `scanner_1` pueda seguir usando su firma lateral fuerte aunque
+     tenga pocos faltantes.
+3. `config/io_map.yaml`
+   - `scanner_1`:
+     - `pattern_align_enabled: true`
+     - `pattern_global_offset_max_px: 8.0`
+     - `pattern_slope_delta_max_deg: 1.0`
+     - `pattern_align_stop_frames: 2`
+   - `scanner_2`:
+     - `pattern_align_enabled: true`
+     - `pattern_align_min_missing: 3`
+     - `pattern_align_std_max_px: 3.0`
+     - `pattern_align_abs_max_px: 10.0`
+     - `pattern_slope_delta_max_deg: 0.6`
+     - `pattern_global_offset_max_px: 0.0`
+     - `pattern_align_stop_frames: 2`
+
+**Validacion:**
+- `scanner_1` sobre `IMAGENES-VIERNES-12-EDITADAS/...SCANNER_1`
+  - desalineamiento detectado en `frame_0070..0074`
+  - `MACHINE_STOP` desde `frame_0071`
+  - resumen: `raw_ok=68 raw_nok=9 temporal_ok=69 temporal_nok=8 machine_stop_frames=8`
+- `scanner_2` sobre `IMAGENES-VIERNES-12-EDITADAS/...SCANNER_2`
+  - desalineamiento detectado en `frame_0072`, `frame_0074`, `frame_0075`
+  - `MACHINE_STOP` en `frame_0075`
+  - resumen: `raw_ok=81 raw_nok=7 temporal_ok=86 temporal_nok=2 machine_stop_frames=2`
+
+**Archivos:** `src/utils/config.py`, `src/inspection.py`,
+`config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 191 - Microperforado editado: parada de maquina por agujeros faltantes reales
 
 **Pedido:** en las carpetas editadas de `scanner_1` y `scanner_2`, los frames
