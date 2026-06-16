@@ -46,6 +46,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-16 — Claude
+
+#### Cambio 185 - Fix scanner_2: restaurar roi.json w=265 y deshabilitar roi_recenter
+
+**Bug:** warning en producción `[modelo_B] Patrón calibrado a 265x480 pero frame actual
+(post-ROI) es 236x480. Resultados incorrectos`.
+
+**Causa:** misma causa raíz que Cambio 183. El merge `1ba776e` ("keep local changes")
+retuvo el `roi.json` local con `w=236`, pero incorporó el patrón reconstruido a `w=265`
+desde origin (commit `a5b7ff3` "Tune scanner 2 microperforado stability"). Ese commit
+había sincronizado correctamente roi.json `w=235→265` y holes.json `image_size=265`, pero
+el merge los volvió a desincronizar.
+
+**Fix:**
+- `data/patterns/scanner_2/modelo_B/roi.json`: restaurado a `w=265` (sincroniza con
+  `image_size=265` del patrón construido en `a5b7ff3`).
+- `config/io_map.yaml` (scanner_2 inspection override): `roi_recenter_enabled: false`
+  para evitar que el ROI vuelva a desincronizarse del patrón en futuros merges o sesiones.
+
+**Nota:** si se desea cambiar el ROI de scanner_2, reconstruir el patrón inmediatamente
+con `build-pattern --model modelo_B --scanner scanner_2 --img <ref.jpg>`.
+
+**Archivos:** `data/patterns/scanner_2/modelo_B/roi.json`, `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 ### Sesión 2026-06-12 — Tadeo + Claude
 
 #### Cambio 184 - Fix ícono barra de tareas en exe: usar .ico en vez de .jpg
