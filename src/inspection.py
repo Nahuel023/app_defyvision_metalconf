@@ -890,10 +890,7 @@ def _inspect_bgr(
             missing_cells=_ms_missing_cells,
         )
         if machine_stop:
-            cols = _ms_detector.triggered_columns
-            if cols:
-                col_str  = ", ".join(str(c) for c in cols)
-                _ms_reason = f"AGUJERO FALTANTE PERSISTENTE EN COLUMNA {col_str}"
+            _ms_reason = "AGUJERO FALTANTE PERSISTENTE"
 
     # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada por RACHA de N frames.
     # _desalign_stop = True en este frame → incrementar racha.
