@@ -97,6 +97,31 @@ detencion de maquina.
 
 ---
 
+#### Cambio 195 - Desalineamiento: exigir 3 frames consecutivos antes de parar
+
+**Pedido:** si aparece un frame desalineado, la maquina no debe actuar al
+instante porque puede dar falsos positivos. Hay que exigir una racha de frames
+desalineados en ambos scanners.
+
+**Cambio:**
+- `config/io_map.yaml`
+  - `scanner_1.inspection.pattern_align_stop_frames: 3`
+  - `scanner_2.inspection.pattern_align_stop_frames: 3`
+
+**Validacion:**
+- `scanner_1` sobre `...SCANNER_1`
+  - el bloque desalineado `frame_0070..0074` sigue detectandose
+  - la parada arranca recien en `frame_0072` (antes arrancaba en `0071`)
+  - resumen: `machine_stop_frames=7`
+- `scanner_2` sobre `...SCANNER_2`
+  - `frame_0072` y `frame_0074..0075` siguen marcando `NOK` por desalineamiento
+  - ya no hay parada con solo 1-2 frames desalineados seguidos
+  - resumen: `machine_stop_frames=2` (solo por faltantes persistentes del bloque 50-59)
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 193 - Desalineamiento de patron: volver a detectarlo y parar maquina
 
 **Pedido:** en la misma carpeta editada, los frames ~70-76 de ambos scanners

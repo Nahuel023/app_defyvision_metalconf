@@ -22,7 +22,7 @@ scanner_1:
     pattern_align_enabled: true
     pattern_global_offset_max_px: 8.0
     pattern_slope_delta_max_deg: 1.0
-    pattern_align_stop_frames: 2
+    pattern_align_stop_frames: 3
     # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
     # deriva fina sin introducir extras en las pruebas de carpeta.
     tol_xy_px: 38.0
@@ -85,7 +85,7 @@ scanner_2:
     pattern_align_min_missing: 3
     pattern_align_std_max_px: 3.0
     pattern_align_abs_max_px: 10.0
-    pattern_align_stop_frames: 2
+    pattern_align_stop_frames: 3
     pattern_global_offset_max_px: 0.0
     pattern_slope_delta_max_deg: 0.6
     # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo
