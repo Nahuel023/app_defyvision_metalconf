@@ -1026,7 +1026,7 @@ class ConfigTab(QWidget):
     @staticmethod
     def _load(path: str) -> str:
         try:
-            lines = Path(path).read_text(encoding="utf-8").splitlines()
+            lines = (_ROOT / path).read_text(encoding="utf-8").splitlines()
             masked = []
             for line in lines:
                 if "password" in line.lower() and ":" in line:

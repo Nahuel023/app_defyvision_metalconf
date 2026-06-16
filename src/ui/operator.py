@@ -182,7 +182,7 @@ class ScannerPanel(QWidget):
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
         self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
-        self._nok_val   = self._metric_card("TIEMPO",  "00:00",  _MUTED)
+        self._nok_val   = self._metric_card("Tiempo en funcionamiento continuo",  "00:00",  _MUTED, word_wrap=True)
         self._total_val = self._metric_card("NOK",     "0",      _NOK_CLR)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
@@ -191,6 +191,17 @@ class ScannerPanel(QWidget):
         self._center_val = self._metric_card("CENTRADO",  "—",    _MUTED)
         for mv in (self._ok_val, self._nok_val, self._total_val):
             metrics_row.addWidget(mv[0])
+
+        self._metrics_btn = QPushButton("ℹ")
+        self._metrics_btn.setFixedSize(26, 26)
+        self._metrics_btn.setToolTip("Ver métricas detalladas")
+        self._metrics_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
+            "border-radius:5px; font-size:13px; font-weight:700; padding:0; }"
+            f"QPushButton:hover {{ background:{_BORDER}; color:{_TEXT}; }}"
+        )
+        self._metrics_btn.clicked.connect(self._show_metrics_popup)
+        metrics_row.addWidget(self._metrics_btn, alignment=Qt.AlignmentFlag.AlignBottom)
         root.addLayout(metrics_row)
 
         # ── Selector de placa ─────────────────────────────────────────
@@ -229,7 +240,7 @@ class ScannerPanel(QWidget):
 
         self._refresh_buttons(ScannerState.IDLE)
 
-    def _metric_card(self, title: str, value: str, color: str) -> tuple[QWidget, QLabel]:
+    def _metric_card(self, title: str, value: str, color: str, word_wrap: bool = False) -> tuple[QWidget, QLabel]:
         """Tarjeta de métrica — tema oscuro industrial."""
         w = QWidget()
         w.setStyleSheet(
@@ -240,7 +251,8 @@ class ScannerPanel(QWidget):
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(2)
         t = QLabel(title)
-        t.setStyleSheet(f"font-size:8px;color:{_MUTED};letter-spacing:1px;background:transparent;")
+        t.setStyleSheet(f"font-size:8px;color:{_MUTED};letter-spacing:0px;background:transparent;")
+        t.setWordWrap(word_wrap)
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v = QLabel(value)
         v.setStyleSheet(f"font-size:18px;font-weight:700;color:{color};background:transparent;")
@@ -459,6 +471,75 @@ class ScannerPanel(QWidget):
             self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")
 
         self._refresh_buttons(state)
+
+    # ------------------------------------------------------------------
+    # Popup de métricas detalladas
+    # ------------------------------------------------------------------
+
+    def _show_metrics_popup(self) -> None:
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel as _QLabel
+
+        s = self._scanner.get_status()
+        streak   = s["nok_streak"]
+        mode     = s["mode"]
+        total    = s["total_inspections"]
+        ok_cnt   = s["ok_count"]
+        nok_cnt  = s["nok_count"]
+        threshold = getattr(self, "_nok_threshold", 5)
+
+        dlg = QDialog(self)
+        _num = self._id.split("_")[-1]
+        dlg.setWindowTitle(f"Métricas — Scanner {_num}")
+        dlg.setFixedWidth(230)
+        dlg.setStyleSheet(
+            f"QDialog {{ background:{_CARD};color:{_TEXT}; }}"
+            f"QLabel  {{ background:transparent; }}"
+        )
+
+        lay = QVBoxLayout(dlg)
+        lay.setContentsMargins(14, 14, 14, 14)
+        lay.setSpacing(8)
+
+        def _row(label: str, value: str, color: str = _TEXT) -> None:
+            h = QHBoxLayout()
+            h.setSpacing(6)
+            lbl = _QLabel(label)
+            lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+            val = _QLabel(value)
+            val.setStyleSheet(f"color:{color};font-weight:700;font-size:12px;")
+            h.addWidget(lbl)
+            h.addStretch()
+            h.addWidget(val)
+            lay.addLayout(h)
+
+        mode_c = "#15803d" if mode.value == "auto" else "#d97706"
+        _row("Modo", mode.value.upper(), mode_c)
+        _row("Inspecciones", str(total))
+        _row("OK", str(ok_cnt), _OK_CLR if ok_cnt > 0 else _MUTED)
+        _row("NOK", str(nok_cnt), _NOK_CLR if nok_cnt > 0 else _MUTED)
+
+        ratio = streak / threshold if threshold > 0 else 0
+        streak_c = (_NOK_CLR if ratio >= 0.8 else ("#d97706" if ratio >= 0.5 else _MUTED))
+        _row("Racha NOK", f"{streak} / {threshold}", streak_c)
+
+        ultimo = self._result_val[1].text()
+        if ultimo and ultimo != "—":
+            _row("Último estado", ultimo)
+
+        c_txt = self._center_val[1].text()
+        if c_txt and c_txt != "—":
+            sep = _QLabel("─" * 26)
+            sep.setStyleSheet(f"color:{_BORDER};font-size:9px;")
+            lay.addWidget(sep)
+            c_lbl = _QLabel("Centrado")
+            c_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+            c_val = _QLabel(c_txt)
+            c_val.setStyleSheet(f"color:{_TEXT};font-weight:700;font-size:11px;")
+            c_val.setWordWrap(True)
+            lay.addWidget(c_lbl)
+            lay.addWidget(c_val)
+
+        dlg.exec()
 
     # ------------------------------------------------------------------
     # Botones

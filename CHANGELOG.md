@@ -48,6 +48,31 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 194 - Fix ConfigTab: tolerancias usaba path relativo, ahora usa _ROOT
+
+**Problema:** La pestaña Tolerancias en Modo Servicio podía mostrar
+"# Archivo no encontrado" si el CWD no era el root del proyecto (caso .exe).
+
+**Fix:** `src/ui/service.py` — `ConfigTab._load` usa `(_ROOT / path)` en lugar
+de `Path(path)` para garantizar la ruta correcta en cualquier contexto.
+
+---
+
+#### Cambio 193 - UX: label TIEMPO → "Tiempo en funcionamiento continuo" + botón ℹ métricas
+
+**Pedido:** Renombrar el label "TIEMPO" y agregar un botón pequeño en el mismo
+renglón para ver las métricas más importantes de cada scanner.
+
+**Cambios — `src/ui/operator.py`:**
+- `_metric_card`: nuevo parámetro `word_wrap=False`; cambia `letter-spacing:1px`
+  → `0px` para que el texto largo no desborde.
+- Card TIEMPO renombrada a `"Tiempo en funcionamiento continuo"` con `word_wrap=True`.
+- Botón `ℹ` (26×26 px) agregado al final del `metrics_row`.
+- Nuevo método `_show_metrics_popup()`: abre `QDialog` modal con Modo, Inspecciones,
+  OK, NOK, Racha NOK, Último estado y Centrado leídos en tiempo real.
+
+---
+
 #### Cambio 192 - Fix login: diálogo de contraseña no persistía al equivocarse
 
 **Problema:** Al ingresar contraseña incorrecta en Modo Servicio el diálogo desaparecía
