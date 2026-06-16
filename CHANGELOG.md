@@ -64,6 +64,39 @@ Sin cambios de lógica; el comportamiento correcto ya estaba implementado.
 ---
 
 
+#### Cambio 194 - Scanner 2: missing mas sensible en el bloque editado 50-59
+
+**Pedido:** en `C:\Users\DefyC\Downloads\IMAGENES-VIERNES-12-EDITADAS\16-06-2026-MICROPERFORADO_1_SCANNER_2`
+los frames `50..59` debian detectar mejor los agujeros faltantes y sostener la
+detencion de maquina.
+
+**Hallazgo de Codex:**
+- La parada ya se disparaba en `frame_0057` y `frame_0059`, pero los primeros
+  cuadros del defecto (`frame_0052` y sobre todo `frame_0053`) todavia
+  entraban con `missing=0` aunque la franja faltante ya era visible.
+- Causa: el gate horizontal del matching en modo grilla seguia apenas ancho
+  (`dx * 0.45`), permitiendo que detecciones de la columna vecina taparan el
+  faltante temprano de la columna `ci=4`.
+
+**Cambio:**
+- `src/inspection.py`
+  - endurecido el gate horizontal de matching para patrones de grilla:
+    `max_dx_px = min(tol_xy_px, max(6.0, dx * 0.40))`
+    en lugar de `dx * 0.45`.
+
+**Validacion:**
+- `scanner_2` sobre `...SCANNER_2`
+  - `frame_0052`: `missing 0 -> 1`
+  - `frame_0053`: `missing 0 -> 1`
+  - `frame_0054`: se mantiene `missing=2`
+  - `frame_0055..0059`: se mantienen/acentuan los missing reales
+  - `MACHINE_STOP` sigue disparando en `frame_0057` y `frame_0059`
+  - resumen: `raw_ok=80 raw_nok=8 temporal_ok=85 temporal_nok=3 machine_stop_frames=3`
+
+**Archivos:** `src/inspection.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 193 - Desalineamiento de patron: volver a detectarlo y parar maquina
 
 **Pedido:** en la misma carpeta editada, los frames ~70-76 de ambos scanners

@@ -666,7 +666,7 @@ def _inspect_bgr(
         # "tape" un agujero faltante cuando tol_xy_px es mas grande que dx.
         _grid_match_max_dx_px = min(
             float(tol_xy_px),
-            max(6.0, float(pattern.dx) * 0.45),
+            max(6.0, float(pattern.dx) * 0.40),
         )
 
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
