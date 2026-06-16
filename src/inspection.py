@@ -659,9 +659,20 @@ def _inspect_bgr(
                 if _y_keep_min <= y <= _y_keep_max
             ]
 
+    _grid_match_max_dx_px: float | None = None
+    if pattern.has_grid and detected_points and pattern.dx is not None:
+        # En grilla no permitimos que una deteccion de la columna vecina
+        # "tape" un agujero faltante cuando tol_xy_px es mas grande que dx.
+        _grid_match_max_dx_px = min(
+            float(tol_xy_px),
+            max(6.0, float(pattern.dx) * 0.45),
+        )
+
     _max_missing = grid_max_missing if (pattern.has_grid and detected_points) else 0
     report  = compare_missing_only(compare_points, detected_in_bbox,
-                                   tol_xy_px=tol_xy_px, max_missing=_max_missing,
+                                   tol_xy_px=tol_xy_px,
+                                   max_dx_px=_grid_match_max_dx_px,
+                                   max_missing=_max_missing,
                                    max_extra=max_extra,
                                    extra_min_dist_factor=extra_min_dist_factor,
                                    expected_cells=compare_cells if compare_cells else None,

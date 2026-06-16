@@ -33,6 +33,12 @@ scanner_1:
     # umbral global compare_left_ignore_px=40 la cortaba. Con 28px se excluye solo
     # la columna mas izquierda (x=18-24, max=24) y se incluye siempre la segunda (x=37-42).
     compare_left_ignore_px: 28.0
+    # En scanner_1 el ruido normal deja faltantes sueltos repartidos, pero el defecto
+    # editado arma una misma columna con 4-6 agujeros ausentes durante varios frames.
+    # Usamos esa firma para machine_stop sin depender de que el frame entero ya haya
+    # cruzado el gate global de NOK.
+    machine_stop_min_missing: 4
+    machine_stop_require_frame_nok: false
     # Deshabilitado: el roi_recenter en modo resize expandio el ROI de w=242 a w=259
     # desincronizandolo del patron (image_size=241). Sin recenter, el ROI queda fijo
     # en el valor del roi.json, que ya cubre bien la zona microperforada de scanner_1.
@@ -89,6 +95,9 @@ scanner_2:
     # Matching mas permisivo solo para scanner_2 en microperforado; reduce
     # missing residuales del lote OK sin afectar scanner_1.
     tol_xy_px: 42.0
+    # Los frames editados con agujeros faltantes reales hoy quedan en 6-9 missing:
+    # con umbral 5 pasan a NOK y permiten acumular la racha de machine_stop.
+    frame_missing_nok_threshold: 5
     # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0
