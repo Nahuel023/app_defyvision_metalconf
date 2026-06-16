@@ -88,6 +88,10 @@ scanner_2:
     # Filtra blobs fusionados/reflejos: con gray quedan agujeros reales ~160-185px2
     # y los falsos unificados pasan claramente por arriba.
     max_area: 250.0
+    # Endurece la decision de nitidez solo para scanner_2:
+    # con 1200 entran como LOW_QUALITY los frames visiblemente mas blandos
+    # del lote 16-06, sin volver demasiado sensible la corrida normal.
+    blur_score_min: 1200.0
     chapa_edge_inner_px: 40
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)

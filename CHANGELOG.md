@@ -113,6 +113,47 @@ la calibracion de `scanner_2` en microperforado, porque en grabacion habia:
 
 ---
 
+#### Cambio 182 - Scanner 2 microperforado: umbral de blur mas exigente
+
+**Pedido:** detectar mejor cuando un frame esta borroso y endurecer un poco la
+decision de `LOW_QUALITY`, porque la nitidez afecta la calidad del analisis.
+
+**Hallazgo de Codex:**
+- `modelo_B` seguia usando base global `blur_score_min=200.0`, demasiado permisiva
+  para `scanner_2`: en el lote `16-06` todos los frames quedaban como `GOOD`
+  aunque los peores visualmente estaban en `Nitidez ~877 .. 1061`;
+- sobre `186` frames del lunes:
+  - min `876.7`
+  - p10 `1201.8`
+  - mediana `1672.4`
+  - p90 `2192.9`
+- un umbral de `1200` marca como `LOW_QUALITY` aproximadamente el `8.6%` del lote,
+  capturando los frames mas blandos sin castigar demasiado la corrida normal.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/io_map.yaml` (`scanner_2.inspection`):
+  - `blur_score_min: 1200.0`
+
+**Validacion en los lotes del 16-06:**
+- `16-06-2026-MICROPERFORADO_1_SCANNER_2`
+  - `low_quality=8/87`
+  - `max_low_quality_streak=2`
+  - ejemplos marcados: `frame_0005 (1148.9)`, `frame_0008 (1060.6)`, `frame_0091 (1111.2)`
+- `16-06-2026-MICROPERFOADO_2_SCANNER_2`
+  - `low_quality=7/75`
+  - `max_low_quality_streak=2`
+  - ejemplos marcados: `frame_0019 (876.7)`, `frame_0004 (958.4)`, `frame_0069 (920.4)`
+- los dos lotes se mantienen en `raw_ok=100%`.
+
+**Riesgos / oportunidades:**
+- el umbral nuevo es mas duro solo para `scanner_2`; si en corrida viva aparecen
+  demasiados `LOW_QUALITY`, el ajuste fino razonable seria bajar a `1150`, no volver
+  a `200`.
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 ### Sesión 2026-06-12 — Tadeo + Claude
 
 #### Cambio 180 - Microperforado SCANNER 2: estabilizacion de blobs falsos y borde derecho
