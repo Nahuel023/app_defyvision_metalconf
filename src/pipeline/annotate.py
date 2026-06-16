@@ -287,7 +287,7 @@ def draw_machine_stop_badge(
     img: np.ndarray,
     reason: str = "",
     index: int = 0,
-    title: str = "! DETENCION DE MAQUINA",
+    title: str = "DETENCION DE MAQUINA",
 ) -> np.ndarray:
     """Draw compact strip at the top of the image.
 

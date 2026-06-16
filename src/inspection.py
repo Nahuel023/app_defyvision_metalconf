@@ -1120,15 +1120,14 @@ def _inspect_bgr(
         )
 
     if machine_stop and pattern_alignment_warn:
-        overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
-        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=1)
+        overlay = draw_machine_stop_badge(overlay, reason=f"{_ms_reason}  +  PATRON DESALINEADO", index=0)
     elif machine_stop:
         overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
     elif pattern_alignment_warn:
         overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
     if _lateral_shift_warn:
-        idx = int(bool(machine_stop)) + int(bool(pattern_alignment_warn))
-        overlay = draw_machine_stop_badge(overlay, reason=_lateral_shift_reason, index=idx, title="! DESVIACION LATERAL")
+        idx = int(bool(machine_stop or pattern_alignment_warn))
+        overlay = draw_machine_stop_badge(overlay, reason=_lateral_shift_reason, index=idx, title="DESVIACION LATERAL")
 
     # Estado OK/NOK dibujado al borde IZQUIERDO del frame completo (zona oscura),
     # para no tapar los agujeros del patrón (que viven en la ROI, a la derecha).
