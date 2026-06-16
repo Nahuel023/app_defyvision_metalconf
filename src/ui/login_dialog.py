@@ -108,13 +108,13 @@ class LoginDialog(QDialog):
         self._pass_edit.returnPressed.connect(self._on_accept)
         pass_row.addWidget(self._pass_edit)
 
-        self._eye_btn = QPushButton("👁")
+        self._eye_btn = QPushButton("⊙")
         self._eye_btn.setFixedSize(32, 32)
         self._eye_btn.setCheckable(True)
         self._eye_btn.setToolTip("Mostrar / ocultar contraseña")
         self._eye_btn.setStyleSheet(
             f"QPushButton{{background:{_PANEL};color:{_MUTED};"
-            f"border:1px solid {_BORDER};border-radius:5px;font-size:14px;}}"
+            f"border:1px solid {_BORDER};border-radius:5px;font-size:16px;font-weight:700;}}"
             f"QPushButton:checked{{color:{_ACCENT};border-color:{_ACCENT};}}"
             f"QPushButton:hover{{background:#243044;}}"
         )
