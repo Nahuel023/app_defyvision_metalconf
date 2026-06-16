@@ -8,7 +8,7 @@ aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
 consecutive_nok_frames: 9999
-frame_rate_hz: 5.0
+frame_rate_hz: 25.0
 max_response_sec: 1.6
 edge_margin_px: 15.0
 pattern_edge_margin_px: 40.0
@@ -17,7 +17,7 @@ clahe_clip: 3.0
 clahe_tile: 8
 use_otsu: true
 continuous_position_threshold: 0.0
-max_inspection_hz: 15
+max_inspection_hz: 25
 # ---------------- Buffer circular de frames OK ----------------
 # Guarda las ultimas ok_buffer_count inspecciones correctas (con overlay verde)
 # en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mas viejas.

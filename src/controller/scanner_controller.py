@@ -839,7 +839,7 @@ class ScannerController:
                 self._last_position_diff = session.last_position_diff
 
             if res is None:
-                self._stop_event.wait(timeout=0.033)
+                self._stop_event.wait(timeout=0.005)
                 continue
 
             self._handle_result(res, model)
