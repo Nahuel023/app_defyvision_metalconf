@@ -48,6 +48,44 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 199 - Rediseño overlay frames analizados
+
+**Pedido:** quitar información innecesaria del bottom-left, corregir solapamientos
+entre errores, mejorar estética de los frames analizados.
+
+**Problemas encontrados:**
+- `draw_centering_overlay` dibujaba 3 filas de texto técnico al fondo:
+  "Izq: Xpx Der: Ypx", "Delta/Offset", "Vert pat: Izq/Der/dCh" — puro debug,
+  no útil para operadores, solapaba con otros indicadores.
+- `draw_tilt_indicator` y `draw_blur_indicator` dibujaban texto en y=62 y y=82
+  fijos que se solapaban con el panel NOK (que empieza en badge_count×92).
+- `draw_roi_health_indicator` dibujaba dimensiones de frame/ROI en y=102 —
+  información técnica que ningún operador necesita ver.
+- Caracteres Unicode (►, ✔, °) no soportados por HERSHEY → salían como "???".
+
+**Cambios en `src/pipeline/annotate.py`:**
+- `draw_centering_overlay`: eliminadas las 3 filas de texto bottom. En su lugar,
+  cuando `pattern_warn=True`, aparece un chip compacto en esquina inferior-derecha:
+  "zigzag X.Xpx  slope X.Xdeg".
+- `draw_tilt_indicator`: ya no dibuja texto normal; solo badge en bottom-left
+  cuando `warn=True`. Sin solapamiento con el panel NOK (que está arriba).
+- `draw_blur_indicator`: mismo patrón — solo badge cuando borroso.
+- `draw_roi_health_indicator`: convertida en no-op (API compatible, sin dibujo).
+- `_draw_nok_reasons_panel`: bullets cambiados a ">" (ASCII), tipografía más
+  legible, mejor contraste. Fondo azul oscuro con borde azul-violeta.
+- `draw_status_indicator` OK: reemplazado "STATUS: OK" por badge pill verde.
+- `draw_roi_indicator`: borde simplificado (sin label, tenue).
+- Todos los caracteres Unicode reemplazados por ASCII puro.
+
+**Resultado visual:**
+- Frame OK: badge verde, círculos verdes en agujeros, líneas CHAPA/PATRON sutiles.
+- Frame NOK: panel "NOK > AGUJEROS FALTANTES: N" compacto, sin solapamiento.
+- Frame MACHINE_STOP: banners rojos + panel NOK + chip métricas (bottom-right).
+
+**Archivos:** `src/pipeline/annotate.py`, `CHANGELOG.md`
+
+---
+
 #### Cambio 198 - Scanner_2: desalineamiento como trigger principal de machine_stop
 
 **Problema:** El "cartel de detencion" (badge roja MACHINE_STOP) no aparecia en
