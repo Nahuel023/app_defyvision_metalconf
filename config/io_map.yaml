@@ -56,6 +56,20 @@ scanner_2:
     # Overrides especificos para microperforado en scanner_2.
     # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
     # la inspeccion corre con scanner_id=scanner_2.
+    # Ajuste fino del 16-06:
+    # - pasar a gray + sin CLAHE separa mejor microagujeros vecinos;
+    # - blur/open/close chicos limpian ruido sin volver a unir filas;
+    # - bajar max_area corta blobs fusionados grandes en la zona baja;
+    # - reducir chapa_edge_inner_px estabiliza la toma de borde de chapa.
+    threshold: 145
+    use_channel: gray
+    use_clahe: false
+    blur_ksize: 3
+    open_ksize: 3
+    close_ksize: 2
+    # ROI de scanner_2 debe mantenerse en w=265 (igual que image_size del patron).
+    # roi_recenter desactivado para evitar desincronizacion (Cambio 185).
+    roi_recenter_enabled: false
     # El patron recortado (sin columna derecha inestable) hace que los agujeros
     # detectados en el borde derecho caigan fuera del convex hull esperado.
     # Deshabilitado: machine_stop cubre defectos reales.
@@ -75,12 +89,18 @@ scanner_2:
     # Matching mas permisivo solo para scanner_2 en microperforado; reduce
     # missing residuales del lote OK sin afectar scanner_1.
     tol_xy_px: 42.0
-    # Incluye hasta ci=4 odd para cubrir las dos columnas derechas que el usuario
-    # necesita ver. Corte en 200px excluye solo el borde extremo.
-    pattern_edge_margin_right_px: 35.0
-    # ROI de scanner_2 debe mantenerse en w=265 (igual que image_size del patron).
-    # roi_recenter desactivado para evitar desincronizacion como ocurrio en Cambio 183.
-    roi_recenter_enabled: false
+    # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
+    # derecha mas inestable para no penalizar el borde residual.
+    pattern_edge_margin_right_px: 15.0
+    compare_right_ignore_px: 75.0
+    # Filtra blobs fusionados/reflejos: con gray quedan agujeros reales ~160-185px2
+    # y los falsos unificados pasan claramente por arriba.
+    max_area: 250.0
+    # Endurece la decision de nitidez solo para scanner_2:
+    # con 1200 entran como LOW_QUALITY los frames visiblemente mas blandos
+    # del lote 16-06, sin volver demasiado sensible la corrida normal.
+    blur_score_min: 1200.0
+    chapa_edge_inner_px: 40
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:

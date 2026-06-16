@@ -46,29 +46,61 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-### Sesión 2026-06-16 — Tadeo + Claude
+### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
-#### Cambio 185 - Fix scanner_2: restaurar roi.json w=265 y deshabilitar roi_recenter
+#### Cambio 188 - Scanner 2 microperforado: umbral de blur más exigente
 
-**Bug:** warning en producción `[modelo_B] Patrón calibrado a 265x480 pero frame actual
-(post-ROI) es 236x480. Resultados incorrectos`.
+**Pedido:** detectar mejor cuando un frame esta borroso y endurecer un poco la
+decision de `LOW_QUALITY`, porque la nitidez afecta la calidad del analisis.
 
-**Causa:** misma causa raíz que Cambio 183. El merge `1ba776e` ("keep local changes")
-retuvo el `roi.json` local con `w=236`, pero incorporó el patrón reconstruido a `w=265`
-desde origin (commit `a5b7ff3` "Tune scanner 2 microperforado stability"). Ese commit
-había sincronizado correctamente roi.json `w=235→265` y holes.json `image_size=265`, pero
-el merge los volvió a desincronizar.
+**Hallazgo de Codex:**
+- `modelo_B` seguia usando base global `blur_score_min=200.0`, demasiado permisiva
+  para `scanner_2`: en el lote `16-06` todos los frames quedaban como `GOOD`
+  aunque los peores visualmente estaban en `Nitidez ~877 .. 1061`;
+- sobre `186` frames del lunes:
+  - min `876.7`
+  - p10 `1201.8`
+  - mediana `1672.4`
+  - p90 `2192.9`
+- un umbral de `1200` marca como `LOW_QUALITY` aproximadamente el `8.6%` del lote,
+  capturando los frames mas blandos sin castigar demasiado la corrida normal.
 
-**Fix:**
-- `data/patterns/scanner_2/modelo_B/roi.json`: restaurado a `w=265` (sincroniza con
-  `image_size=265` del patrón construido en `a5b7ff3`).
-- `config/io_map.yaml` (scanner_2 inspection override): `roi_recenter_enabled: false`
-  para evitar que el ROI vuelva a desincronizarse del patrón en futuros merges o sesiones.
+**Cambios:** `config/io_map.yaml` (`scanner_2.inspection`): `blur_score_min: 1200.0`
 
-**Nota:** si se desea cambiar el ROI de scanner_2, reconstruir el patrón inmediatamente
-con `build-pattern --model modelo_B --scanner scanner_2 --img <ref.jpg>`.
+**Validacion en los lotes del 16-06:**
+- `16-06-2026-MICROPERFORADO_1_SCANNER_2`: `low_quality=8/87`, `max_streak=2`
+- `16-06-2026-MICROPERFOADO_2_SCANNER_2`: `low_quality=7/75`, `max_streak=2`
+- los dos lotes se mantienen en `raw_ok=100%`.
 
-**Archivos:** `data/patterns/scanner_2/modelo_B/roi.json`, `config/io_map.yaml`, `CHANGELOG.md`
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
+#### Cambio 187 - Scanner 2 microperforado: separación de agujeros fusionados + warning de ancho de chapa
+
+**Pedido:** mejorar la calibración de `scanner_2` en microperforado (blobs fusionados,
+detection_ratio inflado ~119%, bordes de chapa mal tomados en algunos frames).
+
+**Hallazgo de Codex:**
+- pasar `scanner_2/modelo_B` a `gray` sin `CLAHE` y con morfología chica
+  (`blur=3`, `open=3`, `close=2`) separa mucho mejor los microagujeros;
+- la ROI guardada (`x=218, w=265`) es más angosta que la chapa detectada por backlight
+  (`ratio ~1.68x..1.72x`); `resolve_runtime_roi()` ahora lo advierte explícitamente.
+
+**Cambios:**
+- `config/io_map.yaml` (`scanner_2.inspection`): `threshold=145`, `use_channel=gray`,
+  `use_clahe=false`, `blur/open/close=3/3/2`, `max_area=250.0`, `chapa_edge_inner_px=40`
+- `src/patterns/roi.py`: `resolve_runtime_roi()` agrega warning cuando ancho de chapa
+  detectada no es comparable con la ROI guardada.
+- `data/patterns/scanner_2/modelo_B/holes.json`: reconstruido desde frame_0071.png del
+  lote 16-06 — patron final depurado: 179 puntos.
+
+**Validacion:**
+- `16-06-2026-MICROPERFORADO_1_SCANNER_2`: `raw_ok=87/87`, `avg_ratio=113%` (vs 119%)
+- `16-06-2026-MICROPERFOADO_2_SCANNER_2`: `raw_ok=75/75`, `avg_ratio=114%` (vs 119%)
+
+**Archivos:** `config/io_map.yaml`, `src/patterns/roi.py`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
 
 ---
 
@@ -96,19 +128,11 @@ coordenadas incorrectas. El operador no se enteraba hasta ver resultados erráti
    lleva embebido el ROI con el que fue construido.
 
 4. **`data/patterns/scanner_1/modelo_B/holes.json`** y
-   **`data/patterns/scanner_2/modelo_B/holes.json`** — Actualizados manualmente para
-   agregar `built_with_roi` a los patrones existentes (retrocompatible: el campo es
-   opcional y los patrones sin él siguen funcionando).
+   **`data/patterns/scanner_2/modelo_B/holes.json`** — Actualizados para agregar
+   `built_with_roi` a los patrones existentes (retrocompatible: el campo es opcional).
 
 **Comportamiento nuevo:** si en el futuro `roi.json` se modifica sin reconstruir el
-patrón (merge, UI, edición manual), el primer frame que inspeccione lanzará un error
-claro:
-```
-ValueError: [modelo_B] ROI y patrón desincronizados:
-  patrón construido a 265x480 pero frame actual (post-ROI) es 236x480.
-  Recalibrá con: build-pattern --model modelo_B --scanner scanner_2 --img <ref.jpg>
-```
-El scanner transiciona a ERROR (luz roja, mensaje en UI) en lugar de inspeccionar mal.
+patrón, el primer frame lanzará un error claro y pondrá el scanner en ERROR.
 
 **Archivos:** `src/inspection.py`, `src/patterns/pattern_io.py`,
 `src/patterns/pattern_build.py`, `data/patterns/scanner_1/modelo_B/holes.json`,
@@ -116,6 +140,22 @@ El scanner transiciona a ERROR (luz roja, mensaje en UI) en lugar de inspecciona
 
 ---
 
+#### Cambio 185 - Fix scanner_2: restaurar roi.json w=265 y deshabilitar roi_recenter
+
+**Bug:** warning en producción `[modelo_B] Patrón calibrado a 265x480 pero frame actual
+(post-ROI) es 236x480. Resultados incorrectos`.
+
+**Causa:** misma causa raíz que Cambio 183. El merge `1ba776e` (“keep local changes”)
+retuvo el `roi.json` local con `w=236`, pero incorporó el patrón reconstruido a `w=265`
+desde origin (commit `a5b7ff3`).
+
+**Fix:**
+- `data/patterns/scanner_2/modelo_B/roi.json`: restaurado a `w=265`.
+- `config/io_map.yaml` (scanner_2): `roi_recenter_enabled: false`.
+
+**Archivos:** `data/patterns/scanner_2/modelo_B/roi.json`, `config/io_map.yaml`, `CHANGELOG.md`
+
+---
 ### Sesión 2026-06-12 — Tadeo + Claude
 
 #### Cambio 184 - Fix ícono barra de tareas en exe: usar .ico en vez de .jpg
