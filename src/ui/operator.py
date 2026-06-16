@@ -178,12 +178,12 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
-        # ── Tres métricas operativas: OK / TIEMPO / TOTAL ────────────
+        # ── Tres métricas operativas: OK / TIEMPO / NOK ────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
         self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
         self._nok_val   = self._metric_card("TIEMPO",  "00:00",  _MUTED)
-        self._total_val = self._metric_card("TOTAL",   "0",      _MUTED)
+        self._total_val = self._metric_card("NOK",     "0",      _NOK_CLR)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
         self._result_val = self._metric_card("ÚLTIMO",    "—",    _MUTED)
@@ -398,8 +398,10 @@ class ScannerPanel(QWidget):
         self._streak_val[1].setText(f"{streak} / {_threshold}")
         self._streak_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{sc};")
 
-        self._total_val[1].setText(str(total))
-        self._total_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{_MUTED};background:transparent;")
+        nok_cnt = s["nok_count"]
+        nok_c = _NOK_CLR if nok_cnt > 0 else _MUTED
+        self._total_val[1].setText(str(nok_cnt))
+        self._total_val[1].setStyleSheet(f"font-size:18px;font-weight:700;color:{nok_c};background:transparent;")
 
         ok_c = _OK_CLR if ok_cnt > 0 else _MUTED
         self._ok_val[1].setText(str(ok_cnt))
