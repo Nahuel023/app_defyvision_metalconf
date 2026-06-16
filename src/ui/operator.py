@@ -182,7 +182,7 @@ class ScannerPanel(QWidget):
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
         self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
-        self._nok_val   = self._metric_card("Tiempo en funcionamiento continuo",  "00:00",  _MUTED, word_wrap=True)
+        self._nok_val   = self._metric_card("Tiempo en funcionamiento continuo",  "00:00",  _MUTED, word_wrap=True, title_size=11)
         self._total_val = self._metric_card("NOK",     "0",      _NOK_CLR)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
@@ -240,7 +240,7 @@ class ScannerPanel(QWidget):
 
         self._refresh_buttons(ScannerState.IDLE)
 
-    def _metric_card(self, title: str, value: str, color: str, word_wrap: bool = False) -> tuple[QWidget, QLabel]:
+    def _metric_card(self, title: str, value: str, color: str, word_wrap: bool = False, title_size: int = 8) -> tuple[QWidget, QLabel]:
         """Tarjeta de métrica — tema oscuro industrial."""
         w = QWidget()
         w.setStyleSheet(
@@ -251,7 +251,7 @@ class ScannerPanel(QWidget):
         lay.setContentsMargins(6, 6, 6, 6)
         lay.setSpacing(2)
         t = QLabel(title)
-        t.setStyleSheet(f"font-size:8px;color:{_MUTED};letter-spacing:0px;background:transparent;")
+        t.setStyleSheet(f"font-size:{title_size}px;color:{_MUTED};letter-spacing:0px;background:transparent;")
         t.setWordWrap(word_wrap)
         t.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v = QLabel(value)
