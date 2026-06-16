@@ -48,6 +48,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 197 - Scanner_2: machine_stop por faltantes en zona desalineada (frames 70-76)
+
+**Problema:** Scanner_2 no disparaba `machine_stop` en los frames 70-76 (patron
+desalineado). La racha temporal NOK (FAULT a los 5 frames) funcionaba, pero el
+`machine_stop` directo (solenoid inmediato) nunca se activaba en esa zona.
+
+**Causa raiz:** `machine_stop_min_missing: 2` (modelo_B) exige 2 agujeros
+faltantes en la *misma columna ci* para que esa columna acumule racha. En los
+frames desalineados los faltantes quedan esparcidos (1 por columna ci por frame),
+por lo que ninguna columna llegaba a contar >= 2 → racha del tracker = 0.
+
+**Fix:** `config/io_map.yaml` — agregar override en `scanner_2.inspection`:
+  `machine_stop_min_missing: 1`
+
+Con `machine_stop_require_frame_nok: true` y `frame_missing_nok_threshold: 2`
+como guarda, el gate global sigue en 2 faltantes totales por frame; solo la
+condicion *por columna* se relaja de 2 a 1.
+
+**Validacion `run-folder` sobre IMAGENES-VIERNES-12-EDITADAS/...SCANNER_2:**
+- Zona 50-60: `MACHINE_STOP` en frame 57 (sin cambio respecto a antes)
+- Zona 70-76: `MACHINE_STOP` ahora en frame 74 (antes no disparaba)
+- OK frames sin falsos positivos
+
+#### Cambio 196 - Login: letras mas grandes en labels y titulo
+
+**Pedido:** aumentar el tamano de letra en los labels del dialogo de login.
+
+**Cambio:** `src/ui/login_dialog.py`:
+- `lbl_style` `font-size:12px` → `font-size:15px`
+- `field_style` `font-size:13px` → `font-size:15px`
+- Titulo `font-size:15px` → `font-size:18px`
+
+**Archivos:** `src/ui/login_dialog.py`, `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 194 - Fix ConfigTab: tolerancias usaba path relativo, ahora usa _ROOT
 
 **Problema:** La pestaña Tolerancias en Modo Servicio podía mostrar

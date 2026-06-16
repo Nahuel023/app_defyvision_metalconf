@@ -70,7 +70,7 @@ class LoginDialog(QDialog):
         title = QLabel("Acceso Modo Servicio")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"font-size:15px;font-weight:700;color:{_ACCENT};"
+            f"font-size:18px;font-weight:700;color:{_ACCENT};"
             "background:transparent;"
         )
         root.addWidget(title)
@@ -79,10 +79,10 @@ class LoginDialog(QDialog):
         form.setSpacing(10)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
 
-        lbl_style   = f"color:{_MUTED};font-size:12px;"
+        lbl_style   = f"color:{_MUTED};font-size:15px;"
         field_style = (
             f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:5px;padding:5px 8px;font-size:13px;"
+            "border-radius:5px;padding:5px 8px;font-size:15px;"
         )
 
         user_lbl = QLabel("Usuario:")

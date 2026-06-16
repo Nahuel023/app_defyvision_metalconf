@@ -107,6 +107,10 @@ scanner_2:
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0
     compare_right_ignore_px: 75.0
+    # Con desalineamiento, los faltantes quedan repartidos (1 por columna ci).
+    # min_missing=1 permite que cada columna acumule racha aunque falte un solo
+    # agujero por frame; frame_missing_nok_threshold=2 sigue siendo el gate global.
+    machine_stop_min_missing: 1
     # Filtra blobs fusionados/reflejos: con gray quedan agujeros reales ~160-185px2
     # y los falsos unificados pasan claramente por arriba.
     max_area: 250.0
