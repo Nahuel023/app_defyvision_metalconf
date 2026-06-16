@@ -46,6 +46,41 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-06-16 — Tadeo + Claude
+
+#### Cambio 182 - Scanner 1 microperforado: corrección de columna derecha fantasma
+
+**Pedido:** el `scanner_1` en modo microperforado saltaba una columna (la derecha),
+marcando 5 agujeros como faltantes en esa zona en la mayoría de los frames y
+causando 4/30 NOK falsos en el lote `12-06-2026-MICROPERFORADO_10_SCANNER_1`.
+
+**Diagnóstico (Claude):**
+- El patrón `holes.json` tenía 176 puntos con 7 celdas `ci=6` en x≈205-210.
+- Esas 7 celdas eran mal-clasificaciones: durante el build el `scanner_id` no se
+  había pasado, por lo que `pattern_edge_margin_right_px: 65.0` del io_map.yaml
+  **no se aplicó**. Holes de `ci=5 fila-par` en x≈207 quedaron asignados a `ci=6`
+  por redondeo (`|207-222|=15 < |207-186|=21`).
+- Durante inspección, el grid generaba posiciones esperadas `ci=6` en x≈221 donde
+  **no hay agujeros físicos** (confirmado: rightmost real hole en full_x=424 =
+  ROI_x=210 con detección del frame completo). Resultado: 5–7 missing fantasmas
+  por frame, provocando NOK cuando superaban el umbral.
+- La columna más derecha del patrón físico termina en ROI_x≈210; la franja
+  x=210–259 es fondo oscuro sin agujeros.
+
+**Cambio:**
+- Reconstrucción del patrón con `scanner_id='scanner_1'` para aplicar correctamente
+  `pattern_edge_margin_right_px: 65.0` del io_map.yaml.
+- Patrón nuevo: **146 puntos**, `ci=0` a `ci=5`, x_max=186.2, sin `ci=6`.
+- Imagen de referencia: `frame_0055.png` del lote del 12-06 (misma que antes).
+
+**Validación sobre el lote completo `12-06-2026-MICROPERFORADO_10_SCANNER_1`:**
+- Antes: `74/104 raw OK`, `4/30 primeros NOK`
+- Después: **104/104 raw OK**, `0 NOK`, `0 missing fantasmas`
+
+**Archivos:** `data/patterns/scanner_1/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
 ### SesiÃ³n 2026-06-16 â€” Tadeo + Codex
 
 #### Cambio 181 - Scanner 2 microperforado: separacion de agujeros fusionados + warning real de ancho de chapa
