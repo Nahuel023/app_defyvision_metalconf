@@ -37,6 +37,8 @@ def compare_missing_only(
     expected_points: List[Tuple[float, float]],
     detected_points: List[Tuple[float, float]],
     tol_xy_px: float = 8.0,
+    max_dx_px: float | None = None,
+    max_dy_px: float | None = None,
     max_missing: int = 0,
     max_extra: int = -1,
     extra_min_dist_factor: float = 0.0,
@@ -64,6 +66,10 @@ def compare_missing_only(
       When both are provided, cross-type matches are blocked (distance set to inf),
       so a large detected blob cannot steal the position of a small expected hole.
       missing_types in the returned report reflects the type of each missing hole.
+
+    max_dx_px / max_dy_px: optional per-axis gates applied before the radial
+    tolerance. Useful in grid mode to prevent a hole from the neighbouring
+    column/row from validating an expected position when tol_xy_px is large.
 
     extra = detected holes with no expected match (spurious / reflections).
     max_extra=-1 disables the extra criterion.
@@ -93,6 +99,11 @@ def compare_missing_only(
     diff  = exp[:, None, :] - det[None, :, :]           # (n_exp, n_det, 2)
     dist2 = (diff * diff).sum(axis=2)                   # (n_exp, n_det)
     tol2  = tol_xy_px * tol_xy_px
+
+    if max_dx_px is not None:
+        dist2 = np.where(np.abs(diff[:, :, 0]) <= float(max_dx_px), dist2, np.inf)
+    if max_dy_px is not None:
+        dist2 = np.where(np.abs(diff[:, :, 1]) <= float(max_dy_px), dist2, np.inf)
 
     # Type-aware matching: cross-type pairs get infinite distance so they are
     # never matched (a large blob cannot steal a small expected hole's position).

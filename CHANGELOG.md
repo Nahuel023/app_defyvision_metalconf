@@ -48,6 +48,58 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 191 - Microperforado editado: parada de maquina por agujeros faltantes reales
+
+**Pedido:** en las carpetas editadas de `scanner_1` y `scanner_2`, los frames
+50-60 contienen agujeros faltantes a proposito y **deben detener la maquina**
+cuando la ausencia persiste varios frames.
+
+**Hallazgos de Codex:**
+- En `scanner_2`, el compare de grilla permitia que una deteccion de la
+  columna vecina cubriera un agujero faltante porque `tol_xy_px=42` era mayor
+  que el paso entre columnas (`grid_dx~35.5px`). Resultado: el defecto visual
+  existia, pero entraba con `missing=0`.
+- Una vez corregido el matching, el defecto editado pasaba a `missing=6..9`,
+  pero el gate `frame_missing_nok_threshold=8` seguia demasiado alto y solo
+  convertia un frame en `NOK`, insuficiente para acumular `machine_stop`.
+- En `scanner_1`, la prueba estaba bloqueada porque `roi.json` y `holes.json`
+  habian quedado desincronizados. Se reconstruyo el patron desde un frame OK
+  del mismo lote editado para volver a sincronizar ROI + grilla.
+- Ya con el patron nuevo, el defecto editado de `scanner_1` aparecia como una
+  misma columna (`ci=2`) con 4-6 agujeros faltantes por frame entre 54 y 58,
+  mientras que el ruido normal del scanner dejaba faltantes mas dispersos.
+
+**Cambios:**
+1. `src/pipeline/compare.py`
+   - nuevo gate opcional `max_dx_px` / `max_dy_px` para bloquear matches entre
+     columnas/filas vecinas aun cuando el radio Euclideo global sea grande.
+2. `src/inspection.py`
+   - en modo grilla, el compare activa `max_dx_px=min(tol_xy_px, dx*0.45)` para
+     que un agujero de la columna vecina no "tape" un faltante real.
+3. `config/io_map.yaml`
+   - `scanner_2.inspection.frame_missing_nok_threshold: 5`
+   - `scanner_1.inspection.machine_stop_min_missing: 4`
+   - `scanner_1.inspection.machine_stop_require_frame_nok: false`
+4. `data/patterns/scanner_1/modelo_B/holes.json`
+   - patron reconstruido desde `frame_0000.png` del lote editado para
+     resincronizarlo con la ROI activa.
+
+**Validacion:**
+- `scanner_2` sobre `IMAGENES-VIERNES-12-EDITADAS/...SCANNER_2`
+  - ahora marca faltantes reales en `frame_0055..0058`
+  - `frame_0057` dispara `MACHINE_STOP`
+  - resumen: `raw_ok=83 raw_nok=4 temporal_ok=86 temporal_nok=1 machine_stop_frames=1`
+- `scanner_1` sobre `IMAGENES-VIERNES-12-EDITADAS/...SCANNER_1`
+  - el patron vuelve a cargar sin error de ROI
+  - `frame_0055..0058` disparan `MACHINE_STOP`
+  - resumen: `raw_ok=73 raw_nok=4 temporal_ok=73 temporal_nok=4 machine_stop_frames=4`
+
+**Archivos:** `src/pipeline/compare.py`, `src/inspection.py`,
+`config/io_map.yaml`, `data/patterns/scanner_1/modelo_B/holes.json`,
+`CHANGELOG.md`
+
+---
+
 #### Cambio 190 - Fix exe: frames OK y timeline no se guardaban en producción
 
 **Problema:** Al correr el `.exe` en modo producción (`run`), no se guardaba ningún
