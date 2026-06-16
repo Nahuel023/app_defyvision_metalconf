@@ -183,6 +183,29 @@ desalineados en ambos scanners.
 
 ---
 
+#### Cambio 196 - Desalineamiento: endurecer aun mas la racha en ambos scanners
+
+**Pedido:** evitar falsos positivos por un frame desalineado suelto en ambos
+scanners durante produccion.
+
+**Cambio:**
+- `config/io_map.yaml`
+  - `scanner_1.inspection.pattern_align_stop_frames: 3`
+  - `scanner_2.inspection.pattern_align_stop_frames: 3`
+
+**Validacion:**
+- `scanner_1` sobre `...SCANNER_1`
+  - el bloque `frame_0070..0074` sigue entrando como desalineado
+  - `MACHINE_STOP` recien aparece desde `frame_0072`
+- `scanner_2` sobre `...SCANNER_2`
+  - `frame_0072`, `frame_0074`, `frame_0075` siguen marcando `NOK`
+  - ya no hay parada por un primer o segundo frame aislado desalineado
+  - las paradas que quedan vienen del bloque de `missing` 50-59
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 193 - Desalineamiento de patron: volver a detectarlo y parar maquina
 
 **Pedido:** en la misma carpeta editada, los frames ~70-76 de ambos scanners
