@@ -181,9 +181,9 @@ class ScannerPanel(QWidget):
         # ── Tres métricas operativas: OK / TIEMPO / NOK ────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
-        self._ok_val    = self._metric_card("OK",      "0",      _OK_CLR)
+        self._ok_val    = self._metric_card("Imagenes OK",   "0",      _OK_CLR,  word_wrap=True, title_size=11)
         self._nok_val   = self._metric_card("Tiempo en funcionamiento continuo",  "00:00",  _MUTED, word_wrap=True, title_size=11)
-        self._total_val = self._metric_card("NOK",     "0",      _NOK_CLR)
+        self._total_val = self._metric_card("Imagenes NOK",  "0",      _NOK_CLR, word_wrap=True, title_size=11)
         # campos no visibles pero necesarios para refresh_status
         self._mode_val   = self._metric_card("MODO",      "AUTO", _MUTED)
         self._result_val = self._metric_card("ÚLTIMO",    "—",    _MUTED)
@@ -191,17 +191,6 @@ class ScannerPanel(QWidget):
         self._center_val = self._metric_card("CENTRADO",  "—",    _MUTED)
         for mv in (self._ok_val, self._nok_val, self._total_val):
             metrics_row.addWidget(mv[0])
-
-        self._metrics_btn = QPushButton("ℹ")
-        self._metrics_btn.setFixedSize(26, 26)
-        self._metrics_btn.setToolTip("Ver métricas detalladas")
-        self._metrics_btn.setStyleSheet(
-            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
-            "border-radius:5px; font-size:13px; font-weight:700; padding:0; }"
-            f"QPushButton:hover {{ background:{_BORDER}; color:{_TEXT}; }}"
-        )
-        self._metrics_btn.clicked.connect(self._show_metrics_popup)
-        metrics_row.addWidget(self._metrics_btn, alignment=Qt.AlignmentFlag.AlignBottom)
         root.addLayout(metrics_row)
 
         # ── Selector de placa ─────────────────────────────────────────
