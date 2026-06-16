@@ -48,6 +48,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 189 - Scanner 1 microperforado: corrección de columna derecha fantasma
+
+**Pedido:** el `scanner_1` en modo microperforado saltaba una columna (la derecha),
+marcando 5 agujeros como faltantes en esa zona en la mayoría de los frames y
+causando 4/30 NOK falsos en el lote `12-06-2026-MICROPERFORADO_10_SCANNER_1`.
+
+**Diagnóstico (Claude):**
+- El patrón `holes.json` tenía 176 puntos con 7 celdas `ci=6` en x≈205-210.
+- Esas 7 celdas eran mal-clasificaciones: durante el build el `scanner_id` no se
+  había pasado, por lo que `pattern_edge_margin_right_px: 65.0` del io_map.yaml
+  **no se aplicó**. Holes de `ci=5 fila-par` en x≈207 quedaron asignados a `ci=6`
+  por redondeo (`|207-222|=15 < |207-186|=21`).
+- Durante inspección, el grid generaba posiciones esperadas `ci=6` en x≈221 donde
+  **no hay agujeros físicos**. Resultado: 5-7 missing fantasmas por frame.
+
+**Cambio:**
+- Reconstrucción del patrón con `scanner_id='scanner_1'` para aplicar correctamente
+  `pattern_edge_margin_right_px: 65.0` del io_map.yaml.
+- Patrón nuevo: **146 puntos**, `ci=0` a `ci=5`, sin `ci=6` fantasma.
+
+**Validación:**
+- Antes: `74/104 raw OK`, `4/30 NOK`
+- Después: **104/104 raw OK**, `0 NOK`
+
+**Archivos:** `data/patterns/scanner_1/modelo_B/holes.json`, `CHANGELOG.md`
+
+---
+
 #### Cambio 188 - Scanner 2 microperforado: umbral de blur más exigente
 
 **Pedido:** detectar mejor cuando un frame esta borroso y endurecer un poco la
