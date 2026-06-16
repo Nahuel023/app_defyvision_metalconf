@@ -35,7 +35,7 @@ class LoginDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Modo Servicio — Autenticación")
-        self.setFixedSize(380, 230)
+        self.setFixedSize(380, 265)
         self.setModal(True)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint

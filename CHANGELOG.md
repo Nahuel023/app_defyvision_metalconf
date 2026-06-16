@@ -48,6 +48,21 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 191 - Fix login: diálogo de contraseña no persistía al equivocarse
+
+**Problema:** Al ingresar contraseña incorrecta en Modo Servicio el diálogo desaparecía
+en lugar de mostrar el mensaje de error y permanecer abierto.
+
+**Causa raíz:** `LoginDialog` tenía `setFixedSize(380, 230)`. El `_error_lbl` ya
+estaba en el layout pero oculto; al hacer `.show()` Qt no tenía espacio para
+renderizarlo dentro del área fija y el diálogo parecía cerrarse (el contenido
+quedaba fuera del viewport).
+
+**Fix:** `src/ui/login_dialog.py` — cambiar alto fijo de 230 → 265 px.  
+Sin cambios de lógica; el comportamiento correcto ya estaba implementado.
+
+---
+
 #### Cambio 190 - Fix exe: frames OK y timeline no se guardaban en producción
 
 **Problema:** Al correr el `.exe` en modo producción (`run`), no se guardaba ningún
