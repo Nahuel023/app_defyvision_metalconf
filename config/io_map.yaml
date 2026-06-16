@@ -100,6 +100,9 @@ scanner_2:
     # con 1200 entran como LOW_QUALITY los frames visiblemente mas blandos
     # del lote 16-06, sin volver demasiado sensible la corrida normal.
     blur_score_min: 1200.0
+    # Ajuste fino de borde de patron: bajar el gate lateral evita que una banda
+    # tome la columna siguiente como borde y dibuje zigzag falso en el overlay.
+    pattern_edge_boundary_tol_px: 5.0
     chapa_edge_inner_px: 40
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)

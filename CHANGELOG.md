@@ -104,6 +104,51 @@ decision de `LOW_QUALITY`, porque la nitidez afecta la calidad del analisis.
 
 ---
 
+#### Cambio 190 - Scanner 2 microperforado: borde del patron mas recto, sin zigzag falso
+
+**Pedido:** mejorar apenas la deteccion del borde del patron en `scanner_2`, porque
+por momentos hacia zigzag aunque la deteccion general ya estaba bien.
+
+**Hallazgo de Codex:**
+- el problema no estaba en el patron real ni en la deteccion central de agujeros:
+  `pattern_center_zigzag_std_px` se mantenia bajo;
+- el zigzag venia de la seleccion de la columna extrema por banda (`pattern edge`):
+  con `pattern_edge_boundary_tol_px=8.0`, algunas bandas aceptaban un agujero de la
+  columna siguiente como si fuera borde exterior;
+- bajar ese gate a `5.0 px` alcanza para fijar el borde correcto sin tocar ni ROI,
+  ni blur, ni segmentacion.
+
+**Cambio hecho por Tadeo + Codex:**
+- `config/io_map.yaml` (`scanner_2.inspection`):
+  - `pattern_edge_boundary_tol_px: 5.0`
+
+**Validacion sobre los dos lotes del 16-06 (`186` frames):**
+- antes (`8.0 px`):
+  - `avg_pattern_zigzag_std = 1.817`
+  - `p95_pattern_zigzag_std = 5.197`
+  - `max_pattern_zigzag_std = 6.888`
+  - `avg_pattern_zigzag_max = 5.901`
+  - `max_pattern_zigzag_max = 21.126`
+- ahora (`5.0 px`):
+  - `avg_pattern_zigzag_std = 1.008`
+  - `p95_pattern_zigzag_std = 4.078`
+  - `max_pattern_zigzag_std = 4.817`
+  - `avg_pattern_zigzag_max = 3.336`
+  - `max_pattern_zigzag_max = 17.038`
+- sin regresion funcional:
+  - `raw_ok = 186/186`
+  - `low_quality = 16`
+  - `missing_total = 0`
+
+**Caso representativo:**
+- `frame_0075.png` del lote `MICROPERFOADO_2_SCANNER_2`
+  - `pattern_zigzag_std_px: 6.888 -> 0.636`
+  - `pattern_zigzag_max_px: 21.126 -> 2.420`
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 187 - Scanner 2 microperforado: separación de agujeros fusionados + warning de ancho de chapa
 
 **Pedido:** mejorar la calibración de `scanner_2` en microperforado (blobs fusionados,
