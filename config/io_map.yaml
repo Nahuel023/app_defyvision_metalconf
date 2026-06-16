@@ -78,14 +78,21 @@ scanner_2:
     # ROI de scanner_2 debe mantenerse en w=265 (igual que image_size del patron).
     # roi_recenter desactivado para evitar desincronizacion (Cambio 185).
     roi_recenter_enabled: false
-    # Rehabilitado para capturar desalineamientos geometricos del lote editado.
-    # En scanner_2 el corrimiento real no se ve tanto en offset global como en
-    # zigzag/inclinacion local, por eso se exige ademas un minimo de missing.
+    # Deteccion de desalineamiento geometrico: basada SOLO en metricas de
+    # centering (zigzag de borde + inclinacion), SIN gate de missing.
+    # Con min_missing=0 no se requieren agujeros faltantes para activar el
+    # check; las metricas del patron solas determinan si hay desalineacion.
+    # stop_frames=2: 2 frames consecutivos desalineados disparan machine_stop.
     pattern_align_enabled: true
-    pattern_align_min_missing: 3
+    # min_missing=1: se exige al menos 1 faltante para entrar al check de zigzag.
+    # Esto filtra frames de borde de chapa (std alto pero missing=0) sin impedir
+    # la deteccion en frames realmente desalineados (que siempre tienen missing>=1).
+    pattern_align_min_missing: 1
     pattern_align_std_max_px: 3.0
     pattern_align_abs_max_px: 10.0
-    pattern_align_stop_frames: 3
+    # stop_frames=2: 2 frames consecutivos desalineados disparan machine_stop
+    # (en el lote editado frames 074+075 son la racha consecutiva).
+    pattern_align_stop_frames: 2
     pattern_global_offset_max_px: 0.0
     pattern_slope_delta_max_deg: 0.6
     # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo

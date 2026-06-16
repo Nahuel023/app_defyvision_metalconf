@@ -48,6 +48,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
+#### Cambio 198 - Scanner_2: desalineamiento como trigger principal de machine_stop
+
+**Problema:** El "cartel de detencion" (badge roja MACHINE_STOP) no aparecia en
+los frames desalineados (70-76) de scanner_2. La racha de desalign se cortaba en
+frames 073 y 076 (metricas dentro de tolerancia) y nunca llegaba a stop_frames=3.
+
+**Causa raiz:** Con min_missing=3 y stop_frames=3, la racha (072=True, 073=False,
+074=True, 075=True) nunca llegaba a 3 consecutivos.
+
+**Fix:** `config/io_map.yaml` scanner_2.inspection:
+- `pattern_align_min_missing: 3 → 1`: filtra frames de borde (noise alto, missing=0)
+  pero activa el check cuando hay al menos 1 faltante.
+- `pattern_align_stop_frames: 3 → 2`: frames 074+075 forman racha de 2 → MACHINE_STOP.
+
+El per-ci tracker (machine_stop_min_missing:1 del Cambio 197) dispara machine_stop
+en frame 074; el desalign path dispara en frame 075. Ambos son OR — badge desde 074.
+
+**Validacion:** OK en 45-54 (sin FP), MACHINE_STOP en 57 (defecto) y 74 (desalin).
+
+**Archivos:** `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
 #### Cambio 197 - Scanner_2: machine_stop por faltantes en zona desalineada (frames 70-76)
 
 **Problema:** Scanner_2 no disparaba `machine_stop` en los frames 70-76 (patron
