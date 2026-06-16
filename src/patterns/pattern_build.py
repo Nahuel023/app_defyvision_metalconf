@@ -190,10 +190,12 @@ def build_pattern_from_image(
         cells = dedup_cells
         print(f"[build-pattern] Duplicadas depuradas: patron final con {len(points)} puntos.")
 
+    built_with_roi = (roi.x, roi.y, roi.w, roi.h) if roi is not None else None
     pat = Pattern(
         model=model, image_size=(w, h), points=points, radii=radii,
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
         stagger_x_odd=stagger_x_odd,
+        built_with_roi=built_with_roi,
     )
     out = pattern_path(model, scanner_id)
     save_pattern(pat, out)

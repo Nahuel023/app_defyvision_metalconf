@@ -362,33 +362,21 @@ def _inspect_bgr(
     else:
         img = img_aligned
 
-    # Warn if pattern was built at a different resolution than the current frame.
-    # Critical for non-grid patterns (absolute coords); grid patterns are more tolerant
-    # (dx/dy/phase scale-invariant) but still wrong if scale changed significantly.
+    # Verificar que el patrón fue construido con la misma resolución que el frame actual.
+    # Un mismatch significa que roi.json y holes.json están desincronizados. Se lanza
+    # excepción para poner el scanner en ERROR de forma visible, en lugar de correr
+    # silenciosamente con coordenadas incorrectas.
+    # Tolerancia de 1px: absorbe clips de borde cuando roi.x+roi.w == frame_width.
     if pattern.image_size and pattern.image_size != (0, 0):
         pat_w, pat_h = pattern.image_size
         frame_w, frame_h = img.shape[1], img.shape[0]
-        if pat_w != frame_w or pat_h != frame_h:
-            import logging as _logging
-            _logging.getLogger(__name__).warning(
-                "[%s] Patrón calibrado a %dx%d pero frame actual (post-ROI) es %dx%d. "
-                "Resultados incorrectos — recalibrá con: "
-                "build-pattern --model %s --scanner <scanner_id> --img <ref.jpg>",
-                model, pat_w, pat_h, frame_w, frame_h, model,
+        if abs(pat_w - frame_w) > 1 or abs(pat_h - frame_h) > 1:
+            raise ValueError(
+                f"[{model}] ROI y patrón desincronizados: "
+                f"patrón construido a {pat_w}x{pat_h} pero frame actual (post-ROI) es {frame_w}x{frame_h}. "
+                f"Recalibrá con: "
+                f"build-pattern --model {model} --scanner {scanner_id or '<scanner_id>'} --img <ref.jpg>"
             )
-            if roi_info is not None:
-                warn = f"ROI/patron {frame_w}x{frame_h} vs {pat_w}x{pat_h}"
-                roi_info = RuntimeROIInfo(
-                    frame_w=roi_info.frame_w,
-                    frame_h=roi_info.frame_h,
-                    saved_roi=roi_info.saved_roi,
-                    effective_roi=roi_info.effective_roi,
-                    detected_roi=roi_info.detected_roi,
-                    shift_x=roi_info.shift_x,
-                    width_delta_px=roi_info.width_delta_px,
-                    auto_corrected=roi_info.auto_corrected,
-                    warning=f"{roi_info.warning} | {warn}".strip(" |"),
-                )
 
     preprocess_kw = dict(
         threshold=threshold, use_channel=use_channel, polarity=polarity,

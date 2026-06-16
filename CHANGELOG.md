@@ -46,7 +46,7 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-### Sesión 2026-06-16 — Claude
+### Sesión 2026-06-16 — Tadeo + Claude
 
 #### Cambio 185 - Fix scanner_2: restaurar roi.json w=265 y deshabilitar roi_recenter
 
@@ -69,6 +69,50 @@ el merge los volvió a desincronizar.
 con `build-pattern --model modelo_B --scanner scanner_2 --img <ref.jpg>`.
 
 **Archivos:** `data/patterns/scanner_2/modelo_B/roi.json`, `config/io_map.yaml`, `CHANGELOG.md`
+
+---
+
+#### Cambio 186 - Prevención estructural: error fatal si ROI y patrón desincronizados
+
+**Problema raíz:** cuando `roi.json` y `holes.json` quedaban desincronizados (por merge,
+edición manual o roi_recenter), el sistema solo logueaba un WARNING y seguía corriendo con
+coordenadas incorrectas. El operador no se enteraba hasta ver resultados erráticos.
+
+**Cambios estructurales:**
+
+1. **`src/inspection.py`** — El bloque que antes era `logging.warning` ahora lanza
+   `ValueError` cuando `|image_size - frame_size| > 1px`. Esto pone el scanner en estado
+   `ERROR` inmediatamente, visible en la UI y en los logs, en lugar de continuar con
+   resultados incorrectos. La tolerancia de 1px absorbe el clip de borde cuando
+   `roi.x + roi.w == frame_width`.
+
+2. **`src/patterns/pattern_io.py`** — El dataclass `Pattern` ahora tiene el campo
+   `built_with_roi: Optional[Tuple[int,int,int,int]]` (x, y, w, h). Se guarda y carga
+   en `holes.json`. Cuando un patrón tiene este campo, se puede verificar en cualquier
+   momento si el ROI activo coincide con el usado en la calibración.
+
+3. **`src/patterns/pattern_build.py`** — `build_pattern_from_image()` ahora pasa el ROI
+   al constructor de `Pattern`, de modo que todo patrón construido a partir de ahora
+   lleva embebido el ROI con el que fue construido.
+
+4. **`data/patterns/scanner_1/modelo_B/holes.json`** y
+   **`data/patterns/scanner_2/modelo_B/holes.json`** — Actualizados manualmente para
+   agregar `built_with_roi` a los patrones existentes (retrocompatible: el campo es
+   opcional y los patrones sin él siguen funcionando).
+
+**Comportamiento nuevo:** si en el futuro `roi.json` se modifica sin reconstruir el
+patrón (merge, UI, edición manual), el primer frame que inspeccione lanzará un error
+claro:
+```
+ValueError: [modelo_B] ROI y patrón desincronizados:
+  patrón construido a 265x480 pero frame actual (post-ROI) es 236x480.
+  Recalibrá con: build-pattern --model modelo_B --scanner scanner_2 --img <ref.jpg>
+```
+El scanner transiciona a ERROR (luz roja, mensaje en UI) en lugar de inspeccionar mal.
+
+**Archivos:** `src/inspection.py`, `src/patterns/pattern_io.py`,
+`src/patterns/pattern_build.py`, `data/patterns/scanner_1/modelo_B/holes.json`,
+`data/patterns/scanner_2/modelo_B/holes.json`, `CHANGELOG.md`
 
 ---
 

@@ -26,6 +26,9 @@ class Pattern:
     # rows (e.g. Esterilla large/small hole alternation), store the signed X-phase
     # offset so grid_compare_points can generate correct expected positions for both.
     stagger_x_odd: Optional[float] = None        # odd-cj X-phase offset (px); 0 = no stagger
+    # ROI usada al construir el patrón — (x, y, w, h) en coordenadas de la imagen alineada.
+    # Permite detectar en arranque si el roi.json activo cambió respecto del usado en la calibración.
+    built_with_roi: Optional[Tuple[int, int, int, int]] = None
 
     @property
     def has_grid(self) -> bool:
@@ -90,6 +93,9 @@ def save_pattern(p: Pattern, path: Path) -> None:
         "image_size": [p.image_size[0], p.image_size[1]],
         "points": [{"x": x, "y": y} for (x, y) in p.points],
     }
+    if p.built_with_roi is not None:
+        x, y, w, h = p.built_with_roi
+        payload["built_with_roi"] = {"x": int(x), "y": int(y), "w": int(w), "h": int(h)}
     if p.radii is not None:
         payload["radii"] = [float(r) for r in p.radii]
     if p.has_grid:
@@ -126,6 +132,14 @@ def load_pattern(path: Path) -> Pattern:
         cells = None
         stagger_x_odd = None
 
+    bwr_data = payload.get("built_with_roi")
+    built_with_roi: Optional[Tuple[int, int, int, int]] = None
+    if bwr_data:
+        built_with_roi = (
+            int(bwr_data["x"]), int(bwr_data["y"]),
+            int(bwr_data["w"]), int(bwr_data["h"]),
+        )
+
     return Pattern(
         model=str(payload.get("model", "")),
         image_size=(int(w), int(h)),
@@ -133,4 +147,5 @@ def load_pattern(path: Path) -> Pattern:
         radii=None if radii is None else [float(r) for r in radii],
         dx=dx, dy=dy, phase_x=phase_x, phase_y=phase_y, cells=cells,
         stagger_x_odd=stagger_x_odd,
+        built_with_roi=built_with_roi,
     )
