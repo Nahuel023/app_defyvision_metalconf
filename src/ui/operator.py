@@ -980,7 +980,7 @@ class OperatorWindow(QMainWindow):
 
         # ── DEMO TEST: bloqueo a las 9:18 ────────────────────────────
         _now    = datetime.now()
-        _target = _now.replace(hour=9, minute=18, second=0, microsecond=0)
+        _target = _now.replace(hour=9, minute=26, second=0, microsecond=0)
         _ms     = int((_target - _now).total_seconds() * 1000)
         if 0 < _ms < 3_600_000:
             self._demo_timer = QTimer(self)
