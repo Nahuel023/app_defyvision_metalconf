@@ -124,11 +124,23 @@ class InspectionSystem:
         return self._safe_mode
 
     def set_safe_mode(self, enabled: bool) -> None:
+        from src.utils.state import ScannerState
         enabled = bool(enabled)
         if self._safe_mode == enabled:
             return
         self._safe_mode = enabled
+        self._io.set_safe_mode(enabled)
         logger.warning("Modo seguro %s", "ACTIVADO" if enabled else "DESACTIVADO")
+        if enabled:
+            # bloqueo inmediato: cortar solenoides en todos los scanners
+            for sid in self._scanners:
+                self._io.write(f"{sid}.solenoid", False)
+        else:
+            # liberar: activar solenoides en scanners que estén en RUNNING
+            for sid, sc in self._scanners.items():
+                if sc.state == ScannerState.RUNNING:
+                    self._io.write(f"{sid}.solenoid", True)
+                    logger.info("[%s] solenoide ON — modo seguro desactivado", sid)
 
     # ------------------------------------------------------------------
 

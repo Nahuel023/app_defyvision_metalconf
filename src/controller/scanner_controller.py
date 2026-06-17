@@ -223,6 +223,7 @@ class ScannerController:
             self._start_poller_thread()
 
         self._transition(ScannerState.RUNNING)
+        self._io.write(f"{self._id}.solenoid", True)
         self._set_lights(green=True)
         logger.info(f"[{self._id}] iniciado ({mode.value})")
         return True
@@ -323,9 +324,9 @@ class ScannerController:
             self._force_inspect.clear()
 
         self._start_poller_thread()
-        # solenoid deshabilitado por seguridad hasta implementar control automático
         self._io.write(f"{self._id}.backlight", True)
         self._transition(ScannerState.RUNNING)
+        self._io.write(f"{self._id}.solenoid", True)
         self._set_lights(green=True)
         logger.info(f"[{self._id}] iniciado (simulación AUTO)")
         return True
