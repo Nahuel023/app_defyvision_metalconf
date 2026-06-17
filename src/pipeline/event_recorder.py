@@ -7,6 +7,7 @@ Frames originales JPEG en RAM (sin overlay). Nunca supera `max_disk_gb`.
 
 import json
 import logging
+import queue
 import shutil
 import threading
 import time
@@ -77,6 +78,14 @@ class EventRecorder:
         self._post_dir: Optional[Path] = None
         self._post_until: float = 0.0
         self._post_idx: int = 0
+        self._worker_stop = threading.Event()
+        self._task_q: "queue.Queue[tuple[str, tuple] | None]" = queue.Queue(maxsize=8)
+        self._worker = threading.Thread(
+            target=self._worker_loop,
+            daemon=True,
+            name=f"{self._id}-event-writer",
+        )
+        self._worker.start()
 
     # ------------------------------------------------------------------
     # API pública
@@ -135,12 +144,7 @@ class EventRecorder:
 
         # ── Post-evento expiró: actualizar manifest en background ──────
         if finalize_dir is not None:
-            threading.Thread(
-                target=self._finalize_manifest,
-                args=(finalize_dir,),
-                daemon=True,
-                name=f"{self._id}-event-finalize",
-            ).start()
+            self._enqueue_task("finalize", finalize_dir)
 
         # ── Buffer circular normal ─────────────────────────────────────
         with self._lock:
@@ -193,12 +197,22 @@ class EventRecorder:
             self._buf.clear()
             self._buf_bytes = 0
 
-        threading.Thread(
-            target=self._flush_sync,
-            args=(frames, event_type, reason),
-            daemon=True,
-            name=f"{self._id}-event-flush",
-        ).start()
+        if not self._enqueue_task("flush", frames, event_type, reason):
+            logger.error(
+                "[%s] no se pudo encolar flush_event; se descarta evidencia de %s",
+                self._id,
+                event_type,
+            )
+
+    def close(self) -> None:
+        self._worker_stop.set()
+        try:
+            self._task_q.put_nowait(None)
+        except queue.Full:
+            logger.warning("[%s] event writer saturado durante cierre", self._id)
+        self._worker.join(timeout=5.0)
+        if self._worker.is_alive():
+            logger.error("[%s] event writer no termino limpiamente", self._id)
 
     # ------------------------------------------------------------------
     # Disco — hilo background
@@ -288,6 +302,40 @@ class EventRecorder:
             )
         except Exception as exc:
             logger.error(f"[{self._id}] error actualizando manifest post: {exc}")
+
+    def _enqueue_task(self, task_type: str, *args) -> bool:
+        try:
+            self._task_q.put((task_type, args), timeout=0.5)
+            return True
+        except queue.Full:
+            logger.error("[%s] event writer saturado: %s", self._id, task_type)
+            return False
+
+    def _worker_loop(self) -> None:
+        while True:
+            try:
+                item = self._task_q.get(timeout=0.2)
+            except queue.Empty:
+                if self._worker_stop.is_set():
+                    break
+                continue
+
+            if item is None:
+                self._task_q.task_done()
+                break
+
+            task_type, args = item
+            try:
+                if task_type == "flush":
+                    self._flush_sync(*args)
+                elif task_type == "finalize":
+                    self._finalize_manifest(*args)
+                else:
+                    logger.error("[%s] tarea de evento desconocida: %s", self._id, task_type)
+            except Exception as exc:
+                logger.error("[%s] error en tarea %s: %s", self._id, task_type, exc)
+            finally:
+                self._task_q.task_done()
 
     def _next_event_dir(self) -> Path:
         today = datetime.now().strftime("%d-%m-%Y")

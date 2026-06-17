@@ -258,6 +258,11 @@ class ScannerController:
 
     def shutdown(self) -> None:
         self.stop()
+        if self._recorder is not None:
+            try:
+                self._recorder.close()
+            except Exception as exc:
+                logger.error(f"[{self._id}] error cerrando EventRecorder: {exc}")
         self._stop_disk_worker()
 
     def reset(self) -> bool:

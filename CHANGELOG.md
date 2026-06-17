@@ -48,6 +48,44 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-17 - Tadeo + Codex
 
+#### Cambio 201 - Segunda pasada 24/7: EventRecorder serial y cache de tolerancias
+
+**Pedido:** seguir auditando robustez de larga duracion para acercar el sistema
+a operacion estable por meses.
+
+**Hallazgos de Codex:**
+- `EventRecorder` seguia creando `threading.Thread(...)` por cada flush/finalize
+  de evento. Aunque no ocurre por frame, una secuencia de fallas repetidas o
+  disco lento podia acumular hilos sin un techo explicito.
+- `load_tolerances()` reabria y reparseaba YAMLs con mucha frecuencia desde
+  caminos de UI y control. No era una fuga directa, pero si I/O innecesario y
+  trabajo repetido sostenido 24/7.
+- `save_model_overrides()` fallaba con `KeyError` si `tolerancias.yaml` aun no
+  tenia bloque `models`, bug latente detectado al agregar tests de cache.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/pipeline/event_recorder.py`
+  - nuevo worker serial con cola acotada para `flush` y `finalize`
+  - nuevo `close()` para apagar limpio el writer de eventos
+- `src/controller/scanner_controller.py`
+  - `shutdown()` ahora tambien cierra `EventRecorder`
+- `src/utils/config.py`
+  - cache por `mtime` para `tolerancias.yaml` e `io_map.yaml`
+  - invalidacion explicita al guardar tolerancias / overrides
+  - fix del `KeyError` en `save_model_overrides()`
+- tests nuevos:
+  - `tests/test_config.py`
+
+**Validacion:**
+- `pytest tests/` -> `24 passed`
+
+**Riesgos / oportunidades:**
+- No hay garantia honesta de "infinito sin fallar"; sigue habiendo dependencias
+  externas (USB, red, drivers, PLC, disco) que pueden degradarse fuera del
+  proceso.
+- El modo Servicio conserva readers/hilos propios que no forman parte del
+  camino principal de produccion y merecen una tercera pasada separada.
+
 #### Cambio 200 - Hardening 24/7: writer serial, cleanup de PLC/camara y poda de metricas
 
 **Pedido:** revisar el sistema para que pueda correr 24/7 y corregir fallas de

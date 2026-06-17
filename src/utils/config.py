@@ -155,6 +155,28 @@ def tolerances_path() -> Path:
     return Path("config/tolerancias.yaml")
 
 
+_TOLERANCES_CACHE_KEY: tuple[float | None, float | None] | None = None
+_TOLERANCES_CACHE_DATA: dict[str, Any] | None = None
+_TOLERANCES_MERGED_CACHE: dict[
+    tuple[str | None, str | None, tuple[float | None, float | None]],
+    dict[str, Any],
+] = {}
+
+
+def _mtime_or_none(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def _invalidate_tolerances_cache() -> None:
+    global _TOLERANCES_CACHE_KEY, _TOLERANCES_CACHE_DATA
+    _TOLERANCES_CACHE_KEY = None
+    _TOLERANCES_CACHE_DATA = None
+    _TOLERANCES_MERGED_CACHE.clear()
+
+
 def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> dict[str, Any]:
     """Load tolerances, optionally merging per-model overrides.
 
@@ -171,14 +193,26 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
             tol_xy_px: 18.0
     """
     cfg_path = tolerances_path()
-    if not cfg_path.exists():
-        return dict(DEFAULT_TOLERANCES)
+    io_map_path = Path("config") / "io_map.yaml"
+    cache_key = (_mtime_or_none(cfg_path), _mtime_or_none(io_map_path))
 
-    with cfg_path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f) or {}
+    global _TOLERANCES_CACHE_KEY, _TOLERANCES_CACHE_DATA
+    if _TOLERANCES_CACHE_KEY != cache_key:
+        if not cfg_path.exists():
+            data = {}
+        else:
+            with cfg_path.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        _TOLERANCES_CACHE_KEY = cache_key
+        _TOLERANCES_CACHE_DATA = data if isinstance(data, dict) else {}
+        _TOLERANCES_MERGED_CACHE.clear()
 
-    if not isinstance(data, dict):
-        return dict(DEFAULT_TOLERANCES)
+    merged_cache_key = (model, scanner_id, cache_key)
+    cached = _TOLERANCES_MERGED_CACHE.get(merged_cache_key)
+    if cached is not None:
+        return dict(cached)
+
+    data = _TOLERANCES_CACHE_DATA or {}
 
     cfg = dict(DEFAULT_TOLERANCES)
     # Apply global params (skip the 'models' block)
@@ -191,7 +225,6 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
 
     # Apply per-scanner inspection overrides from io_map.yaml.
     if scanner_id:
-        io_map_path = Path("config") / "io_map.yaml"
         if io_map_path.exists():
             try:
                 with io_map_path.open("r", encoding="utf-8") as f:
@@ -202,6 +235,7 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
             except Exception:
                 pass
 
+    _TOLERANCES_MERGED_CACHE[merged_cache_key] = dict(cfg)
     return cfg
 
 
@@ -218,14 +252,16 @@ def save_model_overrides(model: str, updates: dict[str, Any]) -> None:
         with cfg_path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
-    data.setdefault("models", {})[model] = dict(
-        data["models"].get(model) or {},
+    models = data.setdefault("models", {})
+    models[model] = dict(
+        models.get(model) or {},
         **{k: v for k, v in updates.items() if v is not None},
     )
 
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     with cfg_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+    _invalidate_tolerances_cache()
 
 
 def save_tolerances(data: dict[str, Any]) -> None:
@@ -236,3 +272,4 @@ def save_tolerances(data: dict[str, Any]) -> None:
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     with cfg_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+    _invalidate_tolerances_cache()
