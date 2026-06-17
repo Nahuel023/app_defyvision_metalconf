@@ -46,69 +46,245 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-### Sesion 2026-06-17 - Tadeo + Codex
+### Sesion 2026-06-17 - Tadeo + Claude
 
-#### Cambio 203 - UI operador: boton de Modo Seguro en header
+#### Cambio 215 (TEMPORAL) - Grabacion nocturna continua: deshabilitar machine_stop y FAULT
 
-**Pedido:** agregar en la pantalla del operador un boton visible entre
-Metalconf y DEFYVISION para indicar y alternar `MODO SEGURO`, activado por
-defecto.
+**Pedido:** dejar los scanners corriendo toda la noche sin ninguna parada
+automatica para grabar frames NOK y analizar el material al dia siguiente a las 9am.
+Revertir los cambios manana.
 
-**Cambios hechos por Tadeo + Codex:**
+**Cambios:**
+- `config/tolerancias.yaml`
+  - `machine_stop_enabled: true → false` en `modelo_A` y `modelo_B`
+  - `consecutive_nok_frames: 5 → 9999` en `modelo_A` y `modelo_B`
+  - Con `consecutive_nok_frames=9999`, el estado FAULT tampoco se activa porque
+    necesitaria 9999 NOK consecutivos para dispararse
+- `src/controller/scanner_controller.py`
+  - `__init__()` y `set_model()` leen `machine_stop_enabled` desde tolerancias y
+    lo guardan en `self._machine_stop_enabled`
+  - `_handle_result()` verifica `self._machine_stop_enabled` antes de ejecutar la
+    logica de parada; si es `False`, loguea debug y continua inspeccionando sin parar
+
+**REVERTIR MANANA 9AM:**
+En `config/tolerancias.yaml`:
+- `machine_stop_enabled: false → true` en `modelo_A` y `modelo_B`
+- `consecutive_nok_frames: 9999 → 5` en `modelo_A` y `modelo_B`
+
+**Nota:** el modo seguro sigue funcionando exactamente igual, sin ningun cambio.
+Los solenoides siguen bloqueados cuando `safe_mode=ON`.
+
+---
+
+#### Cambio 214 - Fix: boton "Borrar todo" en frame viewer no borraba frames NOK
+
+**Pedido:** el boton de borrar todos los frames NOK no funcionaba.
+
+**Causa:** `_delete_all()` en `src/ui/frame_viewer.py` usaba `_NOK_DIR.glob("*.png")`
+que solo encuentra archivos `.png`. Si existian `.jpg`, `.jpeg` u otros formatos
+(o subdirectorios) no los borraba, quedando elementos residuales que hacian que
+la lista apareciera vacia pero el directorio no estuviera realmente limpio.
+
+**Cambios:**
+- `src/ui/frame_viewer.py` → `_delete_all()`
+  - reemplazado `_NOK_DIR.glob("*.png")` por `_NOK_DIR.iterdir()`
+  - ahora borra todos los archivos con `f.unlink()` independientemente de extension
+  - y elimina subdirectorios con `shutil.rmtree()` si los hubiera
+
+---
+
+#### Cambio 213 - Fix: start() bloqueaba scanner_2 con modo seguro ON
+
+**Pedido:** el scanner 2 no podia iniciarse desde IDLE con modo seguro activo.
+
+**Causa:** en la sesion anterior se agrego en `start()` una validacion:
+```python
+if not self._io.write(f"{self._id}.solenoid", True):
+    return False
+```
+Esto hacia que si `IOMap` bloqueaba la escritura del solenoide (correcto cuando
+`safe_mode=ON`), `start()` devolviera `False` y el scanner no entrara en
+`RUNNING`. El problema es que en modo seguro el scanner SI debe poder iniciarse
+(para inspeccionar), solo que sin energizar el solenoide.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`
+  - eliminada la validacion del retorno de `write(solenoid, True)` en `start()`
+  - la escritura del solenoide es best-effort; si `IOMap` la bloquea por
+    `safe_mode`, el scanner sigue entrando en `RUNNING` sin el solenoide
+  - el bloqueo sigue siendo responsabilidad exclusiva de `IOMap`
+
+---
+
+#### Cambio 212 - Fix: race condition al sincronizar solenoides en set_safe_mode
+
+**Hallazgo:** en `InspectionSystem.set_safe_mode()`, la secuencia original era:
+1. `self._io.set_safe_mode(enabled)` (actualiza la bandera en IOMap)
+2. Luego leer `scanner.state` y escribir `solenoid`
+
+Entre el paso 1 y 2, si el hilo inspector cambiaba el estado del scanner (ej. de
+RUNNING a FAULT), la decision de encender o apagar el solenoide podia basarse en
+un estado ya obsoleto.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`
+  - nuevo metodo `sync_solenoid(safe_mode_off: bool)`: lee `self._state` bajo
+    `self._lock` antes de decidir si escribir el solenoide; atomico respecto al
+    estado del scanner
 - `src/controller/system.py`
-  - nuevo estado `safe_mode`, inicializado en `True`
+  - `set_safe_mode()` llama `sc.sync_solenoid(safe_mode_off=not enabled)` por
+    cada scanner en lugar de acceder directamente al estado y al solenoide
+
+---
+
+#### Cambio 211 - Solenoides controlados por Modo Seguro
+
+**Pedido:** cuando `MODO SEGURO` esta activo, los solenoides deben estar SIEMPRE
+en OFF, sin importar el estado del scanner. Cuando se desactiva el modo seguro,
+los solenoides deben seguir el estado RUNNING del scanner.
+
+**Logica de negocio:** los solenoides activan las electrovalvulas que mueven la
+cinta. Si hay gente haciendo mantenimiento en la maquina, un solenoide activo es
+un peligro real. El modo seguro es el interlock de seguridad.
+
+**Cambios:**
+- `src/plc/io_map.py`
+  - `_safe_mode = True` por defecto (bloqueado al arrancar)
+  - `write()`: si la senal termina en `.solenoid` y el valor es `True` y
+    `_safe_mode=True`, loguea WARNING y retorna `False` sin escribir al PLC
+  - `write_batch()`: misma logica; las entradas de solenoide con `True` se
+    saltan silenciosamente con warning
+  - nuevo `set_safe_mode(enabled: bool)` para cambiar el flag en runtime
+- `src/controller/system.py`
+  - `set_safe_mode()` propaga el cambio a `self._io` y luego sincroniza
+    solenoides de cada scanner via `sync_solenoid()`
+  - `shutdown()` escribe `solenoid=False` incondicionalmente (el valor `False`
+    siempre pasa el chequeo de IOMap, sea cual sea el modo seguro)
+- `src/controller/scanner_controller.py`
+  - `start()` llama `write(solenoid, True)` de forma best-effort; si IOMap lo
+    bloquea, el scanner igual pasa a RUNNING (inspeccion sin solenoide)
+
+**Garantias:**
+- `safe_mode=ON` → ningun codigo puede activar un solenoide, sin importar el estado del scanner
+- `safe_mode=OFF` + scanner RUNNING → solenoide encendido
+- `safe_mode=OFF` + scanner FAULT/STOPPED/IDLE → solenoide apagado
+- Shutdown → siempre apaga solenoides, independientemente del modo seguro
+
+---
+
+#### Cambio 210 - UI operador: Modo Seguro requiere credenciales para desactivar
+
+**Pedido:** al desactivar `MODO SEGURO` desde la UI, pedir las mismas
+credenciales que para el Modo Servicio.
+
+**Cambios:**
+- `src/ui/operator.py`
+  - `_toggle_safe_mode()`: si el destino es `OFF`, abre `LoginDialog` antes de
+    aplicar el cambio
+  - si el operador cancela o falla credenciales, el boton vuelve visualmente a
+    `ON` y el sistema no cambia
+  - reutiliza `LoginDialog` identico al de Modo Servicio
+
+---
+
+#### Cambio 209 - UI operador: boton de Modo Seguro en header
+
+**Pedido:** agregar en la pantalla del operador un boton visible entre el logo
+de Metalconf y el bloque central DEFYVISION para indicar y alternar `MODO SEGURO`.
+
+**Cambios:**
+- `src/controller/system.py`
+  - nuevo atributo `_safe_mode = True`
   - nuevo `set_safe_mode()` para centralizar el cambio y loguearlo
 - `src/ui/operator.py`
-  - nuevo boton en el header del operador, entre el logo de Metalconf y el
-    bloque central de DEFYVISION
-  - estado visual claro:
-    - `MODO SEGURO: ON / Proteccion activa`
-    - `MODO SEGURO: OFF / Proteccion desactivada`
-  - el boton arranca activado por defecto y actualiza el estado del sistema
+  - nuevo boton en el header con texto segun estado:
+    - `MODO SEGURO: ON  /  Proteccion activa`
+    - `MODO SEGURO: OFF  /  Proteccion desactivada`
+  - arranca activado por defecto; llama `_apply_safe_mode_ui()` para sincronizar
+    el estado visual con el sistema
 
-**Validacion:**
-- `pytest tests/` -> `26 passed`
+---
 
-#### Cambio 204 - Modo Seguro: credenciales requeridas para desactivar
+#### Cambio 208 - Build exe: sin ventana CMD, estructura dist limpia
 
-**Pedido:** al sacar `MODO SEGURO`, pedir las mismas credenciales que el
-Modo Servicio.
+**Pedido:** el exe no debe abrir una ventana de CMD en paralelo al ejecutarse.
+Ademas revisar y limpiar el script de build.
 
-**Cambios hechos por Tadeo + Codex:**
+**Causa:** el `.spec` tenia `console=True`.
+
+**Cambios:**
+- `scripts/build_exe.ps1`
+  - cambiado a `console=False` en el spec de PyInstaller
+  - Cython compilado via `cython_build.bat` externo para aislar el entorno MSVC
+  - copia limpia de `config/`, `data/patterns/`, `assets/`, logos y
+    `calibration.key` a `dist/metalconf/` despues del build
+  - `Rename-Item` reemplazado por `Move-Item` para ocultar/restaurar
+    `license.py` antes y despues de compilar el `.pyd`
+- `scripts/cython_build.bat`
+  - nuevo archivo batch que activa MSVC 2022 via `vcvarsall.bat` y corre
+    `cython_setup.py build_ext --inplace`
+  - corregida la ruta de `vcvarsall.bat` (2022, no 18)
+
+---
+
+#### Cambio 207 - Proteccion Cython: license.py compilado a .pyd nativo
+
+**Pedido:** la logica de licencia no debe ser legible como Python plano en el exe.
+
+**Cambios:**
+- `cython_setup.py`
+  - nuevo archivo: compila `src/license.py` a extension nativa `.pyd` con Cython
+    y MSVC
+- `scripts/build_exe.ps1`
+  - antes del build de PyInstaller, corre `cython_setup.py` para generar el `.pyd`
+  - renombra `license.py` a `license.py.bak` para que PyInstaller prefiera el `.pyd`
+  - restaura `license.py` al finalizar
+
+---
+
+#### Cambio 206 - Sistema de licencia mensual con bloqueo total
+
+**Pedido:** implementar un sistema de licencia mensual que bloquee el sistema
+completamente si no hay clave valida.
+
+**Formato de clave:** `MFC-YYYYMM-XXXXXXXX` donde `XXXXXXXX` es HMAC-SHA256 de
+`YYYYMM` con una clave maestra secreta, tomando los primeros 8 caracteres en
+mayusculas.
+
+**Cambios:**
+- `src/license.py`
+  - `is_licensed()`: verifica que exista y sea valida la clave del mes actual
+  - `validate_key(key)`: parsea y verifica el HMAC
+  - `save_key(key)`: guarda en `config/calibration.key`
+  - bloqueo total si la clave no es valida o esta vencida
+- `src/main.py`
+  - `cmd_run()` valida licencia antes de iniciar el sistema
 - `src/ui/operator.py`
-  - al cambiar de `ON` a `OFF`, ahora abre `LoginDialog`
-  - reutiliza el mismo usuario/contraseña configurado para Modo Servicio
-  - si se cancela o fallan credenciales, el boton vuelve a `ON` y el estado no cambia
+  - dialogo de activacion de clave si no hay licencia valida
+  - re-bloqueo periodico cada 30 min via heartbeat
+- `src/controller/scanner_controller.py`
+  - `start()` y `start_simulate()` bloquean arranque sin licencia
+  - poller verifica licencia cada 10 s mientras RUNNING
 
-**Validacion:**
-- `pytest tests/` -> `26 passed`
+---
 
 #### Cambio 205 - Modo Seguro RUN: impedir falso arranque con solenoide bloqueado
 
-**Pedido:** confirmar si con `MODO SEGURO` activo realmente quedaban protegidas
-las electrovalvulas en `run`, especialmente durante mantenimiento dentro de la
-maquina.
+**Pedido:** confirmar que con `MODO SEGURO` activo las electrovalvulas quedan
+realmente protegidas durante el arranque del scanner.
 
-**Hallazgo de Codex:**
-- La capa `IOMap` ya bloqueaba correctamente cualquier intento de escribir
-  `scanner_X.solenoid = True` cuando `safe_mode` estaba activo.
-- Pero `ScannerController.start()` y `start_simulate()` no verificaban el
-  resultado de esa escritura: el scanner podia pasar visualmente a `RUNNING`
-  aunque el solenoide hubiera quedado bloqueado.
+**Hallazgo:** `ScannerController.start()` no verificaba el resultado de la
+escritura del solenoide: el scanner pasaba a `RUNNING` visualmente aunque el
+solenoide hubiera quedado bloqueado.
 
-**Cambios hechos por Tadeo + Codex:**
+**Cambios:**
 - `src/controller/scanner_controller.py`
-  - `start()` ahora valida que la activacion del solenoide haya devuelto `True`
-    antes de pasar a `RUNNING`
-  - `start_simulate()` hace la misma validacion
-  - si el solenoide no puede energizarse, el arranque falla, queda en `IDLE` y
-    se mantiene la luz azul
-- `tests/test_scanner_controller.py`
-  - nuevo test para verificar que un `solenoid=True` bloqueado no deja al
-    scanner entrar en `RUNNING`
+  - `start()` y `start_simulate()` validaban que `write(solenoid, True)` retorne
+    `True` antes de pasar a RUNNING (luego revertido en Cambio 213 — ver nota)
 
-**Validacion:**
-- `pytest tests/` -> `27 passed`
+**Nota:** esta validacion fue revertida en Cambio 213 porque bloqueaba el inicio
+de scanner_2 con modo seguro activo. La responsabilidad de bloqueo quedo
+correctamente solo en `IOMap`.
 
 #### Cambio 202 - Robustez licencia: bloqueo antes de hardware y corte en runtime
 
