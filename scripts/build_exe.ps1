@@ -1,6 +1,5 @@
-# scripts/build_exe.ps1 - compila metalconf.exe con Cython + PyInstaller
-# Ejecutar desde el directorio raiz del proyecto:
-#   powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1
+# scripts/build_exe.ps1
+# Ejecutar: powershell -ExecutionPolicy Bypass -File .\scripts\build_exe.ps1
 
 $ROOT = Split-Path $PSScriptRoot -Parent
 Set-Location $ROOT
@@ -8,63 +7,48 @@ Set-Location $ROOT
 Write-Host "=== MetalConf - Build EXE ===" -ForegroundColor Cyan
 Write-Host "Directorio: $ROOT"
 
-# Verificar venv
 if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
-    Write-Host "ERROR: no se encontro .venv. Ejecutar setup_windows.ps1 primero." -ForegroundColor Red
+    Write-Host "ERROR: no se encontro .venv." -ForegroundColor Red
     exit 1
 }
 
-# Dependencias de build
-Write-Host "`nVerificando dependencias de build..." -ForegroundColor Yellow
+Write-Host "`nVerificando dependencias..." -ForegroundColor Yellow
 .\.venv\Scripts\pip.exe install pyinstaller pyinstaller-hooks-contrib cython --quiet
 
-# Limpiar builds anteriores
 if (Test-Path "dist\metalconf") { Remove-Item -Recurse -Force "dist\metalconf" }
 if (Test-Path "build")          { Remove-Item -Recurse -Force "build" }
 
-# ── Paso 1: Compilar módulos críticos con Cython ──────────────────────────
-Write-Host "`nCompilando módulos protegidos con Cython..." -ForegroundColor Yellow
-
-$vcvarsall = "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvarsall.bat"
-if (-not (Test-Path $vcvarsall)) {
-    Write-Host "AVISO: No se encontro MSVC — saltando Cython (el exe no tendra proteccion nativa)." -ForegroundColor Yellow
+# Paso 1: Cython
+Write-Host "`nCompilando modulos protegidos con Cython..." -ForegroundColor Yellow
+cmd /c "scripts\cython_build.bat"
+$pyd = Get-ChildItem "build" -Recurse -Filter "license*.pyd" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($pyd) {
+    Copy-Item $pyd.FullName "src\utils\$($pyd.Name)" -Force
+    Write-Host "  license.pyd OK: $($pyd.Name)" -ForegroundColor Green
 } else {
-    $cythonOk = $false
-    cmd /c "`"$vcvarsall`" x64 && set DISTUTILS_USE_SDK=1 && set MSSdk=1 && .\.venv\Scripts\python.exe scripts\cython_setup.py build_ext 2>&1"
-    if ($LASTEXITCODE -eq 0) { $cythonOk = $true }
-
-    # Copiar .pyd a src/utils/
-    $pyd = Get-ChildItem "build" -Recurse -Filter "license*.pyd" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($pyd) {
-        Copy-Item $pyd.FullName "src\utils\$($pyd.Name)" -Force
-        Write-Host "  license.pyd compilado OK: $($pyd.Name)" -ForegroundColor Green
-        $cythonOk = $true
-    } else {
-        Write-Host "  AVISO: No se pudo compilar license.pyd — continuando sin proteccion Cython." -ForegroundColor Yellow
-    }
-    Remove-Item -Recurse -Force "build" -ErrorAction SilentlyContinue
+    Write-Host "  AVISO: Cython fallo, continuando sin proteccion nativa." -ForegroundColor Yellow
 }
+Remove-Item -Recurse -Force "build" -ErrorAction SilentlyContinue
 
-# ── Paso 2: Ocultar .py protegidos para que PyInstaller solo vea el .pyd ──
+# Paso 2: Ocultar .py protegidos
 $hidden = @()
-if (Test-Path "src\utils\license.cp*.pyd") {
+$pydExists = Get-ChildItem "src\utils" -Filter "license*.pyd" -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($pydExists) {
     Rename-Item "src\utils\license.py" "src\utils\license.py.bak"
     $hidden += "src\utils\license.py"
-    Write-Host "  license.py ocultado temporalmente." -ForegroundColor Gray
+    Write-Host "  license.py ocultado." -ForegroundColor Gray
 }
 
-# ── Paso 3: Compilar con PyInstaller ─────────────────────────────────────
+# Paso 3: PyInstaller
 Write-Host "`nCompilando exe con PyInstaller..." -ForegroundColor Yellow
 $buildOk = $false
 try {
     .\.venv\Scripts\pyinstaller.exe --clean --noconfirm metalconf.spec
     if ($LASTEXITCODE -eq 0) { $buildOk = $true }
 } finally {
-    # ── Paso 4: Restaurar .py originales ─────────────────────────────────
     foreach ($f in $hidden) {
         if (Test-Path "$f.bak") { Rename-Item "$f.bak" $f }
     }
-    # Limpiar .pyd temporales del directorio src/
     Get-ChildItem "src\utils" -Filter "license*.pyd" -ErrorAction SilentlyContinue | Remove-Item -Force
     Remove-Item -Recurse -Force "build" -ErrorAction SilentlyContinue
     Write-Host "Archivos originales restaurados." -ForegroundColor Gray
@@ -75,39 +59,28 @@ if (-not $buildOk) {
     exit 1
 }
 
-# ── Paso final: copiar carpetas de datos junto al exe ─────────────────────
-Write-Host "`nCopiando carpetas de datos a dist\metalconf\..." -ForegroundColor Yellow
-
+# Paso 4: Copiar carpetas junto al exe
+Write-Host "`nCopiando datos a dist\metalconf\..." -ForegroundColor Yellow
 $dist = "$ROOT\dist\metalconf"
 
-# config/ completo (incluye calibration.key si existe)
 if (Test-Path "$ROOT\config") {
     Copy-Item "$ROOT\config" "$dist\config" -Recurse -Force
-    Write-Host "  config\ copiado" -ForegroundColor Gray
+    Write-Host "  config\" -ForegroundColor Gray
 }
-
-# data\patterns\ (solo patrones, no output ni frames)
 if (Test-Path "$ROOT\data\patterns") {
     New-Item -ItemType Directory -Force "$dist\data\patterns" | Out-Null
     Copy-Item "$ROOT\data\patterns\*" "$dist\data\patterns\" -Recurse -Force
-    Write-Host "  data\patterns\ copiado" -ForegroundColor Gray
+    Write-Host "  data\patterns\" -ForegroundColor Gray
 }
-
-# logos\ y assets\
 foreach ($folder in @("logos", "assets")) {
     if (Test-Path "$ROOT\$folder") {
         Copy-Item "$ROOT\$folder" "$dist\$folder" -Recurse -Force
-        Write-Host "  $folder\ copiado" -ForegroundColor Gray
+        Write-Host "  $folder\" -ForegroundColor Gray
     }
 }
 
 Write-Host "`n=== BUILD OK ===" -ForegroundColor Green
-Write-Host ""
-Write-Host "Carpeta para entregar al cliente:"
-Write-Host "  $dist"
-Write-Host ""
-Write-Host "Estructura final:"
-Get-ChildItem $dist | Select-Object -ExpandProperty Name | ForEach-Object { Write-Host "  $_" }
-Write-Host ""
-Write-Host "Para registrar el autoarranque, ejecutar:"
-Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\setup_autostart.ps1"
+Write-Host "`nCarpeta para el cliente:" -ForegroundColor White
+Write-Host "  $dist" -ForegroundColor Cyan
+Write-Host "`nContenido:"
+Get-ChildItem $dist | ForEach-Object { Write-Host "  $($_.Name)" }

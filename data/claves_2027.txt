@@ -1,0 +1,19 @@
+﻿╔══════════════════════════════════════════════════╗
+║         CLAVES DE ACTIVACIÓN METALCONF           ║
+║                    AÑO 2027                      ║
+╠══════════════════════════════════════════════════╣
+║  Enero      MFC-202701-12BE8692                  ║
+║  Febrero    MFC-202702-EEA7EB07                  ║
+║  Marzo      MFC-202703-C000FADC                  ║
+║  Abril      MFC-202704-2947B645                  ║
+║  Mayo       MFC-202705-9983FA09                  ║
+║  Junio      MFC-202706-D2FFA3B1                  ║
+║  Julio      MFC-202707-B858EF44                  ║
+║  Agosto     MFC-202708-3EF1EDA6                  ║
+║  Septiembre MFC-202709-D6618B18                  ║
+║  Octubre    MFC-202710-9C8856E3                  ║
+║  Noviembre  MFC-202711-3D9A1400                  ║
+║  Diciembre  MFC-202712-3CC3EEA1                  ║
+╚══════════════════════════════════════════════════╝
+  Generadas: 17/06/2026
+  USO INTERNO — DEFYMOTION
