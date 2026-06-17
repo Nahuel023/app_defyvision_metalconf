@@ -32,8 +32,22 @@ def generate_key(year: int, month: int) -> str:
     return f"MFC-{payload}-{_sig(payload)}"
 
 
+def _required_period() -> tuple:
+    """Devuelve el período (año, mes) que debe cubrir la clave.
+
+    A partir del día 30 de cada mes a las 08:00, se exige la clave
+    del mes siguiente — dando margen de gestión antes del cierre.
+    """
+    now = datetime.now()
+    if now.day >= 30 and now.hour >= 8:
+        if now.month == 12:
+            return now.year + 1, 1
+        return now.year, now.month + 1
+    return now.year, now.month
+
+
 def validate_key(key: str) -> bool:
-    """True si la clave es válida y cubre el mes actual o posterior."""
+    """True si la clave es válida y cubre el período requerido actual."""
     parts = key.strip().upper().split("-")
     if len(parts) != 3 or parts[0] != "MFC":
         return False
@@ -47,8 +61,7 @@ def validate_key(key: str) -> bool:
             return False
         if not hmac.compare_digest(_sig(payload), parts[2]):
             return False
-        now = datetime.now()
-        return (year, month) >= (now.year, now.month)
+        return (year, month) >= _required_period()
     except Exception:
         return False
 

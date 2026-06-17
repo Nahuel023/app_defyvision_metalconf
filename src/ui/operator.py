@@ -109,56 +109,120 @@ class LicenseBlockDialog(QDialog):
             | Qt.WindowType.WindowTitleHint
         )
         self.setModal(True)
-        self.setMinimumSize(520, 320)
+        self.setMinimumSize(780, 540)
         self.setStyleSheet(f"background:{_BG};color:{_TEXT};")
 
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(40, 40, 40, 40)
-        lay.setSpacing(18)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Banner superior ───────────────────────────────────────────
+        banner = QWidget()
+        banner.setFixedHeight(130)
+        banner.setStyleSheet(
+            "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #1a0505, stop:0.5 #3d0c0c, stop:1 #1a0505);"
+            f"border-bottom:2px solid #7f1d1d;"
+        )
+        banner_lay = QVBoxLayout(banner)
+        banner_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        banner_lay.setSpacing(4)
 
         icon_lbl = QLabel("⊙")
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        icon_lbl.setStyleSheet("font-size:42px;color:#f85149;background:transparent;")
-        lay.addWidget(icon_lbl)
+        icon_lbl.setStyleSheet(
+            "font-size:48px;color:#f87171;background:transparent;"
+        )
+        banner_lay.addWidget(icon_lbl)
+
+        brand = QLabel("DEFYVISION  ·  Visión Artificial")
+        brand.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand.setStyleSheet(
+            "font-size:12px;font-weight:600;letter-spacing:3px;"
+            "color:#f87171;background:transparent;"
+        )
+        banner_lay.addWidget(brand)
+        root.addWidget(banner)
+
+        # ── Cuerpo central ────────────────────────────────────────────
+        body = QWidget()
+        body.setStyleSheet(f"background:{_BG};")
+        body_lay = QVBoxLayout(body)
+        body_lay.setContentsMargins(70, 44, 70, 44)
+        body_lay.setSpacing(20)
+        body_lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         title = QLabel("Actualización de credenciales requerida")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setStyleSheet(
-            f"font-size:15px;font-weight:700;color:{_TEXT};background:transparent;"
+            f"font-size:20px;font-weight:700;color:{_TEXT};"
+            "background:transparent;letter-spacing:0.5px;"
         )
-        lay.addWidget(title)
+        body_lay.addWidget(title)
 
-        sub = QLabel("Ingrese el código de autorización para continuar.")
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color:{_BORDER};background:{_BORDER};max-height:1px;")
+        body_lay.addWidget(sep)
+
+        sub = QLabel(
+            "El sistema requiere autorización para continuar operando.\n"
+            "Ingrese el código de activación mensual proporcionado por soporte técnico."
+        )
         sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub.setStyleSheet(f"font-size:11px;color:{_MUTED};background:transparent;")
-        lay.addWidget(sub)
+        sub.setWordWrap(True)
+        sub.setStyleSheet(f"font-size:12px;color:{_MUTED};background:transparent;line-height:1.6;")
+        body_lay.addWidget(sub)
+
+        body_lay.addSpacing(6)
 
         self._input = QLineEdit()
         self._input.setPlaceholderText("MFC-YYYYMM-XXXXXXXX")
         self._input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._input.setFixedHeight(52)
         self._input.setStyleSheet(
-            f"background:{_CARD};color:{_TEXT};border:1px solid {_BORDER};"
-            "border-radius:6px;padding:10px;font-size:14px;font-family:Consolas,monospace;"
+            f"background:{_CARD};color:{_TEXT};"
+            f"border:1px solid {_BORDER};border-radius:8px;"
+            "padding:0 16px;font-size:17px;font-family:Consolas,monospace;"
+            "letter-spacing:1px;"
         )
         self._input.returnPressed.connect(self._on_activate)
-        lay.addWidget(self._input)
+        body_lay.addWidget(self._input)
 
         self._error_lbl = QLabel("")
         self._error_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._error_lbl.setFixedHeight(20)
         self._error_lbl.setStyleSheet(
             f"font-size:11px;color:{_NOK_CLR};background:transparent;"
         )
-        lay.addWidget(self._error_lbl)
+        body_lay.addWidget(self._error_lbl)
 
         btn = QPushButton("Activar sistema")
-        btn.setFixedHeight(40)
+        btn.setFixedHeight(50)
         btn.setStyleSheet(
-            "QPushButton { background:#1e40af; color:#ffffff; border-radius:6px;"
-            "font-size:13px; font-weight:600; border:none; }"
+            "QPushButton { background:#1e40af; color:#ffffff; border-radius:8px;"
+            "font-size:14px; font-weight:700; border:none; letter-spacing:1px; }"
             "QPushButton:hover { background:#2563eb; }"
+            "QPushButton:pressed { background:#1d4ed8; }"
         )
         btn.clicked.connect(self._on_activate)
-        lay.addWidget(btn)
+        body_lay.addWidget(btn)
+
+        root.addWidget(body, stretch=1)
+
+        # ── Footer ────────────────────────────────────────────────────
+        footer = QWidget()
+        footer.setFixedHeight(36)
+        footer.setStyleSheet(
+            f"background:{_PANEL};border-top:1px solid {_BORDER};"
+        )
+        footer_lay = QHBoxLayout(footer)
+        footer_lay.setContentsMargins(20, 0, 20, 0)
+        contact = QLabel("Soporte: DEFYMOTION  ·  design@defymotion.com.ar")
+        contact.setStyleSheet(f"font-size:10px;color:{_MUTED};background:transparent;")
+        footer_lay.addWidget(contact)
+        footer_lay.addStretch()
+        root.addWidget(footer)
 
     def _on_activate(self) -> None:
         key = self._input.text().strip()
