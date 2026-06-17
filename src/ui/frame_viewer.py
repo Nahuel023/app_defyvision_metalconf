@@ -1358,8 +1358,11 @@ class OperatorFrameViewer(QMainWindow):
                                 f.unlink(missing_ok=True)
             elif self._mode == "nok":
                 if _NOK_DIR.exists():
-                    for f in _NOK_DIR.glob("*.png"):
-                        f.unlink(missing_ok=True)
+                    for f in _NOK_DIR.iterdir():
+                        if f.is_file():
+                            f.unlink(missing_ok=True)
+                        elif f.is_dir():
+                            shutil.rmtree(f, ignore_errors=True)
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo borrar todo:\n{exc}")
             return

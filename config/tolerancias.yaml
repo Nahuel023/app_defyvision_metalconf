@@ -93,9 +93,9 @@ models:
     compare_bottom_ignore_px: 0.0
     blur_score_min: 800.0
     frame_missing_nok_threshold: 5
-    consecutive_nok_frames: 5
+    consecutive_nok_frames: 9999
     continuous_position_threshold: 3.0
-    machine_stop_enabled: true
+    machine_stop_enabled: false
     machine_stop_missing_frames: 3
     machine_stop_min_missing: 2
     machine_stop_same_zone_px: 40.0
@@ -134,7 +134,7 @@ models:
     grid_max_missing: 60
     bbox_filter_margin_px: 45.0
     quality_ratio_min: 0.0
-    consecutive_nok_frames: 5
+    consecutive_nok_frames: 9999
     grid_min_spacing: 12.0
     grid_dx: 36.0
     grid_dy: 14.0
@@ -144,7 +144,7 @@ models:
     center_offset_tol_px: 0.0
     extra_min_dist_factor: 2.0
     continuous_position_threshold: 4.0
-    machine_stop_enabled: true
+    machine_stop_enabled: false
     machine_stop_missing_frames: 3
     machine_stop_min_missing: 2
     machine_stop_same_zone_px: 35.0

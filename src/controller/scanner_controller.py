@@ -64,6 +64,7 @@ class ScannerController:
                          tols["consecutive_nok_frames"])
         )
         self._low_quality_max_streak = int(tols.get("low_quality_max_streak", 10))
+        self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
         self._poll_interval = io.plc_config.get("poll_interval_ms", 50) / 1000.0
@@ -491,9 +492,11 @@ class ScannerController:
         self._consecutive_nok = int(
             insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
         )
+        self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._inspector.invalidate(model=model, scanner_id=self._id)
         logger.info(f"[{self._id}] modelo cambiado a '{model}' "
-                    f"(consecutive_nok={self._consecutive_nok})")
+                    f"(consecutive_nok={self._consecutive_nok}, "
+                    f"machine_stop_enabled={self._machine_stop_enabled})")
 
     # ------------------------------------------------------------------
     # Propiedades de estado (thread-safe)
@@ -984,6 +987,8 @@ class ScannerController:
             if getattr(result, "machine_stop", False):
                 if in_grace:
                     logger.debug("[%s] machine_stop suprimido (grace %d)", self._id, self._startup_grace_remaining + 1)
+                elif not self._machine_stop_enabled:
+                    logger.debug("[%s] machine_stop suprimido (machine_stop_enabled=false)", self._id)
                 else:
                     machine_stop_triggered = True
                     self._machine_stop_count += 1
