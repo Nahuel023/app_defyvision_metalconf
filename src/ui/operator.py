@@ -1166,7 +1166,11 @@ class OperatorWindow(QMainWindow):
     def _apply_safe_mode_ui(self) -> None:
         enabled = self._system.safe_mode
         label = "MODO SEGURO: ON" if enabled else "MODO SEGURO: OFF"
-        detail = "Proteccion activa" if enabled else "Proteccion desactivada"
+        detail = (
+            "Proteccion electrovalvulas activa"
+            if enabled
+            else "Proteccion desactivada"
+        )
         bg = _SAFE_ON_BG if enabled else _SAFE_OFF_BG
         fg = _SAFE_ON_FG if enabled else _SAFE_OFF_FG
         border = "#f87171" if enabled else "#4ade80"
