@@ -836,6 +836,22 @@ class ScannerController:
                 self._force_inspect.clear()
 
             frame_counter += 1
+            if frame_counter % 500 == 0:
+                from src.utils.license import is_licensed
+                if not is_licensed():
+                    import logging as _lg
+                    _lg.getLogger(__name__).critical(
+                        "[%s] sistema no autorizado — deteniendo scanner", self._id
+                    )
+                    self._io.write(f"{self._id}.solenoid", False)
+                    self._set_lights()
+                    with self._lock:
+                        if self._state == ScannerState.RUNNING:
+                            self._state = ScannerState.STOPPED
+                    self._stop_event.set()
+                    self._fire_state_changed()
+                    return
+
             fid = (f"{self._id}_cont_{datetime.now().strftime('%H%M%S')}"
                    f"_{frame_counter:04d}")
             res = session.inspect_frame(frame, frame_id=fid, force=forced)

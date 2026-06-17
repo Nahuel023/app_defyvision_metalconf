@@ -40,6 +40,7 @@ a = Analysis(
         'src.patterns.pattern_io',
         'src.patterns.roi',
         'src.utils.config',
+        'src.utils.license',
         'src.utils.logger',
         'src.utils.paths',
         'src.utils.state',

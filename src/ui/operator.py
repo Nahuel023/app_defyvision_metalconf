@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -43,6 +44,7 @@ from PyQt6.QtWidgets import (
 from src.controller.system import InspectionSystem
 from src.inspection import InspectionResult
 from src.utils.state import OperationMode, ScannerState
+from src.utils.license import is_licensed, save_license_file, update_heartbeat, validate_key
 
 from src.utils.paths import app_root
 _ROOT = app_root()
@@ -85,6 +87,96 @@ _OVERLAY_HOLD_MS        = 2500
 _OVERLAY_HOLD_FAULT_MS  = 30_000
 
 _HEADER_WING_W = 370
+
+
+# ------------------------------------------------------------------
+# Diálogo de bloqueo de sistema (licencia vencida)
+# ------------------------------------------------------------------
+
+class LicenseBlockDialog(QDialog):
+    """Diálogo modal que bloquea el sistema hasta ingresar un código válido.
+
+    No se puede cerrar con X ni con Escape — la única salida es un código
+    de activación válido.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("DEFYVISION — Verificación de sistema")
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        self.setModal(True)
+        self.setMinimumSize(520, 320)
+        self.setStyleSheet(f"background:{_BG};color:{_TEXT};")
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(40, 40, 40, 40)
+        lay.setSpacing(18)
+
+        icon_lbl = QLabel("⊙")
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet("font-size:42px;color:#f85149;background:transparent;")
+        lay.addWidget(icon_lbl)
+
+        title = QLabel("Actualización de credenciales requerida")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            f"font-size:15px;font-weight:700;color:{_TEXT};background:transparent;"
+        )
+        lay.addWidget(title)
+
+        sub = QLabel("Ingrese el código de autorización para continuar.")
+        sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        sub.setStyleSheet(f"font-size:11px;color:{_MUTED};background:transparent;")
+        lay.addWidget(sub)
+
+        self._input = QLineEdit()
+        self._input.setPlaceholderText("MFC-YYYYMM-XXXXXXXX")
+        self._input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._input.setStyleSheet(
+            f"background:{_CARD};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:10px;font-size:14px;font-family:Consolas,monospace;"
+        )
+        self._input.returnPressed.connect(self._on_activate)
+        lay.addWidget(self._input)
+
+        self._error_lbl = QLabel("")
+        self._error_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._error_lbl.setStyleSheet(
+            f"font-size:11px;color:{_NOK_CLR};background:transparent;"
+        )
+        lay.addWidget(self._error_lbl)
+
+        btn = QPushButton("Activar sistema")
+        btn.setFixedHeight(40)
+        btn.setStyleSheet(
+            "QPushButton { background:#1e40af; color:#ffffff; border-radius:6px;"
+            "font-size:13px; font-weight:600; border:none; }"
+            "QPushButton:hover { background:#2563eb; }"
+        )
+        btn.clicked.connect(self._on_activate)
+        lay.addWidget(btn)
+
+    def _on_activate(self) -> None:
+        key = self._input.text().strip()
+        if validate_key(key):
+            save_license_file(key)
+            self.accept()
+        else:
+            self._error_lbl.setText("Código incorrecto. Contacte a soporte técnico.")
+            self._input.clear()
+            self._input.setFocus()
+
+    def closeEvent(self, event) -> None:
+        event.ignore()
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            return
+        super().keyPressEvent(event)
 
 
 # ------------------------------------------------------------------
@@ -822,6 +914,16 @@ class OperatorWindow(QMainWindow):
         self._status_timer.timeout.connect(self._refresh_status)
         self._status_timer.start(_STATUS_REFRESH_MS)
 
+        # Verificación periódica de licencia cada 30 min
+        self._license_timer = QTimer(self)
+        self._license_timer.timeout.connect(self._check_license)
+        self._license_timer.start(30 * 60 * 1000)
+
+        # Heartbeat para detección de rollback de reloj (cada 10 min)
+        self._heartbeat_timer = QTimer(self)
+        self._heartbeat_timer.timeout.connect(update_heartbeat)
+        self._heartbeat_timer.start(10 * 60 * 1000)
+
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -997,6 +1099,18 @@ class OperatorWindow(QMainWindow):
         for panel in self._panels.values():
             panel.refresh_status()
 
+    def _check_license(self) -> None:
+        if is_licensed():
+            return
+        # Detener todos los scanners antes de bloquear
+        for sid in self._system.scanner_ids():
+            try:
+                self._system.scanner(sid).stop()
+            except Exception:
+                pass
+        dlg = LicenseBlockDialog(self)
+        dlg.exec()
+
     def _open_errors(self) -> None:
         """Abre el visor de frames para el operario (paradas + OK recientes)."""
         from src.ui.frame_viewer import OperatorFrameViewer
@@ -1139,6 +1253,13 @@ def launch_operator_ui(system: InspectionSystem) -> None:
     icon_pix = QPixmap(str(_ico)) if _ico.exists() else QPixmap(str(_jpg))
     if not icon_pix.isNull():
         app.setWindowIcon(QIcon(icon_pix))
+
+    # Verificación de licencia al arrancar — bloquea hasta ingresar clave válida
+    if not is_licensed():
+        dlg = LicenseBlockDialog(None)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return   # no debería ocurrir (closeEvent ignorado), pero por si acaso
+
     win = OperatorWindow(system)
     win.showMaximized()
     win.raise_()
