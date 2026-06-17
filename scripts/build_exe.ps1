@@ -75,11 +75,39 @@ if (-not $buildOk) {
     exit 1
 }
 
+# ── Paso final: copiar carpetas de datos junto al exe ─────────────────────
+Write-Host "`nCopiando carpetas de datos a dist\metalconf\..." -ForegroundColor Yellow
+
+$dist = "$ROOT\dist\metalconf"
+
+# config/ completo (incluye calibration.key si existe)
+if (Test-Path "$ROOT\config") {
+    Copy-Item "$ROOT\config" "$dist\config" -Recurse -Force
+    Write-Host "  config\ copiado" -ForegroundColor Gray
+}
+
+# data\patterns\ (solo patrones, no output ni frames)
+if (Test-Path "$ROOT\data\patterns") {
+    New-Item -ItemType Directory -Force "$dist\data\patterns" | Out-Null
+    Copy-Item "$ROOT\data\patterns\*" "$dist\data\patterns\" -Recurse -Force
+    Write-Host "  data\patterns\ copiado" -ForegroundColor Gray
+}
+
+# logos\ y assets\
+foreach ($folder in @("logos", "assets")) {
+    if (Test-Path "$ROOT\$folder") {
+        Copy-Item "$ROOT\$folder" "$dist\$folder" -Recurse -Force
+        Write-Host "  $folder\ copiado" -ForegroundColor Gray
+    }
+}
+
 Write-Host "`n=== BUILD OK ===" -ForegroundColor Green
-Write-Host "Ejecutable: $ROOT\dist\metalconf\metalconf.exe"
 Write-Host ""
-Write-Host "IMPORTANTE: el .exe necesita leer config/ y data/ del directorio raiz."
-Write-Host "El Task Scheduler debe iniciar con 'Iniciar en': $ROOT"
+Write-Host "Carpeta para entregar al cliente:"
+Write-Host "  $dist"
+Write-Host ""
+Write-Host "Estructura final:"
+Get-ChildItem $dist | Select-Object -ExpandProperty Name | ForEach-Object { Write-Host "  $_" }
 Write-Host ""
 Write-Host "Para registrar el autoarranque, ejecutar:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\scripts\setup_autostart.ps1"

@@ -11,7 +11,7 @@ def _log(msg: str) -> None:
 
 try:
     if getattr(sys, "frozen", False):
-        candidate = Path(sys.executable).parent.parent.parent
+        candidate = Path(sys.executable).parent
         _log(f"exe: {sys.executable}")
         _log(f"candidate root: {candidate}")
         _log(f"io_map exists: {(candidate / 'config' / 'io_map.yaml').exists()}")

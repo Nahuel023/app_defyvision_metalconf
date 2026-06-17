@@ -12,12 +12,7 @@ a = Analysis(
     ['run_production.py'],
     pathex=['.'],
     binaries=[],
-    datas=[
-        ('config',           'config'),
-        ('data\\patterns',   'data\\patterns'),
-        ('assets',           'assets'),
-        ('logos',            'logos'),
-    ],
+    datas=[],  # config, data, logos, assets se copian como carpetas sueltas junto al exe
     hiddenimports=[
         'src.main',
         'src.inspection',
