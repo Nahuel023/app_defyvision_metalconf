@@ -46,6 +46,66 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-06-17 - Tadeo + Codex
+
+#### Cambio 200 - Hardening 24/7: writer serial, cleanup de PLC/camara y poda de metricas
+
+**Pedido:** revisar el sistema para que pueda correr 24/7 y corregir fallas de
+estabilidad de larga duracion.
+
+**Hallazgos de Codex:**
+- `ScannerController` creaba `threading.Thread(...)` nuevos por frame para
+  timeline, ok_buffer y guardado de resultados. Si el disco se pone lento, eso
+  podia escalar a cientos o miles de threads y degradar todo el proceso.
+- `Camera.stop()` soltaba la referencia del hilo aun si seguia vivo, con riesgo
+  de dejar loops zombis y de duplicar capturas en reintentos/reinicios.
+- `PLCClient` recreaba el cliente Modbus al reconectar pero no cerraba de forma
+  consistente el cliente anterior ante errores repetidos.
+- `metrics.db` crecia sin politica de retencion ni VACUUM, y `setup_logging()`
+  ignoraba `config/app.yaml`, por lo que el archivo configurado no se usaba.
+- La UI consultaba `mode_switch` via PLC desde `get_status()`; se movio esa
+  lectura al poller para no congelar paneles por lecturas sincronicas.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/controller/scanner_controller.py`
+  - nuevo disk writer serial por scanner con cola acotada
+  - se eliminaron los threads por frame para guardados en disco
+  - `get_status()` ya no hace lecturas PLC bloqueantes
+  - nuevo `shutdown()` para cerrar worker de disco en el apagado real del sistema
+- `src/controller/system.py`
+  - `shutdown()` ahora llama `scanner.shutdown()` para cerrar tambien el writer
+- `src/vision/camera.py`
+  - `stop()` ahora cierra capturas/conexiones antes del join
+  - si el hilo no termina, queda bloqueado un restart duplicado y se loguea error
+  - seguimiento explicito de la conexion HTTP snapshot para cortar bloqueos
+- `src/plc/client.py`
+  - cierre explicito del cliente anterior en reconnect, disconnect y on_error
+- `src/metrics/recorder.py`
+  - WAL + `synchronous=NORMAL`
+  - poda por antiguedad y tope de filas por scanner
+  - mantenimiento periodico + `VACUUM`
+- `src/utils/logger.py`
+  - ahora lee `config/app.yaml`
+  - usa `RotatingFileHandler` con rotacion acotada
+- `src/utils/config.py`
+  - nuevo default `disk_writer_queue_max`
+- tests nuevos:
+  - `tests/test_metrics_recorder.py`
+  - `tests/test_plc_client.py`
+
+**Validacion:**
+- `pytest tests/` -> `21 passed`
+- `git pull --ff-only origin master` aplicado antes de editar para partir del
+  ultimo `master`
+
+**Riesgos / oportunidades:**
+- El modo Servicio todavia tiene algunos hilos y loops propios, pero el nucleo
+  de produccion (`run`) quedo mucho mas protegido que antes.
+- `EventRecorder` sigue usando hilos por evento, aunque ya no por frame; por
+  frecuencia de uso no quedo como riesgo critico en esta pasada.
+
+---
+
 ### Sesión 2026-06-16 — Tadeo + Claude + Codex
 
 #### Cambio 199 - Rediseño overlay frames analizados
@@ -1151,7 +1211,7 @@ en la deteccion de microperforado.
   - sigue en `71/71 raw OK`, `71/71 temporal OK`
 - `pytest tests/` -> `17 passed`
 
-**Nota de diseÃ±o:**
+**Nota de diseno:**
 - se probo activar el recentrado automatico horizontal en `scanner_2`, pero una
   primera validacion bajo el raw de `71/71` a `69/71`;
 - por eso la correccion automatica quedo implementada pero desactivada por defecto,

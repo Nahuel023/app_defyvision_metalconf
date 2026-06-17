@@ -51,11 +51,7 @@ class PLCClient:
 
     def disconnect(self) -> None:
         with self._lock:
-            if self._client:
-                try:
-                    self._client.close()
-                except Exception:
-                    pass
+            self._close_client_locked()
             self._connected = False
             logger.info("PLC disconnected")
 
@@ -195,6 +191,7 @@ class PLCClient:
         """Conecta al PLC. Debe llamarse con self._lock adquirido."""
         self._last_reconnect_attempt = time.monotonic()
         try:
+            self._close_client_locked()
             self._client = ModbusTcpClient(
                 self._ip, port=self._port, timeout=self._timeout
             )
@@ -206,10 +203,21 @@ class PLCClient:
                 logger.warning(f"PLC connection failed: {self._ip}:{self._port}")
             return ok
         except Exception as exc:
+            self._close_client_locked()
             self._connected = False
             logger.error(f"PLC connect error: {exc}")
             return False
 
     def _on_error(self, msg: str) -> None:
         logger.error(f"PLC: {msg}")
+        self._close_client_locked()
         self._connected = False
+
+    def _close_client_locked(self) -> None:
+        client = self._client
+        self._client = None
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass

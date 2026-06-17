@@ -9,6 +9,7 @@ Uso:
 """
 
 import base64
+import http.client
 import logging
 import threading
 import time
@@ -60,35 +61,53 @@ class Camera:
         self._mjpeg_buffer = b""
         self._frame: Optional[np.ndarray] = None
         self._lock = threading.Lock()
+        self._lifecycle_lock = threading.Lock()
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._frame_times: deque = deque(maxlen=60)
         self._frame_validator = None
         self._snapshot_ok: bool = False
+        self._snapshot_conn: http.client.HTTPConnection | None = None
 
     # ------------------------------------------------------------------
     # Ciclo de vida
     # ------------------------------------------------------------------
 
     def start(self) -> bool:
-        if self._running:
-            return True
-        self._running = True
-        self._thread = threading.Thread(
-            target=self._capture_loop,
-            daemon=True,
-            name=f"camera-{self._source_label()}",
-        )
-        self._thread.start()
+        with self._lifecycle_lock:
+            if self._thread is not None and self._thread.is_alive():
+                self._running = True
+                return True
+            self._running = True
+            self._thread = threading.Thread(
+                target=self._capture_loop,
+                daemon=True,
+                name=f"camera-{self._source_label()}",
+            )
+            self._thread.start()
         logger.info("Camera %s: iniciando en background...", self._source_label())
         return True
 
     def stop(self) -> None:
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
-            self._thread = None
+        with self._lifecycle_lock:
+            self._running = False
+            thread = self._thread
+        self._close_snapshot_connection()
         self._release_capture()
+        if thread:
+            thread.join(timeout=5.0)
+            if thread.is_alive():
+                logger.error(
+                    "Camera %s: el hilo no termino tras stop(); se bloquea un restart duplicado",
+                    self._source_label(),
+                )
+            else:
+                with self._lifecycle_lock:
+                    if self._thread is thread:
+                        self._thread = None
+        else:
+            with self._lifecycle_lock:
+                self._thread = None
         with self._lock:
             self._frame = None
         logger.info("Camera %s: detenida", self._source_label())
@@ -375,6 +394,16 @@ class Camera:
             self._mjpeg_response = None
         self._mjpeg_buffer = b""
         self._snapshot_ok = False
+        self._close_snapshot_connection()
+
+    def _close_snapshot_connection(self) -> None:
+        conn = self._snapshot_conn
+        self._snapshot_conn = None
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _is_snapshot_source(self) -> bool:
         if not isinstance(self._index, str):
@@ -401,7 +430,6 @@ class Camera:
         return headers
 
     def _snapshot_loop(self) -> None:
-        import http.client
         import queue
         from urllib.parse import urlparse
 
@@ -471,6 +499,7 @@ class Camera:
                 try:
                     if conn is None:
                         conn = http.client.HTTPConnection(host, timeout=timeout)
+                        self._snapshot_conn = conn
 
                     conn.request("GET", req_path, headers=auth_headers)
                     resp = conn.getresponse()
@@ -483,6 +512,7 @@ class Camera:
                         resp.read()
                         conn.close()
                         conn = None
+                        self._snapshot_conn = None
                         self._sleep_interruptible(5.0)
                         continue
 
@@ -516,6 +546,7 @@ class Camera:
                         except Exception:
                             pass
                         conn = None
+                        self._snapshot_conn = None
 
                     now   = time.monotonic()
                     stale = now - last_ok_t > stale_timeout
@@ -539,6 +570,12 @@ class Camera:
                 if sleep_for > 0.002:
                     self._sleep_interruptible(sleep_for)
         finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            self._snapshot_conn = None
             _raw_q.put(None)
             dec_thread.join(timeout=1.0)
 

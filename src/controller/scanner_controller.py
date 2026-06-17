@@ -25,6 +25,7 @@ Threads:
 """
 
 import logging
+import queue
 import threading
 import time
 from datetime import datetime
@@ -118,6 +119,18 @@ class ScannerController:
         self._tl_dir      = app_root() / "data/output/timeline" / scanner_id
         self._tl_write: int = 0   # posición de escritura circular
 
+        self._disk_queue: "queue.Queue[tuple[str, Callable[[], None]] | None]" = queue.Queue(
+            maxsize=max(32, int(tols.get("disk_writer_queue_max", 256)))
+        )
+        self._disk_stop_event = threading.Event()
+        self._disk_thread = threading.Thread(
+            target=self._disk_worker_loop,
+            daemon=True,
+            name=f"{self._id}-disk-writer",
+        )
+        self._disk_thread.start()
+        self._disk_drop_counts: dict[str, int] = {}
+
         self._lock          = threading.Lock()
         self._force_inspect = threading.Event()
         self._stop_event    = threading.Event()
@@ -162,6 +175,7 @@ class ScannerController:
         MANUAL: activa solo la electroválvula. Sin backlight ni inspección.
         AUTO:   activa electroválvula + backlight + hilo de inspección continua.
         """
+        self._update_mode_from_plc()
         with self._lock:
             if self._state != ScannerState.IDLE:
                 logger.warning(f"[{self._id}] start() ignorado, estado={self._state.value}")
@@ -241,6 +255,10 @@ class ScannerController:
         self._stop_event.set()
         self._join_threads()
         logger.info(f"[{self._id}] detenido → {new_state.value}")
+
+    def shutdown(self) -> None:
+        self.stop()
+        self._stop_disk_worker()
 
     def reset(self) -> bool:
         """STOPPED → IDLE + azul. Requiere INICIAR para reanudar."""
@@ -469,14 +487,6 @@ class ScannerController:
             return self._last_result
 
     def get_status(self) -> dict:
-        # Lee el switch directamente del PLC para reflejar cambios en cualquier estado
-        # (ignorar si force_auto_mode está activo)
-        if not self._force_auto:
-            mode_raw = self._io.read(f"{self._id}.mode_switch")
-            if mode_raw is not None:
-                with self._lock:
-                    self._mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
-
         with self._lock:
             avg_missing = (
                 self._total_missing / self._nok_with_missing
@@ -534,13 +544,7 @@ class ScannerController:
         _tick = 0
         _prev_blink: Optional[bool] = None
         while not self._stop_event.is_set():
-            # Leer switch de modo (ignorar si force_auto_mode está activo)
-            if not self._force_auto:
-                mode_raw = self._io.read(f"{self._id}.mode_switch")
-                if mode_raw is not None:
-                    new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
-                    with self._lock:
-                        self._mode = new_mode
+            self._update_mode_from_plc()
 
             with self._lock:
                 state  = self._state
@@ -849,14 +853,12 @@ class ScannerController:
         """Actualiza la FSM y dispara callbacks tras un resultado de inspección."""
         if (result.status == "NOK" and self._save_nok) or \
            (result.status == "OK"  and self._save_ok):
-            _sid = self._id
-            def _save(r=result) -> None:
+            def _save_result(r=result) -> None:
                 try:
                     save_result_images(r)
                 except Exception as exc:
-                    logger.error(f"[{_sid}] error guardando imagen: {exc}")
-            threading.Thread(target=_save, daemon=True,
-                             name=f"{self._id}-save").start()
+                    logger.error(f"[{self._id}] error guardando imagen: {exc}")
+            self._enqueue_disk_task("save_result", _save_result, allow_drop=False)
 
         # Si el recorder está grabando el post-evento, guardar overlay del frame analizado
         if self._recorder is not None and result.overlay is not None:
@@ -878,8 +880,7 @@ class ScannerController:
                                              [_cv2.IMWRITE_JPEG_QUALITY, 85])
                     except Exception as exc:
                         logger.debug(f"[{_sid}] overlay post-evento: {exc}")
-                threading.Thread(target=_save_ev_overlay, daemon=True,
-                                 name=f"{self._id}-ev-ov").start()
+                self._enqueue_disk_task("event_overlay", _save_ev_overlay, allow_drop=True)
 
         consecutive_nok = self._consecutive_nok
         warn_at = max(1, consecutive_nok // 3)
@@ -1017,8 +1018,7 @@ class ScannerController:
                     except Exception:
                         pass  # buffer circular, pérdida de un frame es aceptable
 
-                threading.Thread(target=_write, daemon=True,
-                                 name=f"{self._id}-ok-buf").start()
+                self._enqueue_disk_task("ok_buffer", _write, allow_drop=True)
 
         # Buffer cronológico — guarda todos los frames inspeccionados en orden
         if self._tl_enabled and result.overlay is not None:
@@ -1052,8 +1052,7 @@ class ScannerController:
                 except Exception:
                     pass
 
-            threading.Thread(target=_write_tl, daemon=True,
-                             name=f"{self._id}-tl-buf").start()
+            self._enqueue_disk_task("timeline", _write_tl, allow_drop=True)
 
     # ------------------------------------------------------------------
     # Internos
@@ -1087,6 +1086,75 @@ class ScannerController:
         if self._inspector_thread:
             self._inspector_thread.join(timeout=5.0)
             self._inspector_thread = None
+
+    def _update_mode_from_plc(self) -> None:
+        if self._force_auto:
+            return
+        mode_raw = self._io.read(f"{self._id}.mode_switch")
+        if mode_raw is not None:
+            new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
+            with self._lock:
+                self._mode = new_mode
+
+    def _enqueue_disk_task(
+        self,
+        task_type: str,
+        func: Callable[[], None],
+        *,
+        allow_drop: bool,
+    ) -> None:
+        item = (task_type, func)
+        try:
+            if allow_drop:
+                self._disk_queue.put_nowait(item)
+            else:
+                self._disk_queue.put(item, timeout=0.1)
+            return
+        except queue.Full:
+            count = self._disk_drop_counts.get(task_type, 0) + 1
+            self._disk_drop_counts[task_type] = count
+            if count in (1, 10, 100) or count % 1000 == 0:
+                logger.warning(
+                    "[%s] disk-writer saturado: descartando tarea %s (total=%d)",
+                    self._id, task_type, count,
+                )
+
+    def _disk_worker_loop(self) -> None:
+        while True:
+            try:
+                item = self._disk_queue.get(timeout=0.2)
+            except queue.Empty:
+                if self._disk_stop_event.is_set():
+                    break
+                continue
+
+            if item is None:
+                self._disk_queue.task_done()
+                break
+
+            task_type, func = item
+            try:
+                func()
+            except Exception as exc:
+                logger.error("[%s] disk task %s error: %s", self._id, task_type, exc)
+            finally:
+                self._disk_queue.task_done()
+
+    def _stop_disk_worker(self) -> None:
+        if self._disk_thread is None:
+            return
+        self._disk_stop_event.set()
+        deadline = time.monotonic() + 5.0
+        while not self._disk_queue.empty() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        try:
+            self._disk_queue.put_nowait(None)
+        except queue.Full:
+            pass
+        self._disk_thread.join(timeout=5.0)
+        if self._disk_thread.is_alive():
+            logger.error("[%s] disk writer no termino limpiamente", self._id)
+        self._disk_thread = None
 
     @staticmethod
     def _derive_stop_reason(result: InspectionResult) -> str:

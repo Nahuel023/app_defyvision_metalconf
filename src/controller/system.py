@@ -81,7 +81,7 @@ class InspectionSystem:
         """Detiene todos los scanners, cámaras, recorder y cierra el PLC."""
         self._recorder.stop()
         for scanner in self._scanners.values():
-            scanner.stop()
+            scanner.shutdown()
         # Apagar todas las salidas PLC incondicionalmente (por si el scanner
         # quedó en IDLE/MANUAL y no apagó las luces en stop())
         for sid in self._scanners:

@@ -64,12 +64,22 @@ class MetricsRecorder:
         self,
         db_path: str = "data/metrics/metrics.db",
         interval_s: float = 60.0,
+        retention_days: float = 30.0,
+        max_rows: int = 100_000,
+        maintenance_interval_s: float = 3600.0,
+        vacuum_interval_s: float = 43_200.0,
     ) -> None:
         self._db_path  = Path(db_path)
         self._interval = interval_s
         self._system   = None
         self._stop     = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._retention_days = max(1.0, float(retention_days))
+        self._max_rows = max(1, int(max_rows))
+        self._maintenance_interval_s = max(60.0, float(maintenance_interval_s))
+        self._vacuum_interval_s = max(self._maintenance_interval_s, float(vacuum_interval_s))
+        self._last_maintenance = 0.0
+        self._last_vacuum = 0.0
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
@@ -164,6 +174,8 @@ class MetricsRecorder:
     def _init_db(self) -> None:
         try:
             con = sqlite3.connect(self._db_path)
+            con.execute("PRAGMA journal_mode=WAL")
+            con.execute("PRAGMA synchronous=NORMAL")
             con.executescript(_SCHEMA)
             # Migración: agregar columnas nuevas si la tabla ya existía sin ellas
             existing = {row[1] for row in con.execute("PRAGMA table_info(metrics)")}
@@ -193,6 +205,7 @@ class MetricsRecorder:
                 break
             try:
                 self._snapshot()
+                self._maybe_maintain()
             except Exception as exc:
                 logger.error(f"MetricsRecorder snapshot error: {exc}")
 
@@ -246,8 +259,75 @@ class MetricsRecorder:
             return
         try:
             con = sqlite3.connect(self._db_path)
+            con.execute("PRAGMA busy_timeout=5000")
             con.executemany(_INSERT, rows)
             con.commit()
             con.close()
         except Exception as exc:
             logger.error(f"MetricsRecorder write error: {exc}")
+
+    def _maybe_maintain(self) -> None:
+        now = time.time()
+        if (now - self._last_maintenance) < self._maintenance_interval_s:
+            return
+        try:
+            deleted = self._prune_old_rows()
+            self._last_maintenance = now
+            if deleted and (now - self._last_vacuum) >= self._vacuum_interval_s:
+                self._vacuum()
+                self._last_vacuum = now
+        except Exception as exc:
+            logger.error(f"MetricsRecorder maintenance error: {exc}")
+
+    def _prune_old_rows(self) -> int:
+        cutoff = time.time() - (self._retention_days * 86400.0)
+        con = sqlite3.connect(self._db_path)
+        try:
+            con.execute("PRAGMA busy_timeout=5000")
+            rows_before = con.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]
+            con.execute("DELETE FROM metrics WHERE ts < ?", (cutoff,))
+
+            scanners = [row[0] for row in con.execute(
+                "SELECT DISTINCT scanner_id FROM metrics"
+            ).fetchall()]
+            for scanner_id in scanners:
+                overflow = con.execute(
+                    "SELECT COUNT(*) - ? FROM metrics WHERE scanner_id=?",
+                    (self._max_rows, scanner_id),
+                ).fetchone()[0]
+                if overflow and overflow > 0:
+                    ids = [
+                        row[0]
+                        for row in con.execute(
+                            """
+                            SELECT id FROM metrics
+                            WHERE scanner_id=?
+                            ORDER BY ts ASC
+                            LIMIT ?
+                            """,
+                            (scanner_id, int(overflow)),
+                        ).fetchall()
+                    ]
+                    if ids:
+                        placeholders = ",".join("?" for _ in ids)
+                        con.execute(
+                            f"DELETE FROM metrics WHERE id IN ({placeholders})",
+                            ids,
+                        )
+
+            con.commit()
+            rows_after = con.execute("SELECT COUNT(*) FROM metrics").fetchone()[0]
+        finally:
+            con.close()
+
+        deleted = max(0, int(rows_before) - int(rows_after))
+        if deleted:
+            logger.info("MetricsRecorder: poda aplicada (%d filas)", deleted)
+        return deleted
+
+    def _vacuum(self) -> None:
+        con = sqlite3.connect(self._db_path)
+        try:
+            con.execute("VACUUM")
+        finally:
+            con.close()
