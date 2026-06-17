@@ -978,6 +978,17 @@ class OperatorWindow(QMainWindow):
         self._status_timer.timeout.connect(self._refresh_status)
         self._status_timer.start(_STATUS_REFRESH_MS)
 
+        # ── DEMO TEST: bloqueo a las 9:18 ────────────────────────────
+        _now    = datetime.now()
+        _target = _now.replace(hour=9, minute=18, second=0, microsecond=0)
+        _ms     = int((_target - _now).total_seconds() * 1000)
+        if 0 < _ms < 3_600_000:
+            self._demo_timer = QTimer(self)
+            self._demo_timer.setSingleShot(True)
+            self._demo_timer.timeout.connect(self._demo_expire)
+            self._demo_timer.start(_ms)
+        # ─────────────────────────────────────────────────────────────
+
         # Verificación periódica de licencia cada 30 min
         self._license_timer = QTimer(self)
         self._license_timer.timeout.connect(self._check_license)
@@ -1163,6 +1174,10 @@ class OperatorWindow(QMainWindow):
             self._plc_badge.show()
         for panel in self._panels.values():
             panel.refresh_status()
+
+    def _demo_expire(self) -> None:
+        save_license_file("MFC-202501-00000000")
+        self._check_license()
 
     def _check_license(self) -> None:
         if is_licensed():
