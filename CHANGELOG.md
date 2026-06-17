@@ -48,6 +48,48 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-17 - Tadeo + Codex
 
+#### Cambio 202 - Robustez licencia: bloqueo antes de hardware y corte en runtime
+
+**Pedido:** revisar el bloqueo nuevo por licencia y seguir buscando bugs de
+robustez general.
+
+**Hallazgos de Codex:**
+- `src/ui/operator.py` mantenia un `DEMO TEST` con expiracion artificial por
+  hora fija en produccion. Eso podia bloquear una instalacion sana sin motivo.
+- `cmd_run()` levantaba PLC/camaras antes de pedir la clave en la UI. Si el
+  operador dejaba el dialogo abierto mucho tiempo, el hardware quedaba corriendo
+  inutilmente en background.
+- El control de licencia dentro de `ScannerController` corria cada 500 frames
+  en el loop de inspeccion, y el modo MANUAL dependia casi por completo del
+  timer de la UI. Era mejor validarlo al iniciar y tambien en runtime desde el
+  poller comun.
+- Si el bloqueo venia por rollback de reloj, el dialogo podia aceptar una clave
+  valida pero seguir dejando `is_licensed()` en falso hasta el proximo heartbeat.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/main.py`
+  - validacion de licencia antes de crear `InspectionSystem` y antes de abrir
+    PLC/camaras
+- `src/ui/operator.py`
+  - helper `ensure_license_or_prompt()`
+  - al activar una clave valida tambien se actualiza el heartbeat
+  - el re-bloqueo periodico reutiliza el helper
+  - se desactivo la logica demo de expiracion artificial
+- `src/controller/scanner_controller.py`
+  - `start()` y `start_simulate()` bloquean arranque sin licencia
+  - el poller verifica licencia cada 10 s mientras el scanner esta RUNNING
+  - nuevo camino comun `_handle_license_failure()` para detener limpio
+- tests nuevos:
+  - `tests/test_scanner_controller.py`
+
+**Validacion:**
+- `pytest tests/` -> `26 passed`
+
+**Riesgos / oportunidades:**
+- Sigue existiendo informacion sensible en texto plano dentro de configs
+  locales (`camera.yaml`, `app.yaml` y archivos sueltos de datos). No rompe la
+  robustez de runtime, pero si es un riesgo operativo/seguridad a revisar.
+
 #### Cambio 201 - Segunda pasada 24/7: EventRecorder serial y cache de tolerancias
 
 **Pedido:** seguir auditando robustez de larga duracion para acercar el sistema

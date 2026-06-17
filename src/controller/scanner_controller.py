@@ -175,6 +175,9 @@ class ScannerController:
         MANUAL: activa solo la electroválvula. Sin backlight ni inspección.
         AUTO:   activa electroválvula + backlight + hilo de inspección continua.
         """
+        if not self._license_allows_operation():
+            logger.error(f"[{self._id}] inicio bloqueado por licencia invalida")
+            return False
         self._update_mode_from_plc()
         with self._lock:
             if self._state != ScannerState.IDLE:
@@ -290,6 +293,9 @@ class ScannerController:
 
     def start_simulate(self) -> bool:
         """IDLE → RUNNING en modo AUTO sin requerir cámara. Solo para pruebas en servicio."""
+        if not self._license_allows_operation():
+            logger.error(f"[{self._id}] simulacion bloqueada por licencia invalida")
+            return False
         with self._lock:
             if self._state != ScannerState.IDLE:
                 return False
@@ -548,12 +554,21 @@ class ScannerController:
     def _poll_loop(self) -> None:
         _tick = 0
         _prev_blink: Optional[bool] = None
+        _last_license_check = 0.0
         while not self._stop_event.is_set():
             self._update_mode_from_plc()
 
             with self._lock:
                 state  = self._state
                 streak = self._nok_streak
+
+            if state == ScannerState.RUNNING:
+                now_m = time.monotonic()
+                if now_m - _last_license_check >= 10.0:
+                    _last_license_check = now_m
+                    if not self._license_allows_operation():
+                        self._handle_license_failure()
+                        return
 
             _tick += 1
             if state == ScannerState.FAULT:
@@ -841,7 +856,7 @@ class ScannerController:
                 self._force_inspect.clear()
 
             frame_counter += 1
-            if frame_counter % 500 == 0:
+            if False and frame_counter % 500 == 0:
                 from src.utils.license import is_licensed
                 if not is_licensed():
                     import logging as _lg
@@ -1176,6 +1191,22 @@ class ScannerController:
         if self._disk_thread.is_alive():
             logger.error("[%s] disk writer no termino limpiamente", self._id)
         self._disk_thread = None
+
+    @staticmethod
+    def _license_allows_operation() -> bool:
+        from src.utils.license import is_licensed
+
+        return is_licensed()
+
+    def _handle_license_failure(self) -> None:
+        logger.critical("[%s] licencia invalida o vencida - deteniendo scanner", self._id)
+        self._io.write(f"{self._id}.solenoid", False)
+        self._set_lights()
+        with self._lock:
+            if self._state == ScannerState.RUNNING:
+                self._state = ScannerState.STOPPED
+        self._stop_event.set()
+        self._fire_state_changed()
 
     @staticmethod
     def _derive_stop_reason(result: InspectionResult) -> str:

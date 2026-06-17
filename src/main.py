@@ -709,11 +709,18 @@ def cmd_roi_check(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
+    import sys
+
+    from PyQt6.QtWidgets import QApplication
+
     from src.utils.logger import setup_logging
     from src.controller.system import InspectionSystem
-    from src.ui.operator import launch_operator_ui as launch_production_ui
+    from src.ui.operator import ensure_license_or_prompt, launch_operator_ui as launch_production_ui
 
     setup_logging()
+    app = QApplication.instance() or QApplication(sys.argv)
+    if not ensure_license_or_prompt(None):
+        return 0
 
     disable_outputs = getattr(args, "no_plc_outputs", False)
     system = InspectionSystem(disable_plc_outputs=disable_outputs)

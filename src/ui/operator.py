@@ -228,6 +228,7 @@ class LicenseBlockDialog(QDialog):
         key = self._input.text().strip()
         if validate_key(key):
             save_license_file(key)
+            update_heartbeat()
             self.accept()
         else:
             self._error_lbl.setText("Código incorrecto. Contacte a soporte técnico.")
@@ -241,6 +242,13 @@ class LicenseBlockDialog(QDialog):
         if event.key() == Qt.Key.Key_Escape:
             return
         super().keyPressEvent(event)
+
+
+def ensure_license_or_prompt(parent=None) -> bool:
+    if is_licensed():
+        return True
+    dlg = LicenseBlockDialog(parent)
+    return dlg.exec() == QDialog.DialogCode.Accepted and is_licensed()
 
 
 # ------------------------------------------------------------------
@@ -978,6 +986,7 @@ class OperatorWindow(QMainWindow):
         self._status_timer.timeout.connect(self._refresh_status)
         self._status_timer.start(_STATUS_REFRESH_MS)
 
+        # Produccion: no debe existir expiracion artificial por hora fija.
         # Verificación periódica de licencia cada 30 min
         self._license_timer = QTimer(self)
         self._license_timer.timeout.connect(self._check_license)
@@ -1165,6 +1174,8 @@ class OperatorWindow(QMainWindow):
             panel.refresh_status()
 
     def _check_license(self) -> None:
+        if self.isHidden():
+            return
         if is_licensed():
             return
         # Detener todos los scanners antes de bloquear
@@ -1173,8 +1184,7 @@ class OperatorWindow(QMainWindow):
                 self._system.scanner(sid).stop()
             except Exception:
                 pass
-        dlg = LicenseBlockDialog(self)
-        dlg.exec()
+        ensure_license_or_prompt(self)
 
     def _open_errors(self) -> None:
         """Abre el visor de frames para el operario (paradas + OK recientes)."""
@@ -1319,11 +1329,8 @@ def launch_operator_ui(system: InspectionSystem) -> None:
     if not icon_pix.isNull():
         app.setWindowIcon(QIcon(icon_pix))
 
-    # Verificación de licencia al arrancar — bloquea hasta ingresar clave válida
-    if not is_licensed():
-        dlg = LicenseBlockDialog(None)
-        if dlg.exec() != QDialog.DialogCode.Accepted:
-            return   # no debería ocurrir (closeEvent ignorado), pero por si acaso
+    if not ensure_license_or_prompt(None):
+        return
 
     win = OperatorWindow(system)
     win.showMaximized()
