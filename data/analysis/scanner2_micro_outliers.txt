@@ -1,0 +1,140 @@
+TOP offset_px
+frame_0239.png offset_px=12.806 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0274.png offset_px=12.648 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0275.png offset_px=12.648 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0194.png offset_px=12.636 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0030.png offset_px=12.602 quality=GOOD status=OK missing=0 warn=False
+frame_0124.png offset_px=12.576 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0012.png offset_px=12.507 quality=GOOD status=OK missing=0 warn=False
+frame_0277.png offset_px=12.417 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0246.png offset_px=12.368 quality=GOOD status=OK missing=0 warn=False
+frame_0247.png offset_px=12.368 quality=GOOD status=OK missing=0 warn=False
+frame_0193.png offset_px=12.359 quality=GOOD status=OK missing=0 warn=False
+frame_0009.png offset_px=12.281 quality=GOOD status=OK missing=0 warn=False
+frame_0010.png offset_px=12.281 quality=GOOD status=OK missing=0 warn=False
+frame_0233.png offset_px=12.269 quality=GOOD status=OK missing=0 warn=False
+frame_0234.png offset_px=12.269 quality=GOOD status=OK missing=0 warn=False
+
+TOP left_margin_std
+frame_0124.png left_margin_std=2.037 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0274.png left_margin_std=1.971 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0275.png left_margin_std=1.971 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0159.png left_margin_std=1.893 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0047.png left_margin_std=1.793 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0254.png left_margin_std=1.743 quality=GOOD status=OK missing=0 warn=False
+frame_0059.png left_margin_std=1.733 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0060.png left_margin_std=1.733 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0277.png left_margin_std=1.727 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0194.png left_margin_std=1.716 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0189.png left_margin_std=1.708 quality=GOOD status=OK missing=0 warn=False
+frame_0260.png left_margin_std=1.701 quality=GOOD status=OK missing=0 warn=False
+frame_0261.png left_margin_std=1.701 quality=GOOD status=OK missing=0 warn=False
+frame_0154.png left_margin_std=1.698 quality=GOOD status=OK missing=0 warn=False
+frame_0222.png left_margin_std=1.697 quality=GOOD status=OK missing=0 warn=False
+
+TOP right_margin_std
+frame_0271.png right_margin_std=8.440 quality=GOOD status=OK missing=0 warn=False
+frame_0090.png right_margin_std=8.413 quality=GOOD status=OK missing=0 warn=False
+frame_0091.png right_margin_std=8.413 quality=GOOD status=OK missing=0 warn=False
+frame_0125.png right_margin_std=8.229 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0123.png right_margin_std=8.173 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0045.png right_margin_std=8.144 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0046.png right_margin_std=8.144 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0020.png right_margin_std=8.074 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0195.png right_margin_std=8.034 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0236.png right_margin_std=7.983 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0066.png right_margin_std=7.956 quality=GOOD status=OK missing=0 warn=False
+frame_0040.png right_margin_std=7.881 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0092.png right_margin_std=7.841 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0200.png right_margin_std=7.840 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0235.png right_margin_std=7.799 quality=LOW_QUALITY status=OK missing=0 warn=False
+
+TOP shift_x
+frame_0037.png shift_x=-18.500 quality=GOOD status=OK missing=0 warn=False
+frame_0038.png shift_x=-18.500 quality=GOOD status=OK missing=0 warn=False
+frame_0058.png shift_x=-18.500 quality=GOOD status=OK missing=0 warn=False
+frame_0012.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+frame_0018.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0019.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0030.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+frame_0047.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0056.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+frame_0061.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+frame_0062.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+frame_0063.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0064.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0084.png shift_x=-18.000 quality=LOW_QUALITY status=OK missing=0 warn=False
+frame_0212.png shift_x=-18.000 quality=GOOD status=OK missing=0 warn=False
+
+LOW_QUALITY frames
+frame_0018.png shift_x=-18.000 off=10.903 Lstd=1.511 Rstd=1.029
+frame_0019.png shift_x=-18.000 off=10.903 Lstd=1.511 Rstd=1.029
+frame_0020.png shift_x=-17.500 off=11.703 Lstd=1.559 Rstd=8.074
+frame_0028.png shift_x=-17.500 off=11.082 Lstd=1.409 Rstd=1.148
+frame_0029.png shift_x=-17.500 off=11.082 Lstd=1.409 Rstd=1.148
+frame_0039.png shift_x=-17.500 off=10.680 Lstd=1.013 Rstd=7.461
+frame_0040.png shift_x=-17.500 off=11.395 Lstd=1.375 Rstd=7.881
+frame_0045.png shift_x=-17.500 off=11.889 Lstd=1.311 Rstd=8.144
+frame_0046.png shift_x=-17.500 off=11.889 Lstd=1.311 Rstd=8.144
+frame_0047.png shift_x=-18.000 off=11.767 Lstd=1.793 Rstd=1.315
+frame_0059.png shift_x=-17.500 off=11.511 Lstd=1.733 Rstd=1.069
+frame_0060.png shift_x=-17.500 off=11.511 Lstd=1.733 Rstd=1.069
+frame_0063.png shift_x=-18.000 off=11.648 Lstd=1.273 Rstd=7.431
+frame_0064.png shift_x=-18.000 off=11.648 Lstd=1.273 Rstd=7.431
+frame_0065.png shift_x=-17.000 off=12.140 Lstd=1.122 Rstd=1.099
+frame_0083.png shift_x=-17.500 off=12.254 Lstd=1.463 Rstd=1.406
+frame_0084.png shift_x=-18.000 off=11.946 Lstd=1.276 Rstd=1.192
+frame_0085.png shift_x=-17.000 off=11.876 Lstd=1.623 Rstd=1.658
+frame_0086.png shift_x=-17.000 off=11.876 Lstd=1.623 Rstd=1.658
+frame_0087.png shift_x=-17.000 off=10.773 Lstd=0.912 Rstd=0.744
+frame_0088.png shift_x=-16.500 off=11.120 Lstd=1.379 Rstd=1.300
+frame_0089.png shift_x=-15.500 off=11.949 Lstd=1.393 Rstd=1.465
+frame_0092.png shift_x=-15.500 off=11.165 Lstd=1.485 Rstd=7.841
+frame_0093.png shift_x=-16.500 off=11.071 Lstd=1.634 Rstd=1.315
+frame_0120.png shift_x=-14.000 off=10.479 Lstd=0.959 Rstd=1.052
+frame_0121.png shift_x=-15.500 off=11.268 Lstd=1.273 Rstd=0.824
+frame_0122.png shift_x=-15.500 off=11.268 Lstd=1.273 Rstd=0.824
+frame_0123.png shift_x=-15.000 off=11.524 Lstd=1.084 Rstd=8.173
+frame_0124.png shift_x=-16.500 off=12.576 Lstd=2.037 Rstd=1.418
+frame_0125.png shift_x=-15.500 off=11.742 Lstd=1.667 Rstd=8.229
+frame_0126.png shift_x=-15.500 off=11.374 Lstd=1.139 Rstd=1.329
+frame_0127.png shift_x=-15.500 off=11.374 Lstd=1.139 Rstd=1.329
+frame_0128.png shift_x=-17.000 off=11.294 Lstd=1.109 Rstd=0.745
+frame_0129.png shift_x=-16.500 off=11.585 Lstd=1.643 Rstd=1.301
+frame_0130.png shift_x=-16.500 off=11.585 Lstd=1.643 Rstd=1.301
+frame_0155.png shift_x=-15.500 off=10.900 Lstd=1.198 Rstd=1.022
+frame_0156.png shift_x=-17.500 off=11.705 Lstd=1.393 Rstd=1.259
+frame_0157.png shift_x=-17.500 off=11.705 Lstd=1.393 Rstd=1.259
+frame_0158.png shift_x=-16.500 off=11.737 Lstd=1.689 Rstd=1.368
+frame_0159.png shift_x=-15.500 off=11.582 Lstd=1.893 Rstd=1.876
+frame_0160.png shift_x=-16.000 off=11.987 Lstd=1.257 Rstd=7.481
+frame_0161.png shift_x=-14.500 off=11.263 Lstd=0.943 Rstd=0.828
+frame_0162.png shift_x=-14.500 off=11.263 Lstd=0.943 Rstd=0.828
+frame_0163.png shift_x=-15.000 off=10.864 Lstd=1.175 Rstd=0.687
+frame_0164.png shift_x=-16.000 off=12.074 Lstd=1.364 Rstd=7.713
+frame_0165.png shift_x=-15.000 off=11.071 Lstd=1.678 Rstd=1.413
+frame_0166.png shift_x=-15.000 off=11.071 Lstd=1.678 Rstd=1.413
+frame_0194.png shift_x=-16.500 off=12.636 Lstd=1.716 Rstd=1.153
+frame_0195.png shift_x=-15.500 off=11.321 Lstd=0.941 Rstd=8.034
+frame_0196.png shift_x=-16.000 off=11.517 Lstd=1.110 Rstd=6.284
+frame_0197.png shift_x=-16.000 off=11.517 Lstd=1.110 Rstd=6.284
+frame_0198.png shift_x=-16.000 off=11.968 Lstd=0.894 Rstd=0.858
+frame_0199.png shift_x=-17.000 off=11.308 Lstd=1.070 Rstd=1.013
+frame_0200.png shift_x=-16.500 off=12.029 Lstd=1.513 Rstd=7.840
+frame_0235.png shift_x=-16.500 off=11.938 Lstd=1.258 Rstd=7.799
+frame_0236.png shift_x=-16.500 off=11.455 Lstd=1.117 Rstd=7.983
+frame_0237.png shift_x=-16.000 off=12.153 Lstd=1.143 Rstd=7.714
+frame_0238.png shift_x=-16.000 off=12.153 Lstd=1.143 Rstd=7.714
+frame_0239.png shift_x=-17.000 off=12.806 Lstd=1.467 Rstd=1.316
+frame_0240.png shift_x=-17.000 off=11.354 Lstd=0.954 Rstd=0.898
+frame_0241.png shift_x=-16.000 off=12.054 Lstd=1.143 Rstd=1.474
+frame_0242.png shift_x=-17.000 off=11.517 Lstd=1.533 Rstd=1.379
+frame_0243.png shift_x=-17.000 off=11.517 Lstd=1.533 Rstd=1.379
+frame_0244.png shift_x=-17.000 off=11.444 Lstd=1.559 Rstd=1.303
+frame_0245.png shift_x=-15.500 off=11.179 Lstd=1.667 Rstd=1.096
+frame_0274.png shift_x=-16.000 off=12.648 Lstd=1.971 Rstd=1.672
+frame_0275.png shift_x=-16.000 off=12.648 Lstd=1.971 Rstd=1.672
+frame_0276.png shift_x=-16.000 off=11.803 Lstd=1.014 Rstd=1.226
+frame_0277.png shift_x=-16.500 off=12.417 Lstd=1.727 Rstd=1.404
+frame_0278.png shift_x=-17.000 off=11.809 Lstd=1.224 Rstd=0.865
+frame_0279.png shift_x=-16.500 off=11.295 Lstd=0.585 Rstd=0.473

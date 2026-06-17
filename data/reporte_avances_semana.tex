@@ -1,0 +1,203 @@
+\documentclass[11pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish]{babel}
+\usepackage[top=2.5cm, bottom=2.5cm, left=2.5cm, right=2.5cm]{geometry}
+
+% Fuente Palatino — más elegante y formal que Latin Modern
+\usepackage{mathpazo}
+\linespread{1.05}
+
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{microtype}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\usepackage{parskip}
+\usepackage{mdframed}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{colortbl}
+\usepackage{array}
+
+% ── Colores ──────────────────────────────────────────────────────────────────
+\definecolor{navy}{HTML}{0f172a}
+\definecolor{accent}{HTML}{1d4ed8}
+\definecolor{okgreen}{HTML}{15803d}
+\definecolor{lightrow}{HTML}{f8fafc}
+\definecolor{bordergray}{HTML}{cbd5e1}
+\definecolor{textsub}{HTML}{64748b}
+\definecolor{headerbg}{HTML}{0f172a}
+\definecolor{nextbg}{HTML}{eff6ff}
+\definecolor{nextborder}{HTML}{93c5fd}
+
+\hypersetup{colorlinks=true, urlcolor=accent, linkcolor=navy}
+
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\fancyhead[L]{\small\color{textsub} DefyVision Metalconf}
+\fancyhead[R]{\small\color{textsub} Reporte de avances — junio 2026}
+\fancyfoot[C]{\small\color{textsub}\thepage}
+
+\titleformat{\section}{\large\bfseries\color{navy}}{}{0em}{}[{\color{bordergray}\titlerule[0.6pt]}]
+\titlespacing{\section}{0pt}{20pt}{8pt}
+
+\setlist[itemize]{topsep=3pt, itemsep=4pt, leftmargin=1.6em}
+\setlist[enumerate]{topsep=3pt, itemsep=4pt, leftmargin=1.8em}
+
+\newmdenv[
+  backgroundcolor=white,
+  linecolor=bordergray,
+  linewidth=0.7pt,
+  roundcorner=4pt,
+  innertopmargin=10pt,
+  innerbottommargin=10pt,
+  innerleftmargin=14pt,
+  innerrightmargin=14pt,
+  skipabove=5pt,
+  skipbelow=5pt,
+]{abox}
+
+\newmdenv[
+  backgroundcolor=nextbg,
+  linecolor=nextborder,
+  linewidth=1pt,
+  roundcorner=4pt,
+  innertopmargin=10pt,
+  innerbottommargin=10pt,
+  innerleftmargin=14pt,
+  innerrightmargin=14pt,
+  skipabove=5pt,
+  skipbelow=5pt,
+]{nbox}
+
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\renewcommand{\arraystretch}{1.45}
+
+% ════════════════════════════════════════════════════════════════════════════
+\begin{document}
+\thispagestyle{fancy}
+
+\begin{center}
+  {\fontsize{20}{24}\selectfont\bfseries\color{navy} DefyVision Metalconf}\\[6pt]
+  {\large\color{textsub} Reporte de avances — semana del 9 al 12 de junio de 2026}\\[4pt]
+\end{center}
+
+{\color{navy}\rule{\textwidth}{1.5pt}}
+
+\vspace{4pt}
+
+% ── Estado ───────────────────────────────────────────────────────────────────
+\section{Estado del sistema}
+
+El sistema de inspección automática está funcionando correctamente con las
+\textbf{dos cámaras activas} en planta. Durante esta semana se realizaron pruebas
+exhaustivas y ajustes en ambas, logrando que el sistema reconozca correctamente
+las piezas buenas del patrón \textbf{Microperforado} sin generar falsas alarmas.
+
+\vspace{8pt}
+
+\begin{tabularx}{\textwidth}{>{\bfseries}p{3.5cm} X C{5cm}}
+  \arrayrulecolor{bordergray}
+  \rowcolor{headerbg}
+  \color{white}\bfseries Cámara &
+  \color{white}\bfseries Descripción &
+  \color{white}\bfseries Estado \\
+  \hline
+  \rowcolor{lightrow}
+  Cámara 1 & Microperforado — lado izquierdo & Correcto, a testear por operarios. \\
+  Cámara 2 & Microperforado — lado derecho   & Correcto, a testear por operarios. \\
+  \hline
+\end{tabularx}
+
+% ── Avances ──────────────────────────────────────────────────────────────────
+\section{Avances de esta semana}
+
+\begin{abox}
+\textbf{Calibración de cada cámara por separado}\\[4pt]
+Cada cámara fue calibrada de forma independiente con imágenes reales tomadas en
+planta. Así, los parámetros de una no interfieren con los de la otra, y cada una
+reconoce correctamente la chapa que le corresponde inspeccionar.
+\end{abox}
+
+\begin{abox}
+\textbf{Nuevo mapa de referencia de agujeros}\\[4pt]
+Se generó un nuevo mapa con la disposición exacta de los agujeros que debe tener
+una pieza correcta. Este mapa es la base con la que el sistema compara cada chapa
+que pasa por la cámara. Ahora incluye solo los agujeros de la zona más estable de
+la chapa, descartando los bordes donde la variación natural del material generaba
+confusión.
+\end{abox}
+
+\begin{abox}
+\textbf{Eliminación de falsas alarmas en Cámara 2}\\[4pt]
+La Cámara 2 estaba detectando agujeros que no existían, causados por reflejos de
+luz en el borde de la chapa. Se ajustó la forma en que el sistema interpreta la
+imagen en esa zona, y el problema quedó resuelto.
+\end{abox}
+
+\begin{abox}
+\textbf{Pantalla de alerta más clara para el operario}\\[4pt]
+Cuando el sistema detecta una pieza defectuosa y detiene la máquina, la pantalla
+ahora indica de forma grande y visible \textbf{en cuál de las dos cámaras se
+detectó el problema}, para que el operario sepa exactamente a dónde dirigirse sin
+necesidad de interpretación.
+\end{abox}
+
+\begin{abox}
+\textbf{Historial de funcionamiento}\\[4pt]
+Se incorporó una pantalla de historial donde se puede ver el desempeño del sistema
+a lo largo del tiempo en cada cámara, con gráficos simples. Antes esta pantalla
+aparecía vacía aunque hubiera datos guardados; eso quedó corregido.
+\end{abox}
+
+\begin{abox}
+\textbf{Corrección automática de posición}\\[4pt]
+Se desarrolló un mecanismo que detecta si la chapa se fue corriendo lentamente de
+posición a lo largo del turno y ajusta el área de inspección de forma gradual y
+silenciosa, sin interrumpir la producción. Este ajuste funciona de manera muy
+conservadora: solo actúa cuando el desplazamiento es claro y sostenido durante
+varios minutos.
+\end{abox}
+
+\begin{abox}
+\textbf{Indicador de estado del área de inspección}\\[4pt]
+En la pantalla de configuración ahora se muestra si el área que la cámara está
+inspeccionando coincide correctamente con la zona de la chapa, o si se detecta
+algún desplazamiento que requiera atención.
+\end{abox}
+
+\begin{abox}
+\textbf{Mejor organización de grabaciones}\\[4pt]
+Las carpetas donde se guardan las imágenes capturadas ahora incluyen en el nombre
+el número de cámara correspondiente, haciendo más fácil identificar de qué estación
+proviene cada lote.
+\end{abox}
+
+% ── Próximos pasos ────────────────────────────────────────────────────────────
+\section{Próximos pasos}
+
+\begin{nbox}
+\begin{enumerate}
+  \item Poner el sistema en marcha con ambas cámaras funcionando al mismo tiempo en
+        condiciones reales de producción.
+  \item Probar el sistema con piezas defectuosas reales para confirmar que la
+        detección funciona correctamente.
+  \item Seguir observando el comportamiento de la Cámara 2 con distintos lotes de
+        material para confirmar la estabilidad de la calibración.
+\end{enumerate}
+\end{nbox}
+
+% ── Pie ───────────────────────────────────────────────────────────────────────
+\vspace{16pt}
+{\color{bordergray}\rule{\textwidth}{0.6pt}}\\[4pt]
+{\small\color{textsub}
+  DefyVision\quad\textbullet\quad
+  \href{mailto:design@defymotion.com.ar}{design@defymotion.com.ar}\quad\textbullet\quad
+  Junio 2026
+}
+
+\end{document}

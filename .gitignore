@@ -8,6 +8,7 @@ __pycache__/
 # Editors / OS
 .vscode/
 .idea/
+.vs/
 Thumbs.db
 .DS_Store
 
@@ -39,3 +40,7 @@ setup_prov_pc/
 
 # Local service backups
 *.bak
+
+# Cython build artifacts
+*.c
+pyarmor.bug.log
