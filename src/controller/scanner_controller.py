@@ -456,6 +456,22 @@ class ScannerController:
         elif state in (ScannerState.FAULT, ScannerState.STOPPED, ScannerState.ERROR):
             self._set_lights(red=True)   # rojo = intervención requerida (estándar industrial)
 
+    def sync_solenoid(self, safe_mode_off: bool) -> None:
+        """Sincroniza el solenoide con el estado actual del scanner.
+
+        Llamar desde system.set_safe_mode() para evitar la race condition entre
+        la lectura de estado y la escritura al PLC.
+        safe_mode_off=True → activar solenoide solo si el scanner está en RUNNING.
+        safe_mode_off=False → cortar solenoide sin condición.
+        """
+        with self._lock:
+            is_running = self._state == ScannerState.RUNNING
+        # La escritura es fuera del lock para no bloquear el inspector thread
+        if safe_mode_off and is_running:
+            self._io.write(f"{self._id}.solenoid", True)
+        else:
+            self._io.write(f"{self._id}.solenoid", False)
+
     def reload_cache(self) -> None:
         """Invalida el cache del inspector (ROI, patrón, tolerancias) para el modelo activo."""
         model = self._io.scanner_config(self._id).get("model", "")
