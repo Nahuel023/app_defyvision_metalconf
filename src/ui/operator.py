@@ -87,6 +87,10 @@ _OVERLAY_HOLD_MS        = 2500
 _OVERLAY_HOLD_FAULT_MS  = 30_000
 
 _HEADER_WING_W = 370
+_SAFE_ON_BG    = "#8b1e1e"
+_SAFE_ON_FG    = "#fecaca"
+_SAFE_OFF_BG   = "#14532d"
+_SAFE_OFF_FG   = "#bbf7d0"
 
 
 # ------------------------------------------------------------------
@@ -977,6 +981,7 @@ class OperatorWindow(QMainWindow):
         )
         self.resize(1400, 880)
         self._build_ui()
+        self._apply_safe_mode_ui()
 
         self._camera_timer = QTimer(self)
         self._camera_timer.timeout.connect(self._refresh_cameras)
@@ -1063,8 +1068,13 @@ class OperatorWindow(QMainWindow):
         left_wing.setStyleSheet("background:transparent;")
         left_lay = QHBoxLayout(left_wing)
         left_lay.setContentsMargins(0, 10, 0, 10)
-        left_lay.setSpacing(0)
+        left_lay.setSpacing(10)
         left_lay.addWidget(_logo_label("logos/metalconf.png", 56))
+        self._safe_mode_btn = QPushButton()
+        self._safe_mode_btn.setCheckable(True)
+        self._safe_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._safe_mode_btn.clicked.connect(self._toggle_safe_mode)
+        left_lay.addWidget(self._safe_mode_btn)
         left_lay.addStretch()
         outer.addWidget(left_wing)
 
@@ -1152,6 +1162,29 @@ class OperatorWindow(QMainWindow):
         outer.addWidget(right_wing)
 
         return header
+
+    def _apply_safe_mode_ui(self) -> None:
+        enabled = self._system.safe_mode
+        label = "MODO SEGURO: ON" if enabled else "MODO SEGURO: OFF"
+        detail = "Proteccion activa" if enabled else "Proteccion desactivada"
+        bg = _SAFE_ON_BG if enabled else _SAFE_OFF_BG
+        fg = _SAFE_ON_FG if enabled else _SAFE_OFF_FG
+        border = "#f87171" if enabled else "#4ade80"
+        self._safe_mode_btn.blockSignals(True)
+        self._safe_mode_btn.setChecked(enabled)
+        self._safe_mode_btn.setText(f"{label}\n{detail}")
+        self._safe_mode_btn.setStyleSheet(
+            "QPushButton {"
+            f"background:{bg};color:{fg};border:1px solid {border};"
+            "border-radius:8px;padding:6px 12px;font-size:10px;font-weight:800;"
+            "letter-spacing:1px;text-align:center;min-width:132px;}"
+            "QPushButton:hover { filter:brightness(1.08); }"
+        )
+        self._safe_mode_btn.blockSignals(False)
+
+    def _toggle_safe_mode(self) -> None:
+        self._system.set_safe_mode(not self._system.safe_mode)
+        self._apply_safe_mode_ui()
 
     # ------------------------------------------------------------------
     # Timers

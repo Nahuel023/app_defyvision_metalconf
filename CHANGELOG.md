@@ -48,6 +48,27 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-17 - Tadeo + Codex
 
+#### Cambio 203 - UI operador: boton de Modo Seguro en header
+
+**Pedido:** agregar en la pantalla del operador un boton visible entre
+Metalconf y DEFYVISION para indicar y alternar `MODO SEGURO`, activado por
+defecto.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/controller/system.py`
+  - nuevo estado `safe_mode`, inicializado en `True`
+  - nuevo `set_safe_mode()` para centralizar el cambio y loguearlo
+- `src/ui/operator.py`
+  - nuevo boton en el header del operador, entre el logo de Metalconf y el
+    bloque central de DEFYVISION
+  - estado visual claro:
+    - `MODO SEGURO: ON / Proteccion activa`
+    - `MODO SEGURO: OFF / Proteccion desactivada`
+  - el boton arranca activado por defecto y actualiza el estado del sistema
+
+**Validacion:**
+- `pytest tests/` -> `26 passed`
+
 #### Cambio 202 - Robustez licencia: bloqueo antes de hardware y corte en runtime
 
 **Pedido:** revisar el bloqueo nuevo por licencia y seguir buscando bugs de

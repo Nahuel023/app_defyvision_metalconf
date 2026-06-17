@@ -38,6 +38,7 @@ class InspectionSystem:
                          disable_outputs=disable_plc_outputs)
         self._cameras: dict[str, Camera] = {}
         self._scanners: dict[str, ScannerController] = {}
+        self._safe_mode = True
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
@@ -117,6 +118,17 @@ class InspectionSystem:
     @property
     def metrics(self) -> MetricsRecorder:
         return self._recorder
+
+    @property
+    def safe_mode(self) -> bool:
+        return self._safe_mode
+
+    def set_safe_mode(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        if self._safe_mode == enabled:
+            return
+        self._safe_mode = enabled
+        logger.warning("Modo seguro %s", "ACTIVADO" if enabled else "DESACTIVADO")
 
     # ------------------------------------------------------------------
 
