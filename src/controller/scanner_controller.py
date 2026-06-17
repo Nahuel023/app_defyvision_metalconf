@@ -215,24 +215,13 @@ class ScannerController:
             self._force_inspect.clear()
 
         if mode == OperationMode.AUTO:
-            # Encender backlight ANTES del arranque para que el selftest vea
-            # frames iluminados desde el primer momento si el scanner realmente inicia.
             self._io.write(f"{self._id}.backlight", True)
-
-        if not self._io.write(f"{self._id}.solenoid", True):
-            logger.warning(
-                f"[{self._id}] inicio bloqueado: no se pudo energizar solenoide "
-                "(modo seguro activo o error PLC)"
-            )
-            self._set_lights(blue=True)
-            return False
-
-        if mode == OperationMode.AUTO:
             self._start_all_threads()
         else:
             self._start_poller_thread()
 
         self._transition(ScannerState.RUNNING)
+        self._io.write(f"{self._id}.solenoid", True)  # bloqueado por IOMap si safe_mode=ON
         self._set_lights(green=True)
         logger.info(f"[{self._id}] iniciado ({mode.value})")
         return True
