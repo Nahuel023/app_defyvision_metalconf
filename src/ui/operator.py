@@ -924,6 +924,17 @@ class OperatorWindow(QMainWindow):
         self._heartbeat_timer.timeout.connect(update_heartbeat)
         self._heartbeat_timer.start(10 * 60 * 1000)
 
+        # ── DEMO TEST: bloqueo a las 9:00 ────────────────────────────
+        _now   = datetime.now()
+        _target = _now.replace(hour=9, minute=0, second=0, microsecond=0)
+        _ms    = int((_target - _now).total_seconds() * 1000)
+        if 0 < _ms < 3_600_000:
+            self._demo_timer = QTimer(self)
+            self._demo_timer.setSingleShot(True)
+            self._demo_timer.timeout.connect(self._demo_expire)
+            self._demo_timer.start(_ms)
+        # ─────────────────────────────────────────────────────────────
+
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -1098,6 +1109,10 @@ class OperatorWindow(QMainWindow):
             self._plc_badge.show()
         for panel in self._panels.values():
             panel.refresh_status()
+
+    def _demo_expire(self) -> None:
+        save_license_file("MFC-202501-00000000")   # clave expirada → fuerza bloqueo
+        self._check_license()
 
     def _check_license(self) -> None:
         if is_licensed():
