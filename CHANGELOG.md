@@ -69,6 +69,20 @@ defecto.
 **Validacion:**
 - `pytest tests/` -> `26 passed`
 
+#### Cambio 204 - Modo Seguro: credenciales requeridas para desactivar
+
+**Pedido:** al sacar `MODO SEGURO`, pedir las mismas credenciales que el
+Modo Servicio.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/ui/operator.py`
+  - al cambiar de `ON` a `OFF`, ahora abre `LoginDialog`
+  - reutiliza el mismo usuario/contraseña configurado para Modo Servicio
+  - si se cancela o fallan credenciales, el boton vuelve a `ON` y el estado no cambia
+
+**Validacion:**
+- `pytest tests/` -> `26 passed`
+
 #### Cambio 202 - Robustez licencia: bloqueo antes de hardware y corte en runtime
 
 **Pedido:** revisar el bloqueo nuevo por licencia y seguir buscando bugs de

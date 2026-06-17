@@ -1183,7 +1183,15 @@ class OperatorWindow(QMainWindow):
         self._safe_mode_btn.blockSignals(False)
 
     def _toggle_safe_mode(self) -> None:
-        self._system.set_safe_mode(not self._system.safe_mode)
+        target = not self._system.safe_mode
+        if not target:
+            from src.ui.login_dialog import LoginDialog
+
+            dlg = LoginDialog(self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                self._apply_safe_mode_ui()
+                return
+        self._system.set_safe_mode(target)
         self._apply_safe_mode_ui()
 
     # ------------------------------------------------------------------
