@@ -34,7 +34,7 @@ Remove-Item -Recurse -Force "build" -ErrorAction SilentlyContinue
 $hidden = @()
 $pydExists = Get-ChildItem "src\utils" -Filter "license*.pyd" -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($pydExists) {
-    Rename-Item "src\utils\license.py" "src\utils\license.py.bak"
+    Move-Item "src\utils\license.py" "src\utils\license.py.bak" -Force
     $hidden += "src\utils\license.py"
     Write-Host "  license.py ocultado." -ForegroundColor Gray
 }
@@ -47,7 +47,7 @@ try {
     if ($LASTEXITCODE -eq 0) { $buildOk = $true }
 } finally {
     foreach ($f in $hidden) {
-        if (Test-Path "$f.bak") { Rename-Item "$f.bak" $f }
+        if (Test-Path "$f.bak") { Move-Item "$f.bak" $f -Force }
     }
     Get-ChildItem "src\utils" -Filter "license*.pyd" -ErrorAction SilentlyContinue | Remove-Item -Force
     Remove-Item -Recurse -Force "build" -ErrorAction SilentlyContinue
