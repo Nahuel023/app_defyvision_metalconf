@@ -13,6 +13,7 @@ class _FakeIO:
         }
         self.writes: list[tuple[str, bool]] = []
         self.batches: list[list[tuple[str, bool]]] = []
+        self.block_solenoid_on = False
 
     def scanner_config(self, scanner_id: str) -> dict:
         return self._scanner_cfg[scanner_id]
@@ -20,11 +21,15 @@ class _FakeIO:
     def read(self, signal: str):
         return None
 
-    def write(self, signal: str, value: bool) -> None:
+    def write(self, signal: str, value: bool) -> bool:
         self.writes.append((signal, value))
+        if self.block_solenoid_on and signal.endswith(".solenoid") and value:
+            return False
+        return True
 
-    def write_batch(self, batch: list[tuple[str, bool]]) -> None:
+    def write_batch(self, batch: list[tuple[str, bool]]) -> bool:
         self.batches.append(list(batch))
+        return True
 
 
 class _FakeCamera:
@@ -66,6 +71,27 @@ def test_handle_license_failure_stops_running_scanner() -> None:
         assert ("scanner_1.solenoid", False) in io.writes
         assert io.batches[-1] == [
             ("scanner_1.light_blue", False),
+            ("scanner_1.light_green", False),
+            ("scanner_1.light_yellow", False),
+            ("scanner_1.light_red", False),
+        ]
+    finally:
+        controller.shutdown()
+
+
+def test_start_does_not_enter_running_when_solenoid_is_blocked(monkeypatch) -> None:
+    io = _FakeIO()
+    io.block_solenoid_on = True
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    monkeypatch.setattr(controller, "_license_allows_operation", lambda: True)
+
+    try:
+        assert controller.start() is False
+        assert controller.state == ScannerState.IDLE
+        assert ("scanner_1.solenoid", True) in io.writes
+        assert io.batches[-1] == [
+            ("scanner_1.light_blue", True),
             ("scanner_1.light_green", False),
             ("scanner_1.light_yellow", False),
             ("scanner_1.light_red", False),

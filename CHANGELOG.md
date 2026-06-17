@@ -83,6 +83,33 @@ Modo Servicio.
 **Validacion:**
 - `pytest tests/` -> `26 passed`
 
+#### Cambio 205 - Modo Seguro RUN: impedir falso arranque con solenoide bloqueado
+
+**Pedido:** confirmar si con `MODO SEGURO` activo realmente quedaban protegidas
+las electrovalvulas en `run`, especialmente durante mantenimiento dentro de la
+maquina.
+
+**Hallazgo de Codex:**
+- La capa `IOMap` ya bloqueaba correctamente cualquier intento de escribir
+  `scanner_X.solenoid = True` cuando `safe_mode` estaba activo.
+- Pero `ScannerController.start()` y `start_simulate()` no verificaban el
+  resultado de esa escritura: el scanner podia pasar visualmente a `RUNNING`
+  aunque el solenoide hubiera quedado bloqueado.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/controller/scanner_controller.py`
+  - `start()` ahora valida que la activacion del solenoide haya devuelto `True`
+    antes de pasar a `RUNNING`
+  - `start_simulate()` hace la misma validacion
+  - si el solenoide no puede energizarse, el arranque falla, queda en `IDLE` y
+    se mantiene la luz azul
+- `tests/test_scanner_controller.py`
+  - nuevo test para verificar que un `solenoid=True` bloqueado no deja al
+    scanner entrar en `RUNNING`
+
+**Validacion:**
+- `pytest tests/` -> `27 passed`
+
 #### Cambio 202 - Robustez licencia: bloqueo antes de hardware y corte en runtime
 
 **Pedido:** revisar el bloqueo nuevo por licencia y seguir buscando bugs de
