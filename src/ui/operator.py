@@ -312,6 +312,16 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self._title_lbl)
 
+        # ── Estado real de la maneta MANUAL/AUTOMATICO de este scanner ─
+        self._mode_switch_lbl = QLabel("MANETA: —")
+        self._mode_switch_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._mode_switch_lbl.setStyleSheet(
+            f"font-size:10px;font-weight:800;letter-spacing:1px;color:{_MUTED};"
+            f"background:{_CARD};border-radius:4px;padding:3px 8px;"
+            f"border:1px solid {_BORDER};"
+        )
+        root.addWidget(self._mode_switch_lbl)
+
         # ── Feed de cámara — elemento dominante ───────────────────────
         self.camera_label = QLabel()
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -535,6 +545,22 @@ class ScannerPanel(QWidget):
         fault_cnt   = s["fault_count"]
         camera_missing = bool(s.get("camera_missing", False))
         camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
+
+        mode_switch_raw = s.get("mode_switch_raw")
+        if mode_switch_raw is None:
+            self._mode_switch_lbl.setText("MANETA: SIN SEÑAL")
+            self._mode_switch_lbl.setStyleSheet(
+                f"font-size:10px;font-weight:800;letter-spacing:1px;color:{_MUTED};"
+                f"background:{_CARD};border-radius:4px;padding:3px 8px;border:1px solid {_BORDER};"
+            )
+        else:
+            switch_txt = "AUTOMATICO" if mode_switch_raw else "MANUAL"
+            switch_c = "#15803d" if mode_switch_raw else "#d97706"
+            self._mode_switch_lbl.setText(f"MANETA: {switch_txt}")
+            self._mode_switch_lbl.setStyleSheet(
+                f"font-size:10px;font-weight:800;letter-spacing:1px;color:{switch_c};"
+                f"background:{_CARD};border-radius:4px;padding:3px 8px;border:1px solid {switch_c};"
+            )
 
         from src.utils.config import load_tolerances
         _model = self._system.io.scanner_config(self._id).get("model", "")

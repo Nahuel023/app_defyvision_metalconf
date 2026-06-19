@@ -48,6 +48,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 224 - Label MANETA MANUAL/AUTOMATICO por scanner (lectura real, sin tocar el forzado)
+
+**Pedido:** Tadeo quiere empezar a usar la maneta fisica MANUAL/AUTOMATICO
+(entrada `mode_switch`, X0 en scanner_1 / X2 en scanner_2). Aclaro que cada
+scanner tiene su PROPIA maneta (no es una sola compartida como se asumio al
+principio), y que por ahora solo quiere VER el estado real en pantalla, sin
+que afecte el comportamiento — `force_auto_mode: true` sigue activo en ambos
+scanners en `io_map.yaml`, forzando AUTO independientemente de la maneta.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`
+  - `_update_mode_from_plc()`: ahora SIEMPRE lee `mode_switch` del PLC (antes
+    se saltaba la lectura por completo si `force_auto_mode=true`) y guarda el
+    valor crudo en `self._mode_switch_raw`. Solo aplica el valor a
+    `self._mode` (modo operativo real) si `force_auto` es False — el forzado
+    a AUTO sigue intacto
+  - nuevo campo `mode_switch_raw` en `get_status()` (`True`=AUTO, `False`=
+    MANUAL, `None`=sin lectura todavia)
+- `src/ui/operator.py` (`ScannerPanel`)
+  - nuevo label "MANETA: AUTOMATICO/MANUAL/SIN SEÑAL" debajo del titulo de
+    cada panel de scanner, coloreado (verde=AUTO, naranja=MANUAL, gris=sin
+    señal), actualizado en cada `refresh_status()`
+
+**Validacion:** pruebas standalone — con `force_auto_mode=False`,
+`mode_switch_raw` refleja la lectura real (`True`/`False`) tras
+`_update_mode_from_plc()`; con `force_auto_mode=True`, `mode` se mantiene en
+`AUTO` (forzado) pero `mode_switch_raw` igual refleja la lectura real
+(`False`/MANUAL en el test). Suite de tests sin regresiones (mismo fallo
+preexistente no relacionado).
+
+**Pendiente (decision futura de Tadeo):** sacar `force_auto_mode` de
+`io_map.yaml` cuando se confirme que la maneta debe controlar el modo
+operativo real, no solo mostrarse.
+
+---
+
 #### Cambio 223 - RESET FALLA olvida TODAS las estadisticas de NOK/falla de inmediato
 
 **Pedido:** Tadeo confirmo que quiere que RESET FALLA olvide por completo los

@@ -77,6 +77,7 @@ class ScannerController:
 
         self._state      = ScannerState.IDLE
         self._mode       = OperationMode.AUTO if self._force_auto else OperationMode.MANUAL
+        self._mode_switch_raw: Optional[bool] = None  # ultima lectura cruda de la maneta (None=sin leer aun)
         self._nok_streak = 0
         self._lq_streak  = 0
         self._last_result: Optional[InspectionResult] = None
@@ -580,6 +581,7 @@ class ScannerController:
             return {
                 "state":                self._state,
                 "mode":                 self._mode,
+                "mode_switch_raw":      self._mode_switch_raw,
                 "nok_streak":           self._nok_streak,
                 "last_result":          self._last_result,
                 "total_inspections":    self._total_inspections,
@@ -1199,9 +1201,14 @@ class ScannerController:
             self._inspector_thread = None
 
     def _update_mode_from_plc(self) -> None:
+        # Siempre leer la maneta física (para mostrar su estado real en la UI),
+        # aunque force_auto_mode este activo y el modo operativo real quede
+        # forzado en AUTO independientemente de la lectura.
+        mode_raw = self._io.read(f"{self._id}.mode_switch")
+        with self._lock:
+            self._mode_switch_raw = mode_raw
         if self._force_auto:
             return
-        mode_raw = self._io.read(f"{self._id}.mode_switch")
         if mode_raw is not None:
             new_mode = OperationMode.AUTO if mode_raw else OperationMode.MANUAL
             with self._lock:
