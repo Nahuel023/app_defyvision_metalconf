@@ -24,9 +24,11 @@ class IOMap:
                  disable_outputs: bool = False) -> None:
         self._client = client
         self._disable_outputs = disable_outputs
-        self._safe_mode = True  # solenoides bloqueados por defecto hasta que el operador los libere
         self._config: dict[str, Any] = self._load(config_path)
         self._index: dict[str, tuple[str, int]] = self._build_index()
+        # Modo seguro POR SCANNER (cada uno con su propia maneta) — bloqueados
+        # por defecto hasta que el operador/la maneta los libere.
+        self._safe_mode: dict[str, bool] = {sid: True for sid in self.scanner_ids()}
 
     # ------------------------------------------------------------------
     # API pública
@@ -59,7 +61,7 @@ class IOMap:
             sig_type, addr = self._resolve(sig)
             if sig_type != "output":
                 raise ValueError(f"'{sig}' es una entrada — no se puede escribir")
-            if sig.endswith(".solenoid") and val and self._safe_mode:
+            if sig.endswith(".solenoid") and val and self._safe_mode.get(sig.split(".")[0], True):
                 logger.warning(f"[SAFETY] Escritura bloqueada (modo seguro ON): {sig}=True")
                 continue
             resolved.append((addr, val))
@@ -89,16 +91,19 @@ class IOMap:
         if self._disable_outputs:
             logger.debug(f"[no-plc-outputs] {signal}={value} (suprimido)")
             return True
-        if signal.endswith(".solenoid") and value and self._safe_mode:
+        if signal.endswith(".solenoid") and value and self._safe_mode.get(signal.split(".")[0], True):
             logger.warning(
                 f"[SAFETY] Escritura bloqueada (modo seguro ON): {signal}=True"
             )
             return False
         return self._client.write_coil(address, value)
 
-    def set_safe_mode(self, enabled: bool) -> None:
-        """Activa o desactiva el bloqueo de solenoides a nivel IO."""
-        self._safe_mode = bool(enabled)
+    def set_safe_mode(self, scanner_id: str, enabled: bool) -> None:
+        """Activa o desactiva el bloqueo de solenoide de UN scanner puntual."""
+        self._safe_mode[scanner_id] = bool(enabled)
+
+    def get_safe_mode(self, scanner_id: str) -> bool:
+        return self._safe_mode.get(scanner_id, True)
 
     def scanner_ids(self) -> list[str]:
         """Devuelve los IDs de scanners definidos en la config."""

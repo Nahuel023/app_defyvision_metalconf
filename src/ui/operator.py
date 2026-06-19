@@ -278,9 +278,11 @@ class ScannerPanel(QWidget):
         self._nok_threshold: int = 5
         self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
         self._run_start_time: float | None = None
+        self._last_mode_switch_raw: Optional[bool] = None  # para detectar cambios de maneta
 
         self._build_ui()
         self._populate_models()
+        self._apply_safe_mode_ui()
 
         self._sig_overlay.connect(self._set_overlay)
 
@@ -321,6 +323,14 @@ class ScannerPanel(QWidget):
             f"border:1px solid {_BORDER};"
         )
         root.addWidget(self._mode_switch_lbl)
+
+        # ── Modo seguro de ESTE scanner (la maneta lo controla automaticamente;
+        # el boton permite al operador forzarlo manualmente entre cambios de maneta) ─
+        self._safe_mode_btn = QPushButton()
+        self._safe_mode_btn.setCheckable(True)
+        self._safe_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._safe_mode_btn.clicked.connect(self._toggle_safe_mode)
+        root.addWidget(self._safe_mode_btn)
 
         # ── Feed de cámara — elemento dominante ───────────────────────
         self.camera_label = QLabel()
@@ -570,6 +580,15 @@ class ScannerPanel(QWidget):
                 f"background:{_CARD};border-radius:4px;padding:3px 8px;border:1px solid {switch_c};"
             )
 
+        # Maneta AUTOMATICO → libera el modo seguro (electrovalvulas habilitadas);
+        # MANUAL → lo fuerza ON. Solo en el CAMBIO de maneta (no en cada tick) para
+        # que el operador pueda forzarlo manualmente despues sin que este chequeo
+        # se lo pise en el siguiente refresh.
+        if mode_switch_raw is not None and mode_switch_raw != self._last_mode_switch_raw:
+            self._system.set_safe_mode(self._id, not mode_switch_raw)
+            self._last_mode_switch_raw = mode_switch_raw
+        self._apply_safe_mode_ui()
+
         from src.utils.config import load_tolerances
         _model = self._system.io.scanner_config(self._id).get("model", "")
         _tols  = load_tolerances(_model, scanner_id=self._id) if _model else load_tolerances()
@@ -662,6 +681,41 @@ class ScannerPanel(QWidget):
             self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")
 
         self._refresh_buttons(state)
+
+    # ------------------------------------------------------------------
+    # Modo seguro de este scanner
+    # ------------------------------------------------------------------
+
+    def _apply_safe_mode_ui(self) -> None:
+        enabled = self._system.safe_mode(self._id)
+        label = "MODO SEGURO: ON" if enabled else "MODO SEGURO: OFF"
+        detail = "ELECTROVALVULAS DESACTIVADAS" if enabled else "ELECTROVALVULAS ACTIVADAS"
+        bg = _SAFE_ON_BG if enabled else _SAFE_OFF_BG
+        fg = _SAFE_ON_FG if enabled else _SAFE_OFF_FG
+        border = "#f87171" if enabled else "#4ade80"
+        self._safe_mode_btn.blockSignals(True)
+        self._safe_mode_btn.setChecked(enabled)
+        self._safe_mode_btn.setText(f"{label}\n{detail}")
+        self._safe_mode_btn.setStyleSheet(
+            "QPushButton {"
+            f"background:{bg};color:{fg};border:1px solid {border};"
+            "border-radius:6px;padding:4px 8px;font-size:9px;font-weight:800;"
+            "letter-spacing:1px;text-align:center;}"
+            "QPushButton:hover { filter:brightness(1.08); }"
+        )
+        self._safe_mode_btn.blockSignals(False)
+
+    def _toggle_safe_mode(self) -> None:
+        target = not self._system.safe_mode(self._id)
+        if not target:
+            from src.ui.login_dialog import LoginDialog
+
+            dlg = LoginDialog(self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                self._apply_safe_mode_ui()
+                return
+        self._system.set_safe_mode(self._id, target)
+        self._apply_safe_mode_ui()
 
     # ------------------------------------------------------------------
     # Popup de métricas detalladas
@@ -1015,7 +1069,6 @@ class OperatorWindow(QMainWindow):
         )
         self.resize(1400, 880)
         self._build_ui()
-        self._apply_safe_mode_ui()
 
         self._camera_timer = QTimer(self)
         self._camera_timer.timeout.connect(self._refresh_cameras)
@@ -1104,11 +1157,6 @@ class OperatorWindow(QMainWindow):
         left_lay.setContentsMargins(0, 10, 0, 10)
         left_lay.setSpacing(10)
         left_lay.addWidget(_logo_label("logos/metalconf.png", 56))
-        self._safe_mode_btn = QPushButton()
-        self._safe_mode_btn.setCheckable(True)
-        self._safe_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._safe_mode_btn.clicked.connect(self._toggle_safe_mode)
-        left_lay.addWidget(self._safe_mode_btn)
         left_lay.addStretch()
         outer.addWidget(left_wing)
 
@@ -1196,37 +1244,6 @@ class OperatorWindow(QMainWindow):
         outer.addWidget(right_wing)
 
         return header
-
-    def _apply_safe_mode_ui(self) -> None:
-        enabled = self._system.safe_mode
-        label = "MODO SEGURO: ON" if enabled else "MODO SEGURO: OFF"
-        detail = "ELECTROVALVULAS DESACTIVADAS" if enabled else "ELECTROVALVULAS ACTIVADAS"
-        bg = _SAFE_ON_BG if enabled else _SAFE_OFF_BG
-        fg = _SAFE_ON_FG if enabled else _SAFE_OFF_FG
-        border = "#f87171" if enabled else "#4ade80"
-        self._safe_mode_btn.blockSignals(True)
-        self._safe_mode_btn.setChecked(enabled)
-        self._safe_mode_btn.setText(f"{label}\n{detail}")
-        self._safe_mode_btn.setStyleSheet(
-            "QPushButton {"
-            f"background:{bg};color:{fg};border:1px solid {border};"
-            "border-radius:8px;padding:6px 12px;font-size:10px;font-weight:800;"
-            "letter-spacing:1px;text-align:center;min-width:132px;}"
-            "QPushButton:hover { filter:brightness(1.08); }"
-        )
-        self._safe_mode_btn.blockSignals(False)
-
-    def _toggle_safe_mode(self) -> None:
-        target = not self._system.safe_mode
-        if not target:
-            from src.ui.login_dialog import LoginDialog
-
-            dlg = LoginDialog(self)
-            if dlg.exec() != QDialog.DialogCode.Accepted:
-                self._apply_safe_mode_ui()
-                return
-        self._system.set_safe_mode(target)
-        self._apply_safe_mode_ui()
 
     # ------------------------------------------------------------------
     # Timers

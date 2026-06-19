@@ -48,6 +48,52 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 232 - MODO SEGURO pasa a ser POR SCANNER, controlado por la maneta fisica
+
+**Pedido:** Tadeo quiere que la maneta fisica MANUAL/AUTOMATICO de cada
+scanner controle el modo seguro: maneta en AUTOMATICO → modo seguro se
+DESACTIVA (electrovalvulas habilitadas); maneta en MANUAL → modo seguro se
+fuerza SIEMPRE a ON.
+
+**Decisiones confirmadas con Tadeo:**
+- Cada scanner tiene su PROPIA maneta independiente → el modo seguro pasa de
+  ser una sola llave GLOBAL a ser POR SCANNER (antes una sola variable
+  `InspectionSystem._safe_mode` afectaba las electrovalvulas de los 2
+  scanners a la vez).
+- El cambio automatico es por TRANSICION de la maneta (edge-triggered), no
+  continuo: el operador con login sigue pudiendo forzar manualmente el
+  boton (ON↔OFF) entre cambios de maneta, sin que el chequeo automatico se
+  lo pise en cada refresh — solo se reaplica cuando la maneta efectivamente
+  cambia de posicion.
+
+**Cambios:**
+- `src/plc/io_map.py`: `_safe_mode` pasa de `bool` a `dict[scanner_id, bool]`
+  (default `True` para todos). `write()`/`write_batch()` resuelven el
+  scanner_id desde el prefijo de la señal (`"scanner_1.solenoid"` →
+  `"scanner_1"`) para bloquear el solenoide correcto. `set_safe_mode(scanner_id,
+  enabled)` y nuevo `get_safe_mode(scanner_id)`.
+- `src/controller/system.py`: `safe_mode` pasa de `@property` a metodo
+  `safe_mode(scanner_id)`; `set_safe_mode(scanner_id, enabled)` ahora
+  sincroniza el solenoide de ESE scanner unicamente (antes iteraba los 2).
+- `src/ui/operator.py`:
+  - el boton "MODO SEGURO" se mueve del header global a cada `ScannerPanel`
+    (debajo del label "MANETA" de ese scanner — Cambio 224/226)
+  - `ScannerPanel.refresh_status()`: detecta cambios de
+    `mode_switch_raw` (lectura directa del IOMap, ya independiente del
+    estado del scanner desde el Cambio 226) y en el momento del cambio llama
+    `system.set_safe_mode(scanner_id, not mode_switch_raw)` — AUTO(True) →
+    safe_mode False; MANUAL(False) → safe_mode True
+  - `_apply_safe_mode_ui()`/`_toggle_safe_mode()` (con login para forzar OFF)
+    se duplican de `OperatorWindow` a `ScannerPanel`, ya parametrizados por
+    `self._id`; se eliminan las versiones globales del header
+
+**Validacion:** `py_compile` OK en los 4 archivos; suite de tests sin
+regresiones (mismo fallo preexistente no relacionado). Prueba manual con
+`IOMap` aislado: `scanner_1` y `scanner_2` bloquean/liberan el solenoide de
+forma independiente (cambiar el modo seguro de uno no afecta al otro).
+
+---
+
 #### Cambio 231 - Parada inmediata por desalineacion SEVERA de 1 solo frame (scanner_2) + fix badge enganoso
 
 **Pedido:** Tadeo reporto que con desalineacion de patron GRANDE, el sistema la
