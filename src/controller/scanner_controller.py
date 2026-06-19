@@ -269,10 +269,17 @@ class ScannerController:
         self._stop_disk_worker()
 
     def reset(self) -> bool:
-        """STOPPED → IDLE + azul. Requiere INICIAR para reanudar."""
+        """STOPPED → IDLE + azul. Requiere INICIAR para reanudar.
+
+        Descarta inmediatamente la racha NOK y el último resultado (FAULT/NOK)
+        que motivó la parada, para que el panel deje de mostrar el frame con
+        el error apenas se resetea, sin esperar a INICIAR."""
         with self._lock:
             if self._state != ScannerState.STOPPED:
                 return False
+            self._nok_streak = 0
+            self._lq_streak  = 0
+            self._last_result = None
 
         self._transition(ScannerState.IDLE)
         self._set_lights(blue=True)

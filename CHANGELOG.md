@@ -48,6 +48,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 220 - RESET FALLA descarta racha NOK y ultimo resultado de inmediato
+
+**Pedido:** Tadeo pregunto si al hacer RESET FALLA se descartan los frames con
+error/estado de falla, y pidio que la racha vuelva a contar desde cero sin
+quedar "pegada" en estado de falla.
+
+**Causa:** `reset()` en `scanner_controller.py` solo transicionaba
+STOPPED → IDLE; no tocaba `self._nok_streak`, `self._lq_streak` ni
+`self._last_result`. Esos campos quedaban con el valor de la racha/frame que
+causo la falla hasta el proximo INICIAR (que si los reinicia). Mientras el
+scanner quedaba en IDLE esperando a que el operario apriete INICIAR, el panel
+podia seguir mostrando la racha vieja (ej. "5/5") y el ultimo resultado NOK/
+FAULT.
+
+**Cambios:**
+- `src/controller/scanner_controller.py` → `reset()`
+  - ahora pone `self._nok_streak = 0`, `self._lq_streak = 0` y
+    `self._last_result = None` (bajo el lock) antes de transicionar a IDLE
+  - el frame que causo la falla se descarta inmediatamente al resetear, no
+    recien al volver a iniciar
+
+**Validacion:** suite de tests (`pytest tests/`) — 26/27 pasan; el unico fallo
+(`test_start_does_not_enter_running_when_solenoid_is_blocked`) es preexistente
+y no relacionado (quedo desactualizado desde el Cambio 213, que removio el
+bloqueo de `start()` por escritura de solenoide).
+
+---
+
 #### Cambio 219 - Fix: pantalla DETENCION DE MAQUINA se repetia con chapa nueva al reiniciar
 
 **Pedido:** Tadeo reporto que al disparar machine_stop, confirmar la pantalla
