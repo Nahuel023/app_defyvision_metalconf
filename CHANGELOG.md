@@ -48,6 +48,38 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 225 - Modo GRABACION (servicio): numero de frame + fecha/hora quemados en la imagen
+
+**Pedido:** Tadeo quiere, en el modo GRABACION del panel de servicio
+(`RecordingTab`, boton "INICIAR GRABACION"), un numero chico abajo a la
+derecha enumerando los frames en flujo continuo, para saber cual es el frame
+correcto o malo al revisar la grabacion despues. Pidio sumar tambien fecha y
+hora.
+
+**Cambios:**
+- `src/ui/service.py` → `RecordingTab._grab_frame()` (linea ~3004)
+  - se crea `frame_to_save = frame_copy.copy()` y se quema ahi (no en
+    `frame_copy`) el numero de frame (`idx`, el mismo indice del nombre
+    `frame_{idx:04d}.png`) y la fecha/hora (`dd/mm/aaaa HH:MM:SS.mmm`),
+    abajo a la derecha, en dos lineas, amarillo con contorno negro para
+    legibilidad sobre cualquier fondo
+  - `cv2.imwrite` ahora guarda `frame_to_save` (con el sello) en vez de
+    `frame_copy`
+
+**IMPORTANTE — por que NO se quema sobre `frame_copy`:** unas lineas mas abajo,
+`frame_copy` se pasa sin tocar a `self._live_session.inspect_frame(...)`
+cuando "Análisis en vivo" esta activado. Si el numero/fecha se quemara ahi,
+el texto brillante (amarillo) podria detectarse como un agujero falso en
+modo `polarity: bright` (microperforado), contaminando el analisis. Por eso
+se separa una copia exclusiva para disco.
+
+**Validacion:** prueba aislada con frame negro sintetico — confirma que
+`frame_copy` (usado para analisis) queda intacto en negro puro, y
+`frame_to_save` (el que se escribe a disco) tiene el sello quemado; revisado
+visualmente el PNG resultante.
+
+---
+
 #### Cambio 224 - Label MANETA MANUAL/AUTOMATICO por scanner (lectura real, sin tocar el forzado)
 
 **Pedido:** Tadeo quiere empezar a usar la maneta fisica MANUAL/AUTOMATICO

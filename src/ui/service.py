@@ -3015,13 +3015,34 @@ class RecordingTab(QWidget):
         # Write PNG in background - PNG compression can take 50-200ms and must not
         # block the main thread. compression=1 (fastest) trades size for speed.
         frame_copy = frame.copy()
+
+        # Numero de frame + fecha/hora chicos abajo a la derecha, quemados SOLO
+        # en la copia que se guarda a disco — para identificar a simple vista
+        # cual es el frame bueno/malo al revisar la grabacion despues. OJO:
+        # nunca tocar frame_copy (se usa mas abajo para el analisis en vivo);
+        # el texto quemado podria confundirse con un agujero falso en bright.
+        frame_to_save = frame_copy.copy()
+        _now = datetime.now()
+        _lines = [_now.strftime("%d/%m/%Y %H:%M:%S.%f")[:-3], str(idx)]
+        _font, _scale, _thick = cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1
+        _h, _w = frame_to_save.shape[:2]
+        _margin = 8
+        _line_h = 16
+        _y = _h - _margin
+        for _txt in reversed(_lines):
+            (_tw, _th), _ = cv2.getTextSize(_txt, _font, _scale, _thick)
+            _tx = _w - _tw - _margin
+            cv2.putText(frame_to_save, _txt, (_tx + 1, _y + 1), _font, _scale, (0, 0, 0), _thick + 1, cv2.LINE_AA)
+            cv2.putText(frame_to_save, _txt, (_tx, _y), _font, _scale, (0, 255, 255), _thick, cv2.LINE_AA)
+            _y -= _line_h
+
         if self._write_executor is not None:
             self._write_executor.submit(
-                cv2.imwrite, str(path), frame_copy,
+                cv2.imwrite, str(path), frame_to_save,
                 [cv2.IMWRITE_PNG_COMPRESSION, 1],
             )
         else:
-            cv2.imwrite(str(path), frame_copy, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+            cv2.imwrite(str(path), frame_to_save, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         if self._live_chk.isChecked():
             try:
