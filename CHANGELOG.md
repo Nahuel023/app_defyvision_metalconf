@@ -46,6 +46,22 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-06-19 - Tadeo + Claude
+
+#### Cambio 216 - Revertir grabacion nocturna: restaurar parada por NOK
+
+**Pedido:** Tadeo quiere volver a hacer pruebas con la maquina parando normalmente
+al detectar NOK (el cambio 215 era temporal solo para la noche del 2026-06-17).
+
+**Cambios:**
+- `config/tolerancias.yaml`
+  - `consecutive_nok_frames: 9999 → 5` (top-level, `modelo_A`, `modelo_B`)
+  - `machine_stop_enabled: false → true` en `modelo_A` y `modelo_B`
+
+Revierte completamente el Cambio 215.
+
+---
+
 ### Sesion 2026-06-17 - Tadeo + Claude
 
 #### Cambio 215 (TEMPORAL) - Grabacion nocturna continua: deshabilitar machine_stop y FAULT
