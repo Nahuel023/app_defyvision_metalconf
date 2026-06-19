@@ -209,6 +209,21 @@ class Inspector:
             self._pattern[key] = load_pattern(find_pattern_path(model, scanner_id))
         return self._pattern[key]
 
+    def set_roi(self, model: str, scanner_id: str | None, roi) -> None:
+        """Actualiza el ROI cacheado en memoria (ej. tras roi_precalibration en
+        caliente). Sin esto, una correccion de ROI escrita a disco durante una
+        sesion no se reflejaba hasta reiniciar todo el programa: el cache en
+        memoria seguia devolviendo el ROI viejo en cada reinicio del scanner."""
+        self._roi[(model, scanner_id)] = roi
+
+    def reset_machine_stop(self, model: str, scanner_id: str | None) -> None:
+        """Limpia el estado acumulado (zonas/racha) del detector de parada de
+        maquina para este modelo/scanner. Llamar al reiniciar el scanner para
+        no arrastrar zonas ya disparadas de la sesion anterior."""
+        detector = self._detectors.get((model, scanner_id))
+        if detector is not None:
+            detector.reset()
+
     def _get_roi(self, model: str, scanner_id: str | None):
         key = (model, scanner_id)
         if key not in self._roi:

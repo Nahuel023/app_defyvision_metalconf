@@ -776,10 +776,13 @@ class ScannerController:
                 logger.error("[%s] ROI pre-cal: error escribiendo roi.json: %s", self._id, exc)
                 break
 
-            # Actualizar sesión en memoria
+            # Actualizar sesión en memoria Y el cache del Inspector — sin esto el
+            # cache en memoria seguia devolviendo el ROI viejo en cada reinicio
+            # del scanner (solo se corregia tras reiniciar todo el programa).
             session._preloaded["roi"] = new_roi
             session._preloaded["saved_roi"] = new_roi
             session._preloaded["roi_runtime_state"] = {}
+            self._inspector.set_roi(model, self._id, new_roi)
 
             logger.info("[%s] ROI pre-cal: persistido x=%d w=%d (shift fue %.1fpx)", self._id, new_roi.x, new_roi.w, avg_shift)
 
@@ -811,6 +814,12 @@ class ScannerController:
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
+        # Limpiar racha del detector de machine_stop antes de arrancar: el
+        # detector vive cacheado en self._inspector (no se recrea en cada
+        # reinicio del scanner), asi que sin este reset arrastraria zonas ya
+        # disparadas de la corrida anterior y volveria a parar instantaneamente
+        # aunque el defecto fisico ya haya pasado.
+        self._inspector.reset_machine_stop(model_init, self._id)
         session = InspectionSession(
             model_init,
             scanner_id=self._id,

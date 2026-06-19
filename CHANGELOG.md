@@ -48,6 +48,61 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 222 - Fix real: machine_stop volvia a dispararse al instante tras RESET+INICIAR (estado cacheado obsoleto)
+
+**Pedido:** Tadeo reporto que tras una parada de maquina, RESET FALLA + INICIAR
+seguia disparando machine_stop "instantaneamente, aunque el error YA HAYA
+PASADO" — "queda como mirando para atras". Solo reiniciando el PROGRAMA
+COMPLETO (no solo el scanner desde la UI) el sistema volvia a funcionar bien.
+El Cambio 219 (subir startup_grace_frames) no resolvio el problema de fondo.
+
+**Causa raiz (confirmada con prueba aislada):** `Inspector` (`src/vision/
+inspector.py`) cachea ROI/patron/tolerancias/detector de machine_stop por
+`(model, scanner_id)` durante TODA la vida del proceso — no se recrea al
+hacer RESET+INICIAR desde la UI (eso solo crea una `InspectionSession` nueva,
+pero pidiendole los mismos objetos cacheados al `Inspector`, que sigue siendo
+la misma instancia). Dos focos de estado obsoleto:
+
+1. `_run_roi_precalibration()` (linea 669) corrige el ROI desplazado y lo
+   persiste a `roi.json` en disco + a la sesion en memoria
+   (`session._preloaded["roi"]`) — pero NUNCA actualizaba el cache del propio
+   `Inspector` (`self._roi[(model, scanner_id)]`). Como `Inspector._get_roi()`
+   solo lee de disco si la clave no esta ya en cache, cada reinicio del
+   scanner volvia a arrancar con el ROI VIEJO (no el corregido), forzando a
+   la precalibracion a repetir el trabajo y, mientras tanto, producir
+   detecciones de agujeros faltantes falsas con el ROI mal puesto.
+2. El `MachineStopDetector` (`src/pipeline/machine_stop.py`) tambien vive
+   cacheado por `(model, scanner_id)` en el `Inspector`, con sus zonas/racha
+   internas (`_grid_zones`, `_triggered`) — nada llamaba a `.reset()` al
+   reiniciar el scanner, asi que el detector seguia "mirando" el estado
+   disparado de la corrida anterior hasta que datos nuevos lo decantaran
+   (usualmente 1 frame, pero sumado al ROI desfasado del punto 1, se
+   re-disparaba antes de estabilizarse).
+
+Una sesion de proceso nueva (reiniciar el programa) crea un `Inspector()`
+limpio que recien ahi lee `roi.json` ya corregido del disco — por eso
+"andaba" solo reiniciando todo.
+
+**Cambios:**
+- `src/vision/inspector.py`
+  - nuevo `Inspector.set_roi(model, scanner_id, roi)`: actualiza el cache en
+    memoria sin esperar a un reload de disco
+  - nuevo `Inspector.reset_machine_stop(model, scanner_id)`: limpia el
+    detector cacheado (zonas + racha) si existe
+- `src/controller/scanner_controller.py`
+  - `_run_roi_precalibration()`: tras escribir el ROI corregido a disco,
+    ahora tambien llama `self._inspector.set_roi(model, self._id, new_roi)`
+  - `_continuous_loop_impl()`: al arrancar una sesion nueva, llama
+    `self._inspector.reset_machine_stop(model_init, self._id)` antes de crear
+    la `InspectionSession`, para no arrastrar zonas ya disparadas
+
+**Validacion:** prueba aislada con `Inspector` standalone — `reset_machine_stop`
+limpia `is_triggered`/`_grid_zones` correctamente; `set_roi` actualiza el
+cache en memoria sin pasar por disco. Suite de tests sin regresiones (mismo
+fallo preexistente no relacionado).
+
+---
+
 #### Cambio 221 - Diagnostico: log de tiempo real de la racha NOK hasta FAULT
 
 **Pedido:** Tadeo reporta que la maquina tarda ~3 segundos en detenerse desde
