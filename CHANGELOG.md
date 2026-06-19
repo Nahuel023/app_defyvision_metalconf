@@ -48,6 +48,21 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 230 - Boton MODO SEGURO: texto claro ELECTROVALVULAS ACTIVADAS/DESACTIVADAS
+
+**Pedido:** Tadeo quiere que el detalle del boton de modo seguro diga
+directamente "ELECTROVALVULAS DESACTIVADAS" cuando MODO SEGURO esta ON
+(bloqueadas) y "ELECTROVALVULAS ACTIVADAS" cuando esta OFF (liberadas).
+
+**Cambios:** `src/ui/operator.py` → `OperatorWindow._apply_safe_mode_ui()`
+- texto de detalle bajo "MODO SEGURO: ON/OFF" cambiado de "Proteccion
+  electrovalvulas activa"/"Proteccion desactivada" a
+  "ELECTROVALVULAS DESACTIVADAS"/"ELECTROVALVULAS ACTIVADAS"
+
+**Validacion:** `py_compile` OK.
+
+---
+
 #### Cambio 229 - Navegacion con flechas: avance rapido al mantener apretada
 
 **Pedido:** Tadeo quiere usar las flechas izquierda/derecha para pasar de
