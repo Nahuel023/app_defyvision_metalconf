@@ -1434,6 +1434,8 @@ class RecordingTab(QWidget):
         self._frame_paths: list[Path] = []
         self._results: list           = []
         self._current_idx: int        = 0
+        self._nav_hold_key: int | None = None
+        self._nav_hold_count: int      = 0
         self._worker: Optional[_AnalysisWorker] = None
         self._live_ms_detector = None
         self._live_pre: dict | None = None
@@ -3001,6 +3003,21 @@ class RecordingTab(QWidget):
             self._show_frame(0)
         logger.info(f"[Grabación] detenida - {n} frames")
 
+    @staticmethod
+    def _burn_stamp(img, idx: int, dt: datetime) -> None:
+        """Quema numero de frame + fecha/hora abajo a la derecha, in-place."""
+        lines = [dt.strftime("%d/%m/%Y %H:%M:%S.%f")[:-3], str(idx)]
+        font, scale, thick = cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1
+        h, w = img.shape[:2]
+        margin, line_h = 8, 16
+        y = h - margin
+        for txt in reversed(lines):
+            (tw, _th), _ = cv2.getTextSize(txt, font, scale, thick)
+            tx = w - tw - margin
+            cv2.putText(img, txt, (tx + 1, y + 1), font, scale, (0, 0, 0), thick + 1, cv2.LINE_AA)
+            cv2.putText(img, txt, (tx, y), font, scale, (0, 255, 255), thick, cv2.LINE_AA)
+            y -= line_h
+
     def _grab_frame(self) -> None:
         sid  = self._scanner_combo.currentText()
         cam  = self._system.camera(sid)
@@ -3023,18 +3040,7 @@ class RecordingTab(QWidget):
         # el texto quemado podria confundirse con un agujero falso en bright.
         frame_to_save = frame_copy.copy()
         _now = datetime.now()
-        _lines = [_now.strftime("%d/%m/%Y %H:%M:%S.%f")[:-3], str(idx)]
-        _font, _scale, _thick = cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1
-        _h, _w = frame_to_save.shape[:2]
-        _margin = 8
-        _line_h = 16
-        _y = _h - _margin
-        for _txt in reversed(_lines):
-            (_tw, _th), _ = cv2.getTextSize(_txt, _font, _scale, _thick)
-            _tx = _w - _tw - _margin
-            cv2.putText(frame_to_save, _txt, (_tx + 1, _y + 1), _font, _scale, (0, 0, 0), _thick + 1, cv2.LINE_AA)
-            cv2.putText(frame_to_save, _txt, (_tx, _y), _font, _scale, (0, 255, 255), _thick, cv2.LINE_AA)
-            _y -= _line_h
+        self._burn_stamp(frame_to_save, idx, _now)
 
         if self._write_executor is not None:
             self._write_executor.submit(
@@ -3068,6 +3074,14 @@ class RecordingTab(QWidget):
                 )
                 if result is None:
                     return
+                # El overlay del resultado puede estar recortado por el ROI del
+                # modelo (config/patterns/{model}/roi.json), que suele excluir la
+                # esquina inferior derecha — ahi se quemo el sello en frame_to_save.
+                # Se vuelve a quemar sobre el overlay (solo display) para que se
+                # vea tambien al revisar el analisis en vivo.
+                overlay = getattr(result, "overlay", None)
+                if overlay is not None:
+                    self._burn_stamp(overlay, idx, _now)
                 self._results.append(result)
                 ok  = sum(1 for r in self._results if r.status == "OK")
                 nok = len(self._results) - ok
@@ -3252,6 +3266,14 @@ class RecordingTab(QWidget):
                 scanner_id=self._ana_scanner_id,
                 _preloaded=self._ana_pre,
             )
+            # El overlay puede venir recortado por el ROI del modelo, que
+            # excluye la esquina donde se quemo el sello al grabar — se vuelve
+            # a quemar sobre el overlay (solo display) usando la fecha del
+            # archivo, ya que el timestamp real solo vive quemado en el PNG.
+            overlay = getattr(result, "overlay", None)
+            if overlay is not None:
+                mtime = datetime.fromtimestamp(self._frame_paths[i].stat().st_mtime)
+                self._burn_stamp(overlay, i, mtime)
             self._results.append(result)
         except Exception as exc:
             self._ana_running = False
@@ -4007,7 +4029,22 @@ class RecordingTab(QWidget):
         if obj is self._img_view and event.type() == QEvent.Type.KeyPress:
             self.keyPressEvent(event)
             return True
+        if obj is self._img_view and event.type() == QEvent.Type.KeyRelease:
+            self.keyReleaseEvent(event)
+            return True
         return super().eventFilter(obj, event)
+
+    # Pasos por frame segun cuanto tiempo se mantiene la flecha apretada —
+    # cada repeticion de teclado (autorepeat) suma 1 al contador y el salto
+    # crece, asi "pasar rapido" no depende de decodificar cada frame intermedio.
+    _NAV_HOLD_STEPS = ((0, 1), (8, 3), (20, 8), (40, 20))
+
+    def _nav_hold_step_size(self) -> int:
+        step = 1
+        for threshold, size in self._NAV_HOLD_STEPS:
+            if self._nav_hold_count >= threshold:
+                step = size
+        return step
 
     def keyPressEvent(self, event) -> None:
         key  = event.key()
@@ -4019,12 +4056,23 @@ class RecordingTab(QWidget):
             self._go_next_nok()
         elif key == Qt.Key.Key_Left and ctrl:
             self._go_prev_nok()
-        elif key == Qt.Key.Key_Right:
-            self._show_frame(self._current_idx + 1)
-        elif key == Qt.Key.Key_Left:
-            self._show_frame(self._current_idx - 1)
+        elif key in (Qt.Key.Key_Right, Qt.Key.Key_Left):
+            if event.isAutoRepeat() and self._nav_hold_key == key:
+                self._nav_hold_count += 1
+            else:
+                self._nav_hold_key = key
+                self._nav_hold_count = 0
+            step = self._nav_hold_step_size()
+            delta = step if key == Qt.Key.Key_Right else -step
+            self._show_frame(self._current_idx + delta)
         else:
             super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if not event.isAutoRepeat() and event.key() == self._nav_hold_key:
+            self._nav_hold_key = None
+            self._nav_hold_count = 0
+        super().keyReleaseEvent(event)
 
     def _grp_style(self) -> str:
         return (

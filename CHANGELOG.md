@@ -48,6 +48,62 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 229 - Navegacion con flechas: avance rapido al mantener apretada
+
+**Pedido:** Tadeo quiere usar las flechas izquierda/derecha para pasar de
+frame en el visor de `RecordingTab`, y que si las deja apretadas el avance se
+acelere ("que pase rapido").
+
+**Cambios:** `src/ui/service.py` → `RecordingTab`
+- `eventFilter()` ahora tambien reenvia `QEvent.Type.KeyRelease` a
+  `keyReleaseEvent()` (antes solo reenviaba `KeyPress`)
+- `keyPressEvent()`: cada evento de autorepeat (`event.isAutoRepeat()`) de la
+  misma flecha suma al contador `_nav_hold_count`; el tamaño del salto crece
+  por umbrales (`_NAV_HOLD_STEPS`: 1 frame al apretar, luego 3, 8, 20 frames
+  segun cuanto tiempo se mantiene apretada). Saltar de a varios frames evita
+  además depender de decodificar cada frame intermedio, que es lo que
+  volvia lento el avance "rapido" si solo se confiaba en el autorepeat del SO
+- `keyReleaseEvent()` nuevo: al soltar la tecla (evento no autorepeat) reinicia
+  el contador
+
+**Validacion:** `py_compile` OK.
+
+---
+
+#### Cambio 228 - Sello fecha/hora invisible al analizar frames grabados (tapado por el ROI)
+
+**Pedido:** Tadeo reporto que el numero de frame + fecha/hora del Cambio 225
+(quemados en el PNG al grabar) no se ven cuando analiza esos frames despues
+en el visor de `RecordingTab`.
+
+**Causa:** el sello se quema abajo a la derecha del frame COMPLETO al grabar
+(`frame_to_save`, disco). Pero tanto el analisis en vivo (durante grabacion)
+como el analisis offline (boton "Analizar") muestran por defecto el
+**overlay** (`OVERLAY` toggle, `setChecked(True)`), no el PNG crudo. Ese
+overlay lo genera `inspect_image()`/`inspect_frame()`, que aplica el ROI del
+modelo (`data/patterns/{model}/roi.json`, p.ej. `x:225,w:235` en
+`scanner_1/modelo_A` vs un frame mucho mas ancho) — el recorte ROI excluye
+justo la esquina inferior derecha donde vive el sello, asi que el overlay
+nunca lo tenia. Con el toggle OVERLAY apagado si se veia (lee el PNG crudo
+con `cv2.imread`), pero apagar el overlay no es el flujo normal de revision.
+
+**Cambios:** `src/ui/service.py` → `RecordingTab`
+- nuevo metodo estatico `_burn_stamp(img, idx, dt)` — extrae la logica de
+  dibujo (antes inline en `_grab_frame`) para reusarla
+- `_grab_frame()`: usa `_burn_stamp()` para `frame_to_save` (sin cambio de
+  comportamiento) y ADEMAS quema el mismo sello sobre `result.overlay` del
+  análisis en vivo (solo para display — no afecta `frame_copy`, que sigue
+  intacto para no contaminar la deteccion)
+- `_analyze_one_frame_inner()` (análisis offline): quema el sello sobre
+  `result.overlay` usando la fecha de modificacion del archivo PNG
+  (`frame_paths[i].stat().st_mtime`) ya que el timestamp real de captura solo
+  vive quemado en el propio PNG, no se persiste en memoria entre sesiones
+
+**Validacion:** `py_compile` OK; suite de tests sin regresiones (mismo fallo
+preexistente no relacionado, `test_scanner_controller.py`).
+
+---
+
 #### Cambio 227 - Modo SERVICIO (incluye tab GRABACION): abrir siempre en pantalla completa
 
 **Pedido:** Tadeo quiere que al abrir la pantalla de grabacion (tab GRABACION,
