@@ -48,6 +48,39 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 217 - Fix: visor de frames se cuelga con muchas imagenes acumuladas
+
+**Pedido:** Tadeo dejo corriendo el sistema mucho tiempo (incluida la grabacion
+nocturna sin paradas del Cambio 215) y al abrir el visor de frames (pestana NOK
+recientes / Flujo cronologico) la UI se congelaba.
+
+**Causa:** `data/output/nok/` no tiene buffer circular (a diferencia de
+`ok_buffer/`, que sobreescribe slots viejos con tope `ok_buffer_count`). Cada
+frame NOK detectado se guarda ahi para siempre. Tras una corrida larga se
+acumulan miles de archivos, y `_EventNavPanel.load_ok_buffer()` /
+`load_timeline()` en `src/ui/frame_viewer.py` creaban un `QLabel` y lanzaban
+una miniatura (`cv2.imread`) por cada archivo de una sola vez — con miles de
+archivos esto congela la UI.
+
+**Cambios:**
+- `src/ui/frame_viewer.py`
+  - nueva constante `_MAX_VIEWER_FRAMES = 300`
+  - `load_ok_buffer()` y `load_timeline()` ahora ordenan los frames por fecha
+    (ascendente) y recortan a los `_MAX_VIEWER_FRAMES` mas recientes antes de
+    crear miniaturas/widgets; el resto sigue en disco, solo no se carga en la UI
+  - el label de info indica "`N` de `total` frames (mostrando los mas
+    recientes)" cuando se aplica el recorte
+  - de paso corrige un orden inconsistente: la pestana NOK pasaba la lista en
+    orden mas-reciente-primero pero `load_ok_buffer` asume orden ascendente
+    (mas reciente al final) para mostrar el ultimo frame por defecto
+
+**Decision:** Tadeo prefiere mantener `data/output/nok/` sin limite de tamano
+(borrado solo manual con el boton "Borrar todo"), por lo que la carpeta puede
+seguir creciendo — pero el visor ya no se cuelga sin importar cuantos archivos
+haya.
+
+---
+
 #### Cambio 216 - Revertir grabacion nocturna: restaurar parada por NOK
 
 **Pedido:** Tadeo quiere volver a hacer pruebas con la maquina parando normalmente

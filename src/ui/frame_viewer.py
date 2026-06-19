@@ -69,6 +69,12 @@ _TL_COLORS = {
 _THUMB_W = 90
 _THUMB_H = 60
 
+# Tope de frames que el visor carga/miniaturiza de una sola vez. Carpetas como
+# data/output/nok/ no tienen buffer circular y pueden acumular miles de
+# imagenes si la maquina corre mucho tiempo sin limpieza manual; sin este tope
+# el visor crea una miniatura por cada archivo y se cuelga.
+_MAX_VIEWER_FRAMES = 300
+
 
 # ── Helper ────────────────────────────────────────────────────────────────────
 
@@ -479,6 +485,13 @@ class _EventNavPanel(QWidget):
 
     def load_ok_buffer(self, frames: list[Path], scanner_label: str,
                        folder_dir: Optional[Path] = None) -> None:
+        # Orden cronologico ascendente (el llamador puede pasar cualquier orden)
+        # y tope de cantidad: carpetas sin buffer circular (ej. nok/) pueden
+        # acumular miles de archivos y colgar la UI si se cargan todos.
+        frames = sorted(frames, key=lambda f: f.stat().st_mtime)
+        total = len(frames)
+        if total > _MAX_VIEWER_FRAMES:
+            frames = frames[-_MAX_VIEWER_FRAMES:]
         self._frames = frames
         self._current = 0
         self._is_event_mode = False
@@ -490,8 +503,10 @@ class _EventNavPanel(QWidget):
                     frames[-1].stat().st_mtime).strftime("%H:%M:%S")
             except Exception:
                 pass
+        count_txt = f"{len(frames)} frames OK" if total == len(frames) \
+            else f"{len(frames)} de {total} frames OK (mostrando los más recientes)"
         self._info_lbl.setText(
-            f"{scanner_label}   ·   {len(frames)} frames OK"
+            f"{scanner_label}   ·   {count_txt}"
             f"   ◀ antiguo — reciente ▶{newest_ts}"
         )
         self._clear_thumbs()
@@ -516,6 +531,10 @@ class _EventNavPanel(QWidget):
 
     def load_timeline(self, frames: list[Path], scanner_label: str) -> None:
         """Carga el buffer cronológico completo con colores por status."""
+        frames = sorted(frames, key=lambda f: f.stat().st_mtime)
+        total = len(frames)
+        if total > _MAX_VIEWER_FRAMES:
+            frames = frames[-_MAX_VIEWER_FRAMES:]
         self._frames = frames
         self._current = 0
         self._is_event_mode = False
@@ -533,8 +552,10 @@ class _EventNavPanel(QWidget):
                     frames[-1].stat().st_mtime).strftime("%H:%M:%S")
             except Exception:
                 pass
+        count_txt = f"{len(frames)} frames" if total == len(frames) \
+            else f"{len(frames)} de {total} frames (mostrando los más recientes)"
         self._info_lbl.setText(
-            f"{scanner_label}   ·   {len(frames)} frames   ({', '.join(summary_parts)})"
+            f"{scanner_label}   ·   {count_txt}   ({', '.join(summary_parts)})"
             f"   ◀ antiguo — reciente ▶{newest_ts}"
         )
 
