@@ -80,6 +80,7 @@ class ScannerController:
         self._nok_streak = 0
         self._lq_streak  = 0
         self._last_result: Optional[InspectionResult] = None
+        self._streak_start_mono: Optional[float] = None  # time.monotonic() del 1er NOK de la racha activa
 
         # Métricas de sesión (resetean en start())
         self._total_inspections: int       = 0
@@ -195,6 +196,7 @@ class ScannerController:
         with self._lock:
             self._nok_streak              = 0
             self._lq_streak               = 0
+            self._streak_start_mono       = None
             self._total_inspections       = 0
             self._ok_count                = 0
             self._nok_count               = 0
@@ -279,6 +281,7 @@ class ScannerController:
                 return False
             self._nok_streak = 0
             self._lq_streak  = 0
+            self._streak_start_mono = None
             self._last_result = None
 
         self._transition(ScannerState.IDLE)
@@ -309,6 +312,7 @@ class ScannerController:
             self._mode                    = OperationMode.AUTO
             self._nok_streak              = 0
             self._lq_streak               = 0
+            self._streak_start_mono       = None
             self._total_inspections       = 0
             self._ok_count                = 0
             self._nok_count               = 0
@@ -955,6 +959,7 @@ class ScannerController:
 
         fault_triggered = False
         machine_stop_triggered = False
+        streak_start_mono: Optional[float] = None
         with self._lock:
             self._last_result = result
             self._total_inspections += 1
@@ -975,12 +980,15 @@ class ScannerController:
             else:
                 self._lq_streak = 0
                 if result.status == "NOK":
+                    if self._nok_streak == 0:
+                        self._streak_start_mono = time.monotonic()
                     self._nok_streak += 1
                     self._nok_count  += 1
                     self._total_missing    += result.report.missing
                     self._nok_with_missing += 1
                 else:
                     self._nok_streak = 0
+                    self._streak_start_mono = None
                     self._ok_count  += 1
 
             streak = self._nok_streak
@@ -1003,10 +1011,12 @@ class ScannerController:
                 if in_grace:
                     logger.debug("[%s] fault suprimido por grace period (streak=%d)", self._id, streak)
                     self._nok_streak = 0  # reset streak para no acumular durante grace
+                    self._streak_start_mono = None
                 else:
                     self._state     = ScannerState.FAULT
                     fault_triggered = True
                     self._fault_count += 1
+                    streak_start_mono = self._streak_start_mono
 
         if machine_stop_triggered:
             _ms_reason = self._derive_stop_reason(result)
@@ -1043,7 +1053,10 @@ class ScannerController:
             return
 
         if fault_triggered:
-            logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos")
+            elapsed_txt = ""
+            if streak_start_mono is not None:
+                elapsed_txt = f" ({time.monotonic() - streak_start_mono:.2f}s reales)"
+            logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos{elapsed_txt}")
             if self._recorder is not None:
                 try:
                     self._recorder.flush_event("fault", f"racha NOK {streak}")

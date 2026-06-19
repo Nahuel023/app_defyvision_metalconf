@@ -48,6 +48,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 221 - Diagnostico: log de tiempo real de la racha NOK hasta FAULT
+
+**Pedido:** Tadeo reporta que la maquina tarda ~3 segundos en detenerse desde
+que aparece la falla por NOK, cuando deberia ser casi instantaneo. Pidio
+chequear que el flujo de codigo este bien.
+
+**Verificado:** el flujo es correcto — al llegar a `consecutive_nok_frames`
+(5), el corte de solenoide (`_io.write(solenoid, False)`) se ejecuta en la
+misma llamada que detecta la racha, sin sleeps ni esperas intermedias.
+
+**Datos de Metricas durante la sesion:** Camera FPS=13.6, Insp/min=252
+(4.2 inspecciones reales/seg). Con eso, 5 frames deberian tardar ~1.2s, no
+los ~3s observados — la brecha no se explica por el FPS promedio de camara
+ni por el throughput promedio de inspeccion. Hipotesis: los frames NOK
+(deteccion fallida, fallback de alineacion) tardan mas en procesarse que el
+promedio general (que incluye muchos frames OK rapidos), pero no hay forma de
+confirmarlo sin medir la racha real.
+
+**Cambios (diagnostico, no fix):**
+- `src/controller/scanner_controller.py`
+  - nuevo `self._streak_start_mono`: timestamp (`time.monotonic()`) del primer
+    NOK de la racha activa; se limpia en cada reset de racha (frame OK, inicio
+    de sesion, `reset()`, grace period)
+  - el log de FAULT ahora incluye el tiempo real transcurrido:
+    `"[scanner_1] FAULT — 5 NOK consecutivos (X.XXs reales)"`
+
+**Validacion:** prueba standalone con `inject_result()` y sleeps de 0.3s entre
+frames → log mostro correctamente "1.20s reales" para 5 frames. Suite de
+tests sin regresiones (mismo fallo preexistente de siempre).
+
+**Proximo paso:** la proxima vez que ocurra una falla real por NOK, revisar
+el log y pasar el valor de "X.XXs reales" para confirmar si el cuello de
+botella esta en el procesamiento de frames NOK especificamente.
+
+---
+
 #### Cambio 220 - RESET FALLA descarta racha NOK y ultimo resultado de inmediato
 
 **Pedido:** Tadeo pregunto si al hacer RESET FALLA se descartan los frames con
