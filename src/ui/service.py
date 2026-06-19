@@ -6649,5 +6649,5 @@ def launch_service_ui(system: InspectionSystem) -> None:
     if not icon_pix.isNull():
         app.setWindowIcon(QIcon(icon_pix))
     win = ServiceWindow(system)
-    win.show()
+    win.showMaximized()
     app.exec()

@@ -1314,7 +1314,7 @@ class OperatorWindow(QMainWindow):
 
         if self._service_win is None or not self._service_win.isVisible():
             self._service_win = ServiceWindow(self._system, parent=None)
-        self._service_win.show()
+        self._service_win.showMaximized()
         self._service_win.raise_()
         self._service_win.activateWindow()
 

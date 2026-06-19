@@ -48,6 +48,28 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 227 - Modo SERVICIO (incluye tab GRABACION): abrir siempre en pantalla completa
+
+**Pedido:** Tadeo quiere que al abrir la pantalla de grabacion (tab GRABACION,
+dentro de Modo Servicio) se abra en pantalla completa. Aclaro que tambien
+aplica a la ventana de Modo Servicio en general.
+
+**Causa:** `RecordingTab` no es una ventana propia, es un tab embebido dentro
+de `ServiceWindow` (`src/ui/service.py`). Los tres puntos donde se instancia
+y muestra `ServiceWindow` usaban `win.show()`, que abre con el tamaño fijo
+`resize(1200, 760)` en vez de ocupar toda la pantalla.
+
+**Cambios:** `win.show()` → `win.showMaximized()` (mismo patron ya usado por
+`OperatorWindow`) en:
+- `src/main.py` (comando `service`)
+- `src/ui/service.py` (`main()` standalone de pruebas)
+- `src/ui/operator.py` (`OperatorWindow._open_service` — boton "Modo Servicio"
+  desde el panel de operador)
+
+**Validacion:** `py_compile` OK en los 3 archivos modificados.
+
+---
+
 #### Cambio 226 - Label MANETA: mostrar siempre, no solo durante RUN
 
 **Pedido:** Tadeo reporto que el label "MANETA: MANUAL/AUTOMATICO" agregado en

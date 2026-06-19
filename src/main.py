@@ -755,7 +755,7 @@ def cmd_service(_: argparse.Namespace) -> int:
     system.start_cameras()
 
     win = ServiceWindow(system)
-    win.show()
+    win.showMaximized()
     app.exec()
 
     system.shutdown()
