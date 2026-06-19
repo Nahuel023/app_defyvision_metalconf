@@ -48,6 +48,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 219 - Fix: pantalla DETENCION DE MAQUINA se repetia con chapa nueva al reiniciar
+
+**Pedido:** Tadeo reporto que al disparar machine_stop, confirmar la pantalla
+DETENCION DE MAQUINA, hacer RESET FALLA e INICIAR de nuevo, el sistema volvia
+a fallar casi al instante — "montones de veces" en sucesivos reintentos.
+Pregunte y confirmo: en cada reintento la chapa ya era OTRA distinta (la
+cinta habia avanzado), no la misma pieza defectuosa repetida.
+
+**Diagnostico:** eso descarta una re-deteccion correcta del mismo defecto;
+es un falso positivo transitorio justo despues de reiniciar. La causa:
+`startup_grace_frames` (frames tras INICIAR sin evaluar machine_stop/FAULT,
+para darle tiempo a camara/luz/vibracion a estabilizarse) estaba en el
+default de codigo, 30 frames — a ~10 fps son apenas ~3 segundos, insuficiente
+para que el sistema se estabilice tras el reinicio. RESET FALLA si funcionaba
+(STOPPED → IDLE), pero el INICIAR posterior volvia a caer en machine_stop casi
+de inmediato por la inestabilidad inicial, dando la sensacion de que "no
+resetea realmente".
+
+**Cambios:**
+- `config/tolerancias.yaml`
+  - `startup_grace_frames: 100` (override explicito top-level, antes solo el
+    default de codigo de 30) — aplica a modelo_A y modelo_B por igual
+
+**Nota:** si volviera a repetirse con chapas nuevas y buenas tras este cambio,
+el problema no es de timing sino de calibracion del patron/ROI — ahi hay que
+revisar `build-pattern` y los parametros `pattern_align_*`, no este valor.
+
+---
+
 #### Cambio 218 - Buffer "flujo cronologico" mas grande (25000 frames) + paginacion en el visor
 
 **Pedido:** Tadeo quiere un buffer circular mas grande con todas las imagenes

@@ -8,6 +8,11 @@ aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
 consecutive_nok_frames: 5
+# Frames tras INICIAR sin evaluar machine_stop/FAULT: le da tiempo a camara/luz/
+# vibracion a estabilizarse despues de un reinicio. Default de codigo (30, ~1-3s)
+# resulto insuficiente: una chapa nueva y buena disparaba machine_stop apenas
+# reiniciado el scanner (falso positivo transitorio, no defecto real).
+startup_grace_frames: 100
 frame_rate_hz: 25.0
 max_response_sec: 1.6
 edge_margin_px: 15.0
