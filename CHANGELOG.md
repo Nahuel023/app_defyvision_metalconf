@@ -48,6 +48,31 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 226 - Label MANETA: mostrar siempre, no solo durante RUN
+
+**Pedido:** Tadeo reporto que el label "MANETA: MANUAL/AUTOMATICO" agregado en
+el Cambio 224 solo se actualizaba mientras el scanner estaba en RUN.
+
+**Causa:** `ScannerPanel.refresh_status()` leia `mode_switch_raw` desde
+`get_status()`, que a su vez depende de `_update_mode_from_plc()` —  pero esa
+funcion solo se ejecuta dentro del thread `_poll_loop`, y ese thread arranca
+en `start()` y se une (`_join_threads()`) en `stop()`. Fuera de RUNNING el
+poller no existe, asi que `mode_switch_raw` quedaba congelado en su ultimo
+valor (o en `None` si el scanner nunca arranco desde que abrio el programa).
+
+**Cambios:**
+- `src/ui/operator.py` → `ScannerPanel.refresh_status()`
+  - en vez de leer `mode_switch_raw` de `get_status()`, ahora lee directo del
+    IOMap (`self._system.io.read(f"{self._id}.mode_switch")`) en cada tick
+    del timer de UI (200ms), independiente del estado del scanner
+
+**Validacion:** sintaxis OK, suite de tests sin regresiones (mismo fallo
+preexistente no relacionado). El read es un discrete-input Modbus de bajo
+costo, mismo tipo que ya hacia el poller — solo se extiende a todos los
+estados en vez de solo RUNNING.
+
+---
+
 #### Cambio 225 - Modo GRABACION (servicio): numero de frame + fecha/hora quemados en la imagen
 
 **Pedido:** Tadeo quiere, en el modo GRABACION del panel de servicio

@@ -546,7 +546,15 @@ class ScannerPanel(QWidget):
         camera_missing = bool(s.get("camera_missing", False))
         camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
 
-        mode_switch_raw = s.get("mode_switch_raw")
+        # Leida directo del IOMap (no via get_status()): el poller que actualiza
+        # mode_switch_raw en el controller solo corre mientras el scanner esta
+        # RUNNING, asi que dependiamos de un thread parado en IDLE/STOPPED/FAULT
+        # y la maneta dejaba de actualizarse fuera de RUN. Leyendo aca directo
+        # se refresca siempre, sin importar el estado del scanner.
+        try:
+            mode_switch_raw = self._system.io.read(f"{self._id}.mode_switch")
+        except Exception:
+            mode_switch_raw = None
         if mode_switch_raw is None:
             self._mode_switch_lbl.setText("MANETA: SIN SEÑAL")
             self._mode_switch_lbl.setStyleSheet(
