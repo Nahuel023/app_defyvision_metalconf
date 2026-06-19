@@ -273,16 +273,35 @@ class ScannerController:
     def reset(self) -> bool:
         """STOPPED → IDLE + azul. Requiere INICIAR para reanudar.
 
-        Descarta inmediatamente la racha NOK y el último resultado (FAULT/NOK)
-        que motivó la parada, para que el panel deje de mostrar el frame con
-        el error apenas se resetea, sin esperar a INICIAR."""
+        Olvida por completo los NOK y frames malos de la sesión que terminó:
+        racha, último resultado/overlay de la falla y todas las estadísticas
+        acumuladas (conteos OK/NOK, faults, machine_stops, missing, calidad).
+        No espera a INICIAR — el reset es el momento en que el sistema
+        "empieza de cero"."""
         with self._lock:
             if self._state != ScannerState.STOPPED:
                 return False
-            self._nok_streak = 0
-            self._lq_streak  = 0
-            self._streak_start_mono = None
-            self._last_result = None
+            self._nok_streak               = 0
+            self._lq_streak                = 0
+            self._streak_start_mono        = None
+            self._last_result               = None
+            self._total_inspections        = 0
+            self._ok_count                  = 0
+            self._nok_count                 = 0
+            self._session_start             = datetime.now()
+            self._max_nok_streak            = 0
+            self._fault_count               = 0
+            self._machine_stop_count        = 0
+            self._total_missing             = 0
+            self._nok_with_missing          = 0
+            self._last_position_diff        = 0.0
+            self._total_detection_ratio     = 0.0
+            self._align_fail_count          = 0
+            self._low_quality_count         = 0
+            self._camera_missing_since      = None
+            self._camera_missing_warned     = False
+            self._camera_missing_total_s    = 0.0
+            self._camera_missing_events     = 0
 
         self._transition(ScannerState.IDLE)
         self._set_lights(blue=True)

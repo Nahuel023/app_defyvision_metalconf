@@ -48,6 +48,33 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 223 - RESET FALLA olvida TODAS las estadisticas de NOK/falla de inmediato
+
+**Pedido:** Tadeo confirmo que quiere que RESET FALLA olvide por completo los
+NOK y frames malos anteriores apenas se aprieta, no recien al dar INICIAR —
+"justamente para eso es el reset".
+
+**Contexto:** el Cambio 220 ya limpiaba `nok_streak`, `lq_streak` y
+`last_result` en `reset()`. Pero los contadores acumulados de la sesion
+(`nok_count`, `ok_count`, `fault_count`, `machine_stop_count`,
+`max_nok_streak`, `total_missing`, `nok_with_missing`, `align_fail_count`,
+`low_quality_count`, etc.) solo se limpiaban en `start()` — quedaban con los
+valores de la sesion anterior mientras el scanner esperaba en IDLE entre
+RESET e INICIAR.
+
+**Cambios:**
+- `src/controller/scanner_controller.py` → `reset()`
+  - ahora limpia el mismo set completo de contadores que `start()` (conteos
+    OK/NOK, fault_count, machine_stop_count, missing, calidad, camara,
+    session_start), no solo la racha activa
+
+**Validacion:** prueba standalone — tras `inject_result(is_ok=False, count=5)`
+con `consecutive_nok=3` (dispara FAULT), `stop()` + `reset()` deja
+`nok_count=0`, `fault_count=0`, `last_result=None`, `state=IDLE`. Suite de
+tests sin regresiones (mismo fallo preexistente no relacionado).
+
+---
+
 #### Cambio 222 - Fix real: machine_stop volvia a dispararse al instante tras RESET+INICIAR (estado cacheado obsoleto)
 
 **Pedido:** Tadeo reporto que tras una parada de maquina, RESET FALLA + INICIAR
