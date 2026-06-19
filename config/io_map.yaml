@@ -95,6 +95,16 @@ scanner_2:
     pattern_align_stop_frames: 2
     pattern_global_offset_max_px: 0.0
     pattern_slope_delta_max_deg: 0.6
+    # Parada inmediata en 1 SOLO frame para desalineacion severa, sin esperar la
+    # racha de pattern_align_stop_frames: frames reales aportados por Tadeo
+    # (carpeta "ERROR DE PARADA FRAME DESALINEADO", 2026-06-19) mostraron zigzag
+    # de borde muy por encima del umbral de advertencia (13.7px y 16.1px vs
+    # pattern_align_abs_max_px=10.0) en UN SOLO frame aislado — la racha nunca
+    # llegaba a 2 frames seguidos y la maquina no paraba pese a la desalineacion
+    # mecanica real. 12.0px deja margen sobre el umbral de advertencia (10.0) y
+    # bajo el menor caso real observado (13.7) — a confirmar/ajustar probando en
+    # planta si da falsos positivos.
+    pattern_align_severe_abs_max_px: 12.0
     # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo
     # 2-3 columnas al construir el patron. Usar margen pequeño para capturar
     # todos los agujeros; los bordes se excluyen en comparacion via compare_*_ignore_px.

@@ -296,6 +296,12 @@ def _inspect_bgr(
     pattern_align_stop_frames  = int(tolerances.get("pattern_align_stop_frames", 3))
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
+    # Desalineacion SEVERA de un solo frame (zigzag de borde muy por encima del umbral
+    # de advertencia): para de inmediato sin esperar la racha de pattern_align_stop_frames,
+    # porque un solo frame asi ya es indicio mecanico, no ruido normal de borde de chapa.
+    # 0.0 = desactivado (default; requiere calibrar con frames reales antes de habilitar).
+    pattern_align_severe_abs_max_px = float(tolerances.get("pattern_align_severe_abs_max_px", 0.0))
+    pattern_align_severe_slope_deg  = float(tolerances.get("pattern_align_severe_slope_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)
     pattern_center_align_enabled    = bool(tolerances.get("pattern_center_align_enabled", False))
     pattern_center_zigzag_std_max   = float(tolerances.get("pattern_center_zigzag_std_max_px", 8.0))
@@ -918,6 +924,37 @@ def _inspect_bgr(
     # Persistir estado al siguiente frame (si _preloaded es un dict mutable compartido)
     pre["desalign_state"] = desalign_state
 
+    # DESALINEACION SEVERA (1 solo frame, sin esperar racha): cuando el zigzag de borde
+    # del patron supera por mucho el umbral de advertencia, ya no es ruido de borde de
+    # chapa sino un corrimiento mecanico real — parar de inmediato evita que un
+    # desalineamiento fuerte pero intermitente (no sostenido 2-3 frames seguidos)
+    # se pierda porque la racha nunca llega a pattern_align_stop_frames.
+    if (
+        not machine_stop
+        and pattern_align_enabled
+        and frame_geometry_quality != "UNSTABLE"
+        and centering is not None
+        and (pattern_align_min_missing <= 0 or report.missing >= pattern_align_min_missing)
+    ):
+        if (
+            pattern_align_severe_abs_max_px > 0.0
+            and pattern_zigzag_max_px > pattern_align_severe_abs_max_px
+        ):
+            machine_stop = True
+            _ms_reason   = (
+                f"PATRON DESALINEADO - ZIGZAG SEVERO "
+                f"(max={pattern_zigzag_max_px:.1f}px) [1 frame]"
+            )
+        elif (
+            pattern_align_severe_slope_deg > 0.0
+            and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0) > pattern_align_severe_slope_deg
+        ):
+            machine_stop = True
+            _ms_reason   = (
+                f"PATRON DESALINEADO - INCLINACION SEVERA "
+                f"({getattr(centering, 'pattern_sheet_slope_delta_max_deg', 0.0):.1f} deg) [1 frame]"
+            )
+
     # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
     # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
     if tilt_warn and machine_stop_on_tilt:
@@ -1121,7 +1158,13 @@ def _inspect_bgr(
     elif machine_stop:
         overlay = draw_machine_stop_badge(overlay, reason=_ms_reason, index=0)
     elif pattern_alignment_warn:
-        overlay = draw_machine_stop_badge(overlay, reason="PATRON DESALINEADO", index=0)
+        # Solo advertencia (racha aun no llega a pattern_align_stop_frames): la maquina
+        # NO se detuvo este frame. Titulo distinto a "DETENCION DE MAQUINA" para no
+        # hacer creer al operador que ya paro cuando todavia no lo hizo.
+        overlay = draw_machine_stop_badge(
+            overlay, reason="PATRON DESALINEADO", index=0,
+            title="ADVERTENCIA - PATRON DESALINEADO",
+        )
     if _lateral_shift_warn:
         idx = int(bool(machine_stop or pattern_alignment_warn))
         overlay = draw_machine_stop_badge(overlay, reason=_lateral_shift_reason, index=idx, title="DESVIACION LATERAL")

@@ -48,6 +48,58 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 231 - Parada inmediata por desalineacion SEVERA de 1 solo frame (scanner_2) + fix badge enganoso
+
+**Pedido:** Tadeo reporto que con desalineacion de patron GRANDE, el sistema la
+detecta (badge en overlay) pero la maquina no frena. Aporto frames reales de
+una carpeta "ERROR DE PARADA FRAME DESALINEADO" con el caso.
+
+**Diagnostico con los frames reales (`07650_NOK.jpg`, `00192_NOK.jpg`,
+scanner_2):**
+1. **Bug de display:** `src/inspection.py` dibujaba el banner rojo grande
+   "DETENCION DE MAQUINA" tambien cuando `pattern_alignment_warn=True` pero
+   `machine_stop` seguia en `False` (solo advertencia, racha sin completar) —
+   el operador veia "DETENCION DE MAQUINA" en frames donde la maquina, en los
+   hechos, seguia corriendo.
+2. **Causa real de que no frenara:** el unico mecanismo activo para
+   desalineacion de patron es por RACHA (`pattern_align_stop_frames=2` en
+   scanner_2) — exige 2 frames CONSECUTIVOS por encima del umbral de
+   advertencia. Los frames reales mostraban zigzag de borde 13.7px y 16.1px
+   (vs umbral de advertencia `pattern_align_abs_max_px=10.0`) pero como
+   frames AISLADOS (el frame siguiente volvia a estar dentro de tolerancia
+   por vibracion/ruido normal) — la racha nunca llegaba a 2 y `machine_stop`
+   nunca se activaba pese a la desalineacion mecanica real.
+
+**Cambios:**
+- `src/inspection.py`
+  - nuevas tolerancias `pattern_align_severe_abs_max_px` /
+    `pattern_align_severe_slope_deg` (default `0.0` = desactivado): si el
+    zigzag de borde o la inclinacion de UN SOLO frame superan este umbral
+    (mas alto que el umbral de advertencia normal), `machine_stop=True` de
+    inmediato, sin esperar la racha. Respeta el mismo gate
+    `pattern_align_min_missing` que el resto del chequeo de alineacion para
+    no confundir borde de chapa (missing=0) con desalineacion real.
+  - el banner "DETENCION DE MAQUINA" solo se dibuja cuando `machine_stop` es
+    realmente `True`; el caso de solo-advertencia ahora dice
+    "ADVERTENCIA - PATRON DESALINEADO"
+- `src/utils/config.py`: defaults `pattern_align_severe_abs_max_px: 0.0`,
+  `pattern_align_severe_slope_deg: 0.0` (desactivado por default; hay que
+  calibrar por scanner con frames reales antes de habilitar, igual criterio
+  que `pattern_desalign_enabled` — ver Cambio 100)
+- `config/io_map.yaml` → `scanner_2.inspection`: `pattern_align_severe_abs_max_px:
+  12.0` (margen entre el umbral de advertencia 10.0 y el menor caso real
+  observado 13.7). `scanner_1` queda sin calibrar (sin frames reales de
+  desalineacion severa todavia) — NO tocar hasta tener evidencia real,
+  mismo criterio que evito habilitar `pattern_desalign_enabled` a ciegas en
+  el pasado.
+
+**Validacion:** `py_compile` OK, YAML carga el nuevo valor correctamente,
+suite de tests sin regresiones (mismo fallo preexistente no relacionado).
+Pendiente: Tadeo prueba en planta para confirmar que 12.0px no genera falsos
+positivos sobre chapa buena; ajustar el umbral con esos resultados.
+
+---
+
 #### Cambio 230 - Boton MODO SEGURO: texto claro ELECTROVALVULAS ACTIVADAS/DESACTIVADAS
 
 **Pedido:** Tadeo quiere que el detalle del boton de modo seguro diga
