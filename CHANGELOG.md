@@ -48,6 +48,46 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-19 - Tadeo + Claude
 
+#### Cambio 218 - Buffer "flujo cronologico" mas grande (25000 frames) + paginacion en el visor
+
+**Pedido:** Tadeo quiere un buffer circular mas grande con todas las imagenes
+(OK+NOK+LQ+STOP) para poder analizar correctamente, no solo los ultimos
+segundos.
+
+**Contexto:** `timeline_buffer_count` estaba en 500 frames por scanner; a
+25 Hz (frame_rate_hz configurado) eso son apenas ~20 segundos de historial.
+Eligio retencion de ~15-20 minutos por scanner (44 GB libres en disco, holgado
+para el tamano estimado).
+
+**Cambios:**
+- `config/tolerancias.yaml`
+  - `timeline_buffer_count: 500 → 25000` (~15-20 min a 25Hz, ~1.7-2 GB por
+    scanner con jpeg calidad 75, ~4 GB total con 2 scanners)
+- `src/ui/frame_viewer.py` — paginacion en `_EventNavPanel` para poder navegar
+  todo el buffer ampliado sin colgar la UI (el tope de 300 del Cambio 217
+  seguia aplicando como techo fijo, lo cual dejaba inaccesibles los frames mas
+  viejos del nuevo buffer de 25000):
+  - nuevo estado `_all_frames` (set completo, orden ascendente) y `_window_size`
+    (cuanto esta cargado/renderizado actualmente, arranca en
+    `_MAX_VIEWER_FRAMES`)
+  - nuevo boton "⏮ Cargar más antiguos" debajo de la barra de navegacion;
+    visible/habilitado solo en modos `ok_buffer`/`timeline` y cuando quedan
+    frames mas viejos sin cargar
+  - `load_ok_buffer()` y `load_timeline()` refactorizados para delegar en
+    `_render_window()`, que renderiza solo la ventana actual
+  - `_load_more_older()` ampliacion la ventana en otro bloque de
+    `_MAX_VIEWER_FRAMES` y preserva el frame actualmente visible tras
+    re-renderizar
+  - modo "events" (paradas de linea) deshabilita el boton: esos lotes ya son
+    chicos (pre+post de un evento) y no usan ventana progresiva
+
+**Validacion:** probado con `_EventNavPanel` standalone y 700 frames sinteticos
+— ventana inicial de 300, cada click en "cargar mas" suma 300, el frame
+seleccionado se mantiene visible tras cada carga, y el boton se deshabilita al
+llegar al total.
+
+---
+
 #### Cambio 217 - Fix: visor de frames se cuelga con muchas imagenes acumuladas
 
 **Pedido:** Tadeo dejo corriendo el sistema mucho tiempo (incluida la grabacion

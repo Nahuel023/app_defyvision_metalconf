@@ -309,6 +309,13 @@ class _EventNavPanel(QWidget):
         self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
         self._inspect_worker: Optional[_InspectWorker] = None
         self._current_dir: Optional[Path] = None
+        # Paginación para buffers grandes (ok_buffer / timeline): self._all_frames
+        # tiene el set completo (orden ascendente); self._frames es la ventana
+        # actualmente cargada/renderizada (las más recientes, o más tras "cargar más").
+        self._all_frames: list[Path] = []
+        self._window_size: int = _MAX_VIEWER_FRAMES
+        self._panel_kind: str = ""       # "timeline" | "ok_buffer" | "event"
+        self._panel_label: str = ""
         self._build_ui()
 
     def _build_ui(self):
@@ -412,6 +419,23 @@ class _EventNavPanel(QWidget):
 
         root.addLayout(nav)
 
+        # ── Paginación (buffers grandes: ok_buffer / timeline) ─────────
+        load_more_row = QHBoxLayout()
+        load_more_row.addStretch()
+        self._load_more_btn = QPushButton("⏮  Cargar más antiguos")
+        self._load_more_btn.setMinimumHeight(28)
+        self._load_more_btn.setEnabled(False)
+        self._load_more_btn.setStyleSheet(
+            f"QPushButton {{ background:{_CARD}; color:{_MUTED}; border:1px solid {_BORDER};"
+            f"border-radius:6px; font-size:11px; font-weight:600; padding:0 14px; }}"
+            f"QPushButton:hover:!disabled {{ background:{_ACCENT}33; border-color:{_ACCENT}; color:{_TEXT}; }}"
+            f"QPushButton:disabled {{ color:#374151; border-color:#1f2937; }}"
+        )
+        self._load_more_btn.clicked.connect(self._load_more_older)
+        load_more_row.addWidget(self._load_more_btn)
+        load_more_row.addStretch()
+        root.addLayout(load_more_row)
+
         # ── Tira de miniaturas ────────────────────────────────────────
         thumb_scroll = QScrollArea()
         thumb_scroll.setFixedHeight(_THUMB_H + 20)
@@ -441,6 +465,10 @@ class _EventNavPanel(QWidget):
         self._model = _get_model_for_scanner(self._scanner_id)
         self._is_event_mode = True
         self._current_dir = summary.get("dir")
+        self._panel_kind = "event"
+        self._all_frames = []
+        self._load_more_btn.setEnabled(False)
+        self._load_more_btn.setText("⏮  Cargar más antiguos")
 
         # Separar pre/post para colorear la tira
         n_pre = summary["pre_count"]
@@ -485,66 +513,50 @@ class _EventNavPanel(QWidget):
 
     def load_ok_buffer(self, frames: list[Path], scanner_label: str,
                        folder_dir: Optional[Path] = None) -> None:
-        # Orden cronologico ascendente (el llamador puede pasar cualquier orden)
-        # y tope de cantidad: carpetas sin buffer circular (ej. nok/) pueden
-        # acumular miles de archivos y colgar la UI si se cargan todos.
-        frames = sorted(frames, key=lambda f: f.stat().st_mtime)
-        total = len(frames)
-        if total > _MAX_VIEWER_FRAMES:
-            frames = frames[-_MAX_VIEWER_FRAMES:]
-        self._frames = frames
-        self._current = 0
+        self._all_frames = sorted(frames, key=lambda f: f.stat().st_mtime)
+        self._panel_kind = "ok_buffer"
+        self._panel_label = scanner_label
         self._is_event_mode = False
         self._current_dir = folder_dir
-        newest_ts = ""
-        if frames:
-            try:
-                newest_ts = "  ·  último: " + datetime.fromtimestamp(
-                    frames[-1].stat().st_mtime).strftime("%H:%M:%S")
-            except Exception:
-                pass
-        count_txt = f"{len(frames)} frames OK" if total == len(frames) \
-            else f"{len(frames)} de {total} frames OK (mostrando los más recientes)"
-        self._info_lbl.setText(
-            f"{scanner_label}   ·   {count_txt}"
-            f"   ◀ antiguo — reciente ▶{newest_ts}"
-        )
-        self._clear_thumbs()
-        for i in range(len(frames)):
-            lbl = QLabel()
-            lbl.setFixedSize(_THUMB_W, _THUMB_H)
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(
-                f"background:#000;border:2px solid {_OK_CLR};border-radius:3px;"
-            )
-            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-            lbl.mousePressEvent = lambda e, idx=i: self._go_to(idx)
-            self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
-            self._thumb_widgets.append(lbl)
-        if self._loader is not None:
-            self._loader.quit()
-            self._loader.wait(200)
-        self._loader = _ThumbLoader(frames)
-        self._loader.thumb_ready.connect(self._on_thumb_ready)
-        self._loader.start()
-        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
+        self._window_size = _MAX_VIEWER_FRAMES
+        self._render_window(select_newest=True)
 
     def load_timeline(self, frames: list[Path], scanner_label: str) -> None:
         """Carga el buffer cronológico completo con colores por status."""
-        frames = sorted(frames, key=lambda f: f.stat().st_mtime)
-        total = len(frames)
-        if total > _MAX_VIEWER_FRAMES:
-            frames = frames[-_MAX_VIEWER_FRAMES:]
-        self._frames = frames
-        self._current = 0
+        self._all_frames = sorted(frames, key=lambda f: f.stat().st_mtime)
+        self._panel_kind = "timeline"
+        self._panel_label = scanner_label
         self._is_event_mode = False
-        self._current_dir = frames[0].parent if frames else None
+        self._current_dir = self._all_frames[0].parent if self._all_frames else None
+        self._window_size = _MAX_VIEWER_FRAMES
+        self._render_window(select_newest=True)
 
-        counts = {}
-        for f in frames:
-            tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
-            counts[tag] = counts.get(tag, 0) + 1
-        summary_parts = [f"{c} {t}" for t, c in sorted(counts.items())]
+    def _load_more_older(self) -> None:
+        """Amplía la ventana cargada con otro bloque de frames más antiguos."""
+        total = len(self._all_frames)
+        if self._window_size >= total:
+            return
+        keep_path = self._frames[self._current] if self._frames else None
+        self._window_size = min(self._window_size + _MAX_VIEWER_FRAMES, total)
+        self._render_window(keep_path=keep_path)
+
+    def _render_window(self, select_newest: bool = False,
+                        keep_path: Optional[Path] = None) -> None:
+        """Renderiza la ventana actual (`self._window_size` frames más recientes
+        de `self._all_frames`) como miniaturas + navegación. Usado tanto en la
+        carga inicial de ok_buffer/timeline como al pulsar 'Cargar más antiguos'."""
+        total = len(self._all_frames)
+        frames = self._all_frames[-self._window_size:] if self._window_size < total \
+            else self._all_frames
+        self._frames = frames
+
+        more_left = total - len(frames)
+        self._load_more_btn.setEnabled(more_left > 0)
+        self._load_more_btn.setText(
+            f"⏮  Cargar {min(_MAX_VIEWER_FRAMES, more_left)} más antiguos"
+            if more_left > 0 else "⏮  Cargar más antiguos"
+        )
+
         newest_ts = ""
         if frames:
             try:
@@ -554,15 +566,30 @@ class _EventNavPanel(QWidget):
                 pass
         count_txt = f"{len(frames)} frames" if total == len(frames) \
             else f"{len(frames)} de {total} frames (mostrando los más recientes)"
-        self._info_lbl.setText(
-            f"{scanner_label}   ·   {count_txt}   ({', '.join(summary_parts)})"
-            f"   ◀ antiguo — reciente ▶{newest_ts}"
-        )
+
+        if self._panel_kind == "timeline":
+            counts: dict[str, int] = {}
+            for f in frames:
+                tag = f.stem.split("_", 1)[1] if "_" in f.stem else "OK"
+                counts[tag] = counts.get(tag, 0) + 1
+            summary_parts = [f"{c} {t}" for t, c in sorted(counts.items())]
+            self._info_lbl.setText(
+                f"{self._panel_label}   ·   {count_txt}   ({', '.join(summary_parts)})"
+                f"   ◀ antiguo — reciente ▶{newest_ts}"
+            )
+        else:
+            self._info_lbl.setText(
+                f"{self._panel_label}   ·   {count_txt} OK"
+                f"   ◀ antiguo — reciente ▶{newest_ts}"
+            )
 
         self._clear_thumbs()
         for i, path in enumerate(frames):
-            tag = path.stem.split("_", 1)[1] if "_" in path.stem else "OK"
-            color = _TL_COLORS.get(tag, _MUTED)
+            if self._panel_kind == "timeline":
+                tag = path.stem.split("_", 1)[1] if "_" in path.stem else "OK"
+                color = _TL_COLORS.get(tag, _MUTED)
+            else:
+                color = _OK_CLR
             lbl = QLabel()
             lbl.setFixedSize(_THUMB_W, _THUMB_H)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -580,7 +607,13 @@ class _EventNavPanel(QWidget):
         self._loader = _ThumbLoader(frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
-        self._show_frame(len(frames) - 1)   # ir al más reciente (derecha)
+
+        if keep_path is not None and keep_path in frames:
+            self._show_frame(frames.index(keep_path))
+        elif select_newest or not frames:
+            self._show_frame(len(frames) - 1)
+        else:
+            self._show_frame(min(self._current, len(frames) - 1))
 
     # ── Internos ──────────────────────────────────────────────────────
 
