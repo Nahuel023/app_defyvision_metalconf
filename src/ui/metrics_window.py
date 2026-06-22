@@ -71,83 +71,85 @@ _HEADER_WING_W = 310
 # ------------------------------------------------------------------
 # Definición de métricas de tiempo real
 # (id, etiqueta, unidad, tooltip para el operador)
+# Lenguaje simple a propósito: esta pantalla la lee el operario en planta,
+# no un técnico. Sin siglas ni palabras en inglés (uptime, fps, ratio, etc.).
 # ------------------------------------------------------------------
 _METRICS_DEF = [
-    ("inspection_uptime_pct", "Uptime inspección", "%",
-     "Porcentaje del tiempo de sesión en que el scanner estuvo realmente\n"
-     "disponible para inspeccionar, descontando períodos sin cámara."),
+    ("inspection_uptime_pct", "Tiempo trabajando", "%",
+     "De todo el tiempo que el scanner estuvo encendido, qué porcentaje\n"
+     "pudo usarse de verdad para inspeccionar (sin contar los cortes de cámara)."),
 
-    ("ok_pct",             "Calidad OK",        "%",
-     "Porcentaje de inspecciones sin defectos sobre el total de la sesión.\n"
-     "Meta de referencia: 95 % o más."),
+    ("ok_pct",             "Piezas buenas",     "%",
+     "De cada 100 piezas inspeccionadas, cuántas salieron sin defectos.\n"
+     "Cuanto más alto, mejor. Lo ideal es 95 % o más."),
 
-    ("nok_pct",            "Defectos NOK",       "%",
-     "Porcentaje de piezas con agujeros faltantes detectados.\n"
-     "Cualquier valor por encima de 5 % merece atención."),
+    ("nok_pct",            "Piezas con falla",   "%",
+     "De cada 100 piezas inspeccionadas, cuántas tenían agujeros faltantes.\n"
+     "Si pasa de 5 %, conviene avisar y revisar la máquina."),
 
-    ("nok_streak",         "Racha NOK actual",   "",
-     "Cantidad de inspecciones NOK consecutivas en este momento.\n"
-     "Cuando alcanza el límite configurado, el sistema entra en FAULT."),
+    ("nok_streak",         "Fallas seguidas ahora", "",
+     "Cuántas piezas con falla salieron una detrás de otra, justo ahora.\n"
+     "Si llega a un número límite, la máquina se detiene sola."),
 
-    ("max_nok_streak",     "Racha NOK máx.",     "",
-     "Peor racha de NOK consecutivos registrada desde que inició la sesión.\n"
-     "Útil para detectar problemas intermitentes."),
+    ("max_nok_streak",     "Peor racha de fallas", "",
+     "La mayor cantidad de fallas seguidas que hubo desde que se inició\n"
+     "esta sesión, aunque ya se haya solucionado."),
 
-    ("avg_missing_holes",  "Faltantes prom.",    "huecos",
-     "Promedio de agujeros no detectados por inspección NOK.\n"
-     "Un número alto indica que el defecto es grave o sistemático."),
+    ("avg_missing_holes",  "Agujeros que faltan (promedio)", "agujeros",
+     "En las piezas con falla, cuántos agujeros faltaron en promedio.\n"
+     "Un número alto indica un defecto más grave."),
 
-    ("insp_per_min",       "Ritmo",              "/min",
-     "Inspecciones por minuto. Refleja la velocidad de avance de la lámina.\n"
-     "Depende de 'continuous_position_threshold' en tolerancias.yaml."),
+    ("insp_per_min",       "Piezas por minuto", "/min",
+     "Cuántas piezas se están inspeccionando por minuto.\n"
+     "Refleja qué tan rápido está avanzando la línea."),
 
-    ("session_duration",   "Sesión activa",      "",
-     "Tiempo transcurrido desde que se inició el scanner (hh:mm:ss)."),
+    ("session_duration",   "Tiempo encendido",   "",
+     "Cuánto tiempo pasó desde que se inició este scanner (hh:mm:ss)."),
 
-    ("fault_count",        "Paradas FAULT",      "",
-     "Cantidad de veces que el sistema detuvo la producción por racha NOK\n"
-     "excesiva en esta sesión. Cero es lo ideal."),
+    ("fault_count",        "Veces que se detuvo sola", "",
+     "Cuántas veces la máquina se frenó por demasiadas fallas seguidas\n"
+     "en esta sesión. Lo ideal es cero."),
 
-    ("machine_stop_count", "Stops máquina",      "",
-     "Cantidad de machine_stop disparados por lógica de defecto persistente o\n"
-     "desalineación crítica detectada por el sistema."),
+    ("machine_stop_count", "Paradas por defecto repetido", "",
+     "Cuántas veces se detuvo la máquina porque el mismo defecto se repitió\n"
+     "varias veces, o porque la chapa se vio mal alineada o torcida."),
 
-    ("camera_fps",         "FPS cámara",         "fps",
-     "Velocidad de captura real de la cámara.\n"
-     "Un valor bajo puede indicar problema de hardware o conexión USB."),
+    ("camera_fps",         "Velocidad de la cámara", "img/seg",
+     "Cuántas imágenes por segundo está captando la cámara.\n"
+     "Si baja mucho, puede haber un problema de cable o de la cámara."),
 
-    ("camera_missing_events", "Cortes cámara",   "",
-     "Cantidad de veces que el sistema perdió la señal de cámara durante esta sesión."),
+    ("camera_missing_events", "Cortes de cámara", "",
+     "Cuántas veces se perdió la imagen de la cámara durante esta sesión."),
 
-    ("camera_missing_sec", "Sin cámara",         "s",
-     "Tiempo acumulado de sesión sin frames válidos de cámara."),
+    ("camera_missing_sec", "Tiempo sin cámara",  "seg",
+     "Cuánto tiempo en total estuvo la cámara sin dar imagen."),
 
-    ("low_quality_pct",    "Baja calidad",       "%",
-     "Porcentaje de inspecciones que quedaron en LOW_QUALITY y no se usaron\n"
-     "plenamente para la decisión temporal."),
+    ("low_quality_pct",    "Imágenes borrosas",  "%",
+     "Porcentaje de fotos que salieron borrosas o movidas y no se\n"
+     "pudieron usar bien para decidir si la pieza estaba bien o mal."),
 
-    ("avg_detection_ratio","Detección prom.",    "%",
-     "Promedio de agujeros detectados respecto del patrón esperado. Útil para\n"
-     "evaluar si el sistema está trabajando cómodo o al límite."),
+    ("avg_detection_ratio","Agujeros que sí se ven", "%",
+     "En promedio, qué porcentaje de los agujeros esperados pudo ver\n"
+     "la cámara. Si está muy por debajo de 100 %, revisar foco o luz."),
 
-    ("align_fail_count",   "Align fallback",     "",
-     "Cantidad de inspecciones donde falló la alineación principal y se usó\n"
-     "camino de fallback. Un valor alto merece revisión."),
+    ("align_fail_count",   "Veces que costó ubicar la chapa", "",
+     "Cuántas veces el sistema tuvo dificultad para encontrar la chapa\n"
+     "y tuvo que usar un método alternativo. Si se repite, avisar a mantenimiento."),
 
-    ("last_position_diff", "Desplaz. lámina",    "px",
-     "Diferencia media de píxeles entre el frame actual y el último\n"
-     "inspeccionado. Refleja la velocidad de avance de la lámina."),
+    ("last_position_diff", "Movimiento de la chapa", "px",
+     "Cuánto se movió la chapa entre una foto y la siguiente.\n"
+     "Sirve para ver qué tan rápido avanza la lámina."),
 ]
 
 # Métricas que se grafican en la pestaña Historial
 # (columna_db, etiqueta, color, y_label)
 _CHART_DEF = [
-    ("ok_pct",       "Calidad OK (%)",      _OK,     "%"),
-    ("insp_per_min", "Inspecciones / min",  _ACCENT, "insp/min"),
-    ("nok_streak",   "Racha NOK",           _NOK,    "consecutivos"),
-    ("camera_fps",   "FPS cámara",          _WARN,   "fps"),
-    ("avg_detection_ratio", "Detección prom. (%)", "#a78bfa", "%"),
-    ("low_quality_pct", "Baja calidad (%)", "#f97316", "%"),
+    ("ok_pct",       "Piezas buenas (%)",       _OK,     "%"),
+    ("insp_per_min", "Piezas por minuto",       _ACCENT, "piezas/min"),
+    ("nok_streak",   "Fallas seguidas",         _NOK,    "cantidad"),
+    ("camera_fps",   "Velocidad de la cámara",  _WARN,   "img/seg"),
+    ("avg_detection_ratio", "Agujeros que sí se ven (%)", "#a78bfa", "%"),
+    ("low_quality_pct", "Imágenes borrosas (%)", "#f97316", "%"),
 ]
 
 _TIME_RANGES = [

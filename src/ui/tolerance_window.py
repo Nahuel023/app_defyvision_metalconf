@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import (
 )
 
 from src.controller.system import InspectionSystem
-from src.utils.config import load_tolerances, save_model_overrides
+from src.utils.config import load_tolerances, save_scanner_overrides
 from src.utils.model_names import to_display
 
 from src.utils.paths import app_root
@@ -90,6 +90,19 @@ _PARAMS: list[dict[str, Any]] = [
         unit="frames",
         vtype="int",
         vmin=2, vmax=9999, vstep=1,
+    ),
+    dict(
+        key="pattern_align_severe_abs_max_px",
+        label="Sensibilidad ante chapa torcida",
+        desc=(
+            "Si la chapa se ve muy desviada o torcida en una sola foto, la máquina "
+            "se detiene de inmediato, sin esperar varias fotos seguidas. "
+            "Número MÁS BAJO = se detiene más fácil (más sensible). "
+            "Número MÁS ALTO = solo se detiene ante desvíos más grandes."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=5.0, vmax=60.0, vstep=1.0, decimals=1,
     ),
 ]
 
@@ -243,7 +256,7 @@ class _ScannerTolerancePanel(QWidget):
         self._model_lbl.setText(f"Scanner {_num}  ·  {display}")
         if not model:
             return
-        tols = load_tolerances(model)
+        tols = load_tolerances(model, scanner_id=self._id)
         for p in _PARAMS:
             sb = self._spinboxes[p["key"]]
             raw = tols.get(p["key"])
@@ -280,7 +293,7 @@ class _ScannerTolerancePanel(QWidget):
                 return
 
         try:
-            save_model_overrides(model, updates)
+            save_scanner_overrides(self._id, updates)
             # Fuerza recarga de tolerancias en el scanner activo
             scanner = self._system.scanner(self._id)
             scanner.set_model(model)

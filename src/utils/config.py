@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -264,6 +265,78 @@ def save_model_overrides(model: str, updates: dict[str, Any]) -> None:
     with cfg_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
     _invalidate_tolerances_cache()
+
+
+def _format_yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return repr(value)
+    return str(value)
+
+
+def save_scanner_overrides(scanner_id: str, updates: dict[str, Any]) -> None:
+    """Actualiza solo los parámetros pedidos dentro de `<scanner_id>.inspection`
+    en io_map.yaml, preservando intacto el resto del archivo (comentarios,
+    otros scanners, mapeo de señales PLC).
+
+    A diferencia de `save_model_overrides`, esto escribe en el override
+    específico del scanner — necesario porque `scanner_1` y `scanner_2`
+    suelen tener calibraciones distintas aunque compartan el mismo modelo,
+    y un override de scanner siempre pisa al de modelo (ver `load_tolerances`).
+    Si el parámetro no existe todavía en ese bloque, se agrega al final.
+    """
+    path = Path("config/io_map.yaml")
+    if not path.exists():
+        raise FileNotFoundError(f"No existe {path}")
+
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for key, value in updates.items():
+        if value is None:
+            continue
+        lines = _set_io_map_inspection_param(lines, scanner_id, key, value)
+
+    path.write_text("".join(lines), encoding="utf-8")
+    _invalidate_tolerances_cache()
+
+
+def _set_io_map_inspection_param(
+    lines: list[str], scanner_id: str, key: str, value: Any
+) -> list[str]:
+    scanner_re = re.compile(rf"^{re.escape(scanner_id)}:\s*$")
+    top_key_re = re.compile(r"^\S")        # columna 0 = nuevo bloque top-level
+    inspection_re = re.compile(r"^  inspection:\s*$")
+    sibling_re = re.compile(r"^  \S")      # otra clave a 2 espacios (inputs:, outputs:, etc.)
+    param_re = re.compile(rf"^(\s+){re.escape(key)}:\s*.*$")
+
+    start = next((i for i, l in enumerate(lines) if scanner_re.match(l)), None)
+    if start is None:
+        raise KeyError(f"No se encontro el bloque '{scanner_id}:' en io_map.yaml")
+
+    end = next(
+        (i for i in range(start + 1, len(lines)) if top_key_re.match(lines[i])),
+        len(lines),
+    )
+
+    insp_start = next(
+        (i for i in range(start + 1, end) if inspection_re.match(lines[i])), None
+    )
+    if insp_start is None:
+        raise KeyError(f"'{scanner_id}' no tiene bloque 'inspection:' en io_map.yaml")
+
+    insp_end = next(
+        (i for i in range(insp_start + 1, end) if sibling_re.match(lines[i])), end
+    )
+
+    formatted = _format_yaml_scalar(value)
+    for i in range(insp_start + 1, insp_end):
+        m = param_re.match(lines[i])
+        if m:
+            lines[i] = f"{m.group(1)}{key}: {formatted}\n"
+            return lines
+
+    lines.insert(insp_end, f"    {key}: {formatted}\n")
+    return lines
 
 
 def save_tolerances(data: dict[str, Any]) -> None:

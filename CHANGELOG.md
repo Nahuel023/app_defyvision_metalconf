@@ -48,6 +48,68 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 236 - Métricas en lenguaje simple + tolerancias editables por scanner
+
+**Pedido:** Tadeo quiere la pantalla de Métricas mucho más fácil de entender
+para el operario (sin palabras como "uptime", "FPS", "ratio") y que la
+pantalla de Tolerancias permita ajustar la parada por desalineación severa
+(zigzag, Cambio 234/231) que se agregó en ambos scanners, en lenguaje simple,
+verificando que el cambio se aplique de verdad.
+
+**Métricas (`src/ui/metrics_window.py`):**
+- Reescritas las 16 etiquetas/unidades/tooltips de `_METRICS_DEF` (pestaña
+  Tiempo Real) y los 6 títulos de `_CHART_DEF` (pestaña Historial) en
+  español llano, sin siglas ni anglicismos: "Uptime inspección" →
+  "Tiempo trabajando", "FPS cámara" → "Velocidad de la cámara", "Align
+  fallback" → "Veces que costó ubicar la chapa", "Detección prom." →
+  "Agujeros que sí se ven", etc. Los `id` internos (claves usadas por
+  `_refresh()` para actualizar cada tarjeta) no se tocaron — solo texto,
+  cero riesgo funcional. Verificado que todos los `id` de `_METRICS_DEF`
+  siguen presentes en el diccionario `updates` de `_refresh()`.
+
+**Tolerancias (`src/ui/tolerance_window.py` + `src/utils/config.py`):**
+- **Bug encontrado al revisar:** el panel cargaba y guardaba los 3 parámetros
+  expuestos contra `tolerancias.yaml` → `models.modelo_B` (nivel de MODELO),
+  pero `scanner_2` tiene su propio override de `frame_missing_nok_threshold=2`
+  en `io_map.yaml` que SIEMPRE pisa al de modelo (ver `load_tolerances`,
+  el override de scanner se aplica último). Resultado: el panel de
+  `scanner_2` mostraba el valor de modelo (8) en vez del valor real en uso
+  (2), y guardar desde la UI no tenía ningún efecto en `scanner_2` para ese
+  parámetro — quedaba silenciosamente ignorado.
+- **Fix:** nueva función `save_scanner_overrides()` en `src/utils/config.py`
+  que parchea solo las líneas de los parámetros pedidos dentro de
+  `<scanner_id>.inspection` en `io_map.yaml`, preservando intacto el resto
+  del archivo (todos los comentarios técnicos existentes) — no usa
+  `yaml.safe_dump` (que reescribiría el archivo entero sin comentarios),
+  sino un patch de texto dirigido por líneas. Si el parámetro no existe
+  todavía en el bloque del scanner, se agrega al final.
+  `tolerance_window.py` ahora carga con `load_tolerances(model,
+  scanner_id=self._id)` (valor efectivo real, no el de modelo) y guarda con
+  `save_scanner_overrides(self._id, updates)` — todo queda explícito por
+  scanner, igual que ya pasa con los parámetros técnicos de `io_map.yaml`.
+- **Nuevo parámetro expuesto:** `pattern_align_severe_abs_max_px` (la parada
+  inmediata de 1 frame por chapa muy desviada, Cambio 234/231), con label
+  simple "Sensibilidad ante chapa torcida" y rango acotado 5.0–60.0px (no
+  permite poner 0.0 = desactivar la parada desde esta pantalla simple).
+
+**Validación:**
+- Test directo de `_set_io_map_inspection_param` sobre una copia de
+  `io_map.yaml`: modifica un valor existente y agrega uno nuevo; `diff`
+  contra el original muestra ÚNICAMENTE las líneas tocadas, todo el resto
+  (comentarios, otros scanners) idéntico.
+- Test de `_ScannerTolerancePanel` con un `IOMap` real (headless, sin PLC):
+  confirma que ahora `scanner_1` carga 27.0 y `scanner_2` carga 12.0 para
+  `pattern_align_severe_abs_max_px` (antes ambos mostraban lo mismo); ídem
+  para `frame_missing_nok_threshold` (8 vs 2, el bug descripto arriba).
+- Test de guardado end-to-end (`_on_save()` con QMessageBox interceptado)
+  sobre copia temporal de `io_map.yaml`: cambia el valor en `scanner_1` y
+  confirma por `diff` que `scanner_2` queda intacto.
+- Suite de tests sin regresiones (mismo fallo preexistente no relacionado,
+  Cambio 213). `io_map.yaml` real verificado sin diferencias tras las
+  pruebas (se operó siempre sobre copias).
+
+---
+
 #### Cambio 235 - ROI recenter habilitado en modo MOVE, solo ante deriva sostenida
 
 **Pedido:** Tadeo nota que el ROI nunca se corrige (estaba `roi_recenter_enabled:
