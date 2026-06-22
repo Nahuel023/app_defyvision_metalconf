@@ -48,6 +48,50 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 239 - Gracia adicional POR TIEMPO al iniciar (cubre el retraso mecanico de pistones)
+
+**Pedido:** Tadeo reporta que al dar INICIAR/RUN, a veces salta "PATRON
+DESALINEADO" con la cantidad de px casi al instante, pese a la gracia de
+arranque (`startup_grace_frames=100`, Cambio previo). Dato clave: hay
+~5 segundos de retraso MECANICO (pistones) entre apretar INICIAR y que la
+chapa real empiece a avanzar frente a la camara.
+
+**Diagnostico:** la gracia existente cuenta FRAMES INSPECCIONADOS, no
+segundos. Verificado con `ScannerController` real (inyectando resultados
+con `machine_stop=True` desde el primer frame): si durante esos ~5s
+mecanicos la vibracion/movimiento de la maquina (sin la chapa todavia en
+posicion) genera muchas inspecciones "falsas", los 100 frames de gracia
+se agotan ANTES de que la chapa llegue — dejando la primera lectura real
+(con la chapa recien asentandose) sin proteccion, lo que se percibe como
+parada instantanea apenas la chapa arranca a moverse.
+
+**Cambio:** nueva gracia por TIEMPO, independiente de la de frames:
+- `src/utils/config.py`: nuevo default `startup_grace_seconds: 0.0`
+  (desactivado por default).
+- `config/tolerancias.yaml` (global, aplica a ambos modelos/scanners):
+  `startup_grace_seconds: 10.0` — cubre los ~5s reales medidos en planta
+  con margen.
+- `src/controller/scanner_controller.py`:
+  - `ScannerController.__init__`: nuevos `_startup_grace_seconds` y
+    `_run_loop_start_mono`.
+  - `_continuous_loop_impl()`: ademas de `_startup_grace_remaining`, lee
+    `startup_grace_seconds` y guarda `_run_loop_start_mono = time.monotonic()`
+    al arrancar el loop.
+  - `_handle_result()`: `in_grace` ahora es `in_grace_frames OR in_grace_time`
+    — mientras no pasen `startup_grace_seconds` desde que arranco el loop,
+    se suprime `machine_stop` y `FAULT` aunque la gracia por frames ya se
+    haya agotado.
+
+**Validacion:** simulado con `ScannerController` real, forzando
+`machine_stop=True` en CADA frame desde el inicio (peor caso: la gracia
+por frames se agota en menos de 1s). Sin la gracia por tiempo hubiera
+parado de inmediato; con `startup_grace_seconds=10.0` la primera parada
+real ocurrio recien en t=10.1s, protegiendo todo el rango mecanico
+reportado. Suite de tests sin regresiones (mismo fallo preexistente no
+relacionado, Cambio 213).
+
+---
+
 #### Cambio 238 - Boton RESET vs RESET FALLA segun si hubo falla real
 
 **Pedido:** Tadeo nota que el boton siempre dice "RESET FALLA" al detener el

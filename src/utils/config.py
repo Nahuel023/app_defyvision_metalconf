@@ -131,6 +131,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_precal_threshold_px": 10.0,        # shift medio (px) que dispara correccion en pre-cal
     "roi_precal_overshoot_px": 3,           # pixeles extra sobre el shift medido (margen de seguridad)
     "startup_grace_frames": 30,             # frames iniciales sin machine_stop ni fault (da tiempo al roi_recenter)
+    "startup_grace_seconds": 0.0,            # segundos iniciales sin machine_stop ni fault (cubre el tiempo mecanico hasta que la chapa entra en camara, 0 = desactivado)
     # Corrección EMA lenta de ROI — escribe roi.json solo cuando el drift es muy sostenido.
     # Seguro para 24/7: a 5fps tarda mínimo ~3 min en aplicar 1px de corrección.
     "roi_slow_ema_enabled": False,       # activar por scanner en io_map.yaml overrides

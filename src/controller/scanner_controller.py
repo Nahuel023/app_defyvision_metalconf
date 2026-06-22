@@ -96,6 +96,10 @@ class ScannerController:
         # por la UI para decidir si el boton dice "RESET" o "RESET FALLA".
         self._stopped_by_fault:  bool      = False
         self._startup_grace_remaining: int = 0
+        # Gracia adicional por tiempo desde que arranca el loop (independiente de
+        # cuantos frames se procesen) — ver _continuous_loop_impl/_handle_result.
+        self._startup_grace_seconds: float  = 0.0
+        self._run_loop_start_mono: float    = 0.0
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
         self._last_position_diff: float    = 0.0
@@ -871,8 +875,13 @@ class ScannerController:
 
         _grace_tols = load_tolerances(model_init, scanner_id=self._id)
         self._startup_grace_remaining = int(_grace_tols.get("startup_grace_frames", 30))
-        if self._startup_grace_remaining > 0:
-            logger.info("[%s] startup grace: %d frames sin machine_stop ni fault", self._id, self._startup_grace_remaining)
+        self._startup_grace_seconds   = float(_grace_tols.get("startup_grace_seconds", 0.0))
+        self._run_loop_start_mono     = time.monotonic()
+        if self._startup_grace_remaining > 0 or self._startup_grace_seconds > 0.0:
+            logger.info(
+                "[%s] startup grace: %d frames y/o %.1fs sin machine_stop ni fault",
+                self._id, self._startup_grace_remaining, self._startup_grace_seconds,
+            )
 
         while not self._stop_event.is_set():
             with self._lock:
@@ -1038,13 +1047,21 @@ class ScannerController:
             if streak > self._max_nok_streak:
                 self._max_nok_streak = streak
 
-            in_grace = self._startup_grace_remaining > 0
-            if in_grace:
+            in_grace_frames = self._startup_grace_remaining > 0
+            if in_grace_frames:
                 self._startup_grace_remaining -= 1
+            in_grace_time = (
+                self._startup_grace_seconds > 0.0
+                and (time.monotonic() - self._run_loop_start_mono) < self._startup_grace_seconds
+            )
+            in_grace = in_grace_frames or in_grace_time
 
             if getattr(result, "machine_stop", False):
                 if in_grace:
-                    logger.debug("[%s] machine_stop suprimido (grace %d)", self._id, self._startup_grace_remaining + 1)
+                    logger.debug(
+                        "[%s] machine_stop suprimido (grace frames=%d tiempo=%s)",
+                        self._id, self._startup_grace_remaining + 1, in_grace_time,
+                    )
                 elif not self._machine_stop_enabled:
                     logger.debug("[%s] machine_stop suprimido (machine_stop_enabled=false)", self._id)
                 else:
