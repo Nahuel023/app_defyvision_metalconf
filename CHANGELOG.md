@@ -46,6 +46,43 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-06-22 - Tadeo + Claude
+
+#### Cambio 233 - Licencia: bloqueo único el 30/07/2026, despues nunca mas
+
+**Pedido:** Tadeo quiere revisar el sistema de licencia para que se bloquee
+una sola vez el 30 de julio de 2026 (no el 30 de junio ahora, ni nunca mas
+despues del 30 de julio), usando el mismo mecanismo de claves HMAC existente.
+
+**Cambios:**
+- `src/utils/license.py`:
+  - `_required_period()` ya no calcula un período rotativo mes a mes; ahora
+    devuelve un único período fijo `_UNLOCK_PERIOD = (2026, 8)` — la clave
+    de desbloqueo que hay que generar una sola vez con `gen_license.py`.
+  - `_LOCK_DATE = 2026-07-30 08:00` — antes de esa fecha `is_licensed()`
+    devuelve `True` sin pedir clave (no se bloquea el 30/06 ni antes).
+  - una vez que `validate_key()` acepta la clave de desbloqueo, se escribe
+    un marcador nuevo `config/calibration_lock.bin`
+    (`_mark_permanently_unlocked()`); si ese archivo existe, `is_licensed()`
+    devuelve `True` para siempre sin volver a chequear fecha ni clave — el
+    sistema no se vuelve a bloquear nunca despues del 30/07.
+  - se mantiene intacta la deteccion de rollback de reloj
+    (`_detect_clock_rollback()`).
+- `config/calibration.key`: se vacio la clave de prueba
+  (`MFC-202701-12BE8692`, periodo 2027-01) que habia quedado cargada — esa
+  clave ya cubria de sobra el nuevo período exigido (2026-08) y hubiera
+  evitado que el bloqueo del 30/07 se notara.
+- Clave de desbloqueo generada para el 30/07/2026: `MFC-202608-64DF4F6F`
+  (generada con `python scripts/gen_license.py 2026 8`).
+
+**Validacion:** simulando `datetime.now()` con `unittest.mock`, confirmado:
+antes del 30/07 corre sin clave; el 30/07 sin clave bloquea; con la clave
+`MFC-202608-64DF4F6F` desbloquea y escribe el marcador; con el marcador
+presente sigue desbloqueado aunque se borre la clave. Suite de tests sin
+regresiones (mismo fallo preexistente no relacionado, Cambio 213).
+
+---
+
 ### Sesion 2026-06-19 - Tadeo + Claude
 
 #### Cambio 232 - MODO SEGURO pasa a ser POR SCANNER, controlado por la maneta fisica

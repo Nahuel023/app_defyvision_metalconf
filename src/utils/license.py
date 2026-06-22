@@ -17,9 +17,16 @@ _K_ENC = bytes([
 ])
 _K = bytes(b ^ 0xA5 for b in _K_ENC)
 
-_LIC_FILE   = "config/calibration.key"
-_STATE_FILE = "config/calibration_data.bin"
-_MAGIC      = b'\xca\xfe\xba\xbe'
+_LIC_FILE     = "config/calibration.key"
+_STATE_FILE   = "config/calibration_data.bin"
+_UNLOCK_FILE  = "config/calibration_lock.bin"
+_MAGIC        = b'\xca\xfe\xba\xbe'
+
+# Bloqueo único: a partir de esta fecha se exige la clave de desbloqueo.
+# Antes de esa fecha el sistema corre libre; una vez ingresada la clave
+# correcta, queda desbloqueado para siempre (no hay mas bloqueos mensuales).
+_LOCK_DATE        = datetime(2026, 7, 30, 8, 0, 0)
+_UNLOCK_PERIOD    = (2026, 8)  # período que debe cubrir la clave de desbloqueo
 
 
 def _sig(payload: str) -> str:
@@ -33,17 +40,11 @@ def generate_key(year: int, month: int) -> str:
 
 
 def _required_period() -> tuple:
-    """Devuelve el período (año, mes) que debe cubrir la clave.
+    """Devuelve el período (año, mes) que debe cubrir la clave de desbloqueo.
 
-    A partir del día 30 de cada mes a las 08:00, se exige la clave
-    del mes siguiente — dando margen de gestión antes del cierre.
+    Único período exigido por el sistema de bloqueo único (ver _LOCK_DATE).
     """
-    now = datetime.now()
-    if now.day >= 30 and now.hour >= 8:
-        if now.month == 12:
-            return now.year + 1, 1
-        return now.year, now.month + 1
-    return now.year, now.month
+    return _UNLOCK_PERIOD
 
 
 def validate_key(key: str) -> bool:
@@ -82,11 +83,40 @@ def save_license_file(key: str) -> None:
     p.write_text(key.strip().upper(), encoding="utf-8")
 
 
+def _unlock_marker_path() -> Path:
+    return app_root() / _UNLOCK_FILE
+
+
+def _is_permanently_unlocked() -> bool:
+    return _unlock_marker_path().exists()
+
+
+def _mark_permanently_unlocked() -> None:
+    p = _unlock_marker_path()
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(_MAGIC)
+    except Exception:
+        pass
+
+
 def is_licensed() -> bool:
-    """True si la licencia es válida y el reloj no fue retrocedido."""
+    """True si el sistema puede operar.
+
+    Antes de `_LOCK_DATE` corre libre. A partir de esa fecha se exige una
+    única vez la clave de desbloqueo (`_UNLOCK_PERIOD`); una vez validada
+    queda marcada como desbloqueada para siempre y no se vuelve a pedir.
+    """
+    if _is_permanently_unlocked():
+        return True
     if _detect_clock_rollback():
         return False
-    return validate_key(load_license_file())
+    if datetime.now() < _LOCK_DATE:
+        return True
+    if validate_key(load_license_file()):
+        _mark_permanently_unlocked()
+        return True
+    return False
 
 
 # ── Detección de rollback de reloj ────────────────────────────────────
