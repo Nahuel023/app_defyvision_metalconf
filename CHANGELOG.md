@@ -48,6 +48,19 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 237 - Ajuste de wording: "Agujeros que sí se ven" → "Agujeros detectados"
+
+**Pedido:** a Tadeo no le gustó el término "Agujeros que sí se ven" (Cambio
+236) por informal; pidió algo más formal sin volver a la jerga técnica
+original ("Detección prom." / ratio).
+
+**Cambio:** `avg_detection_ratio` en `src/ui/metrics_window.py` pasa a
+"Agujeros detectados" tanto en la tarjeta de Tiempo Real como en el título
+del gráfico de Historial. Tooltip sin cambios. Suite de tests sin
+regresiones (mismo fallo preexistente, Cambio 213).
+
+---
+
 #### Cambio 236 - Métricas en lenguaje simple + tolerancias editables por scanner
 
 **Pedido:** Tadeo quiere la pantalla de Métricas mucho más fácil de entender

@@ -128,7 +128,7 @@ _METRICS_DEF = [
      "Porcentaje de fotos que salieron borrosas o movidas y no se\n"
      "pudieron usar bien para decidir si la pieza estaba bien o mal."),
 
-    ("avg_detection_ratio","Agujeros que sí se ven", "%",
+    ("avg_detection_ratio","Agujeros detectados", "%",
      "En promedio, qué porcentaje de los agujeros esperados pudo ver\n"
      "la cámara. Si está muy por debajo de 100 %, revisar foco o luz."),
 
@@ -148,7 +148,7 @@ _CHART_DEF = [
     ("insp_per_min", "Piezas por minuto",       _ACCENT, "piezas/min"),
     ("nok_streak",   "Fallas seguidas",         _NOK,    "cantidad"),
     ("camera_fps",   "Velocidad de la cámara",  _WARN,   "img/seg"),
-    ("avg_detection_ratio", "Agujeros que sí se ven (%)", "#a78bfa", "%"),
+    ("avg_detection_ratio", "Agujeros detectados (%)", "#a78bfa", "%"),
     ("low_quality_pct", "Imágenes borrosas (%)", "#f97316", "%"),
 ]
 
