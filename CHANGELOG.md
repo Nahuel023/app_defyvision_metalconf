@@ -48,6 +48,118 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 240 - Auditoria pre-entrega: bug critico de licencia + 4 fixes mas
+
+**Pedido:** Tadeo dijo "ya esta la version final para entregar a la empresa,
+vamos a buscar BUGS... revisa TODO", mas mejoras de eficiencia. Se lanzaron
+5 revisiones en paralelo (licencia, concurrencia del controller, pipeline de
+vision, capa de UI, PLC/config) sobre todo el codigo.
+
+**Cambio 240.1 — CRITICO: el bloqueo de licencia (Cambio 233) podia activarse
+ANTES del 30/07/2026 por un rollback de reloj legitimo.**
+- `src/utils/license.py` → `is_licensed()`: el orden era
+  `_is_permanently_unlocked()` → `_detect_clock_rollback()` → `datetime.now()
+  < _LOCK_DATE`. Cualquier correccion de reloj hacia atras de mas de 120s
+  (sincronizacion NTP al arrancar, reloj de PC corregido a mano, resume de
+  una VM) ANTES del 30/07 hacia que `_detect_clock_rollback()` devolviera
+  `True` y `is_licensed()` bloqueara el sistema de inmediato — exactamente
+  lo que el Cambio 233 prometia que NO iba a pasar ("no se bloquee el 30 de
+  junio ahora"). Una correccion de hora rutinaria en la PC de planta
+  hubiera bloqueado la maquina sin ningun aviso ni forma de saber por que.
+- **Fix:** se invirtio el orden — primero se chequea
+  `datetime.now() < _LOCK_DATE` (corre libre, sin mirar el reloj para nada
+  mas); la deteccion de rollback solo se evalua DESPUES del 30/07, cuando
+  ya hay algo real que proteger (la clave de desbloqueo).
+- **Validado:** simulando un rollback de reloj activo, `is_licensed()` antes
+  del 30/07 devuelve `True` igual (antes del fix devolvia `False`); despues
+  del 30/07 el rollback sigue bloqueando correctamente (no se rompio la
+  proteccion real).
+
+**Cambio 240.2 — `IOMap.write_batch()` reportaba éxito cuando en realidad
+el modo seguro bloqueo la única señal del lote.**
+- `src/plc/io_map.py`: si un lote de escritura tenia una sola señal y era un
+  solenoide bloqueado por modo seguro, `resolved` quedaba vacio y la
+  funcion devolvia `True` (linea `if not resolved: return True`) —
+  indistinguible de "se escribio correctamente". `write()` (escritura
+  individual) si devolvia `False` en el caso equivalente; `write_batch()`
+  no era consistente. Fix: devuelve `False` cuando todo lo que habia en el
+  lote quedo bloqueado por modo seguro.
+
+**Cambio 240.3 — Carrera en `stop()` podia pisar `stopped_by_fault` (Cambio
+238) o una transicion concurrente a ERROR/STOPPED del hilo inspector.**
+- `src/controller/scanner_controller.py` → `stop()`: leia `self._state`,
+  liberaba el lock, y RECIEN DESPUES decidia `stopped_by_fault` y llamaba
+  `_transition(new_state)` (escritura incondicional). Si en esa ventana el
+  hilo inspector disparaba un `machine_stop` real (que tambien hace
+  `_state=STOPPED` + `stopped_by_fault=True`) o un escalado a `ERROR` por
+  perdida de camara, `stop()` podia sobreescribirlo con un valor basado en
+  el estado YA VIEJO — el boton mostraria "RESET" tras una falla real, o se
+  perderia una transicion a ERROR. Fix: leer el estado, decidir
+  `stopped_by_fault`/`new_state`, y aplicar `self._state = new_state` todo
+  dentro de UNA sola adquisicion del lock (sin ventana de por medio).
+- **Validado:** se repitieron las pruebas de Cambio 238 (stop voluntario →
+  stopped_by_fault=False; stop tras FAULT → stopped_by_fault=True) tras el
+  refactor — mismo resultado correcto.
+
+**Cambio 240.4 — Un panel de scanner que tirara una excepcion en
+`refresh_status()`/`refresh_camera()` congelaba TODOS los paneles
+siguientes en silencio.**
+- `src/ui/operator.py` → `OperatorWindow._refresh_status()` /
+  `_refresh_cameras()`: el loop `for panel in self._panels.values(): ...`
+  no tenia try/except — si un panel fallaba (p.ej. una clave faltante en
+  `get_status()` tras un cambio futuro), el loop abortaba ahi y los
+  paneles siguientes (en orden de iteracion) dejaban de actualizarse para
+  siempre, sin ningun error visible para el operador. Fix: cada panel se
+  actualiza dentro de su propio try/except con `logger.exception(...)`; un
+  fallo en un scanner ya no afecta a los demas. Se agrego `logger` al
+  modulo (no existia).
+
+**Cambio 240.5 — Eficiencia: `estimate_lattice_tilt_deg()` vectorizado
+(~20-24x mas rapido por frame).**
+- `src/pipeline/grid_fitting.py`: usado en CADA frame de microperforado
+  (`src/inspection.py:457`, scanner_1 y scanner_2 en produccion) para medir
+  la inclinacion de la grilla. La implementacion original era un loop
+  Python de O(n²) — por cada uno de los ~150-200 agujeros, recalculaba un
+  array de diffs contra todos los demas. Reescrito como una sola matriz de
+  diferencias por pares vectorizada (mismo algoritmo, sin el loop Python).
+- **Validado:** 500 pruebas con puntos aleatorios → 0 diferencias contra la
+  version original (tolerancia 1e-6); con grillas sinteticas tipo
+  microperforado (dx=35.5, dy=13.6, stagger=18) recupera el tilt real con
+  error ~0.03-0.04° en todo un rango de inclinaciones. Con 180 agujeros:
+  3.19ms → 0.13ms por llamada (24x).
+
+**Hallazgos reportados pero NO corregidos ahora (riesgo bajo / requieren
+mas contexto, documentados para seguimiento):**
+- `start()` tiene una ventana TOCTOU que permitiria un doble-start
+  concurrente (bajo riesgo real: hoy solo lo llama un boton de Qt
+  single-thread).
+- `_join_threads()` usa `join(timeout=5.0)`; si `_continuous_loop_impl`
+  queda bloqueado en `camera.get_frame()` mas de 5s, un `start()`
+  siguiente podria lanzar un segundo hilo inspector mientras el viejo
+  sigue vivo. Requeriria que `Camera.get_frame()` respete un timeout/stop
+  event — cambio mas invasivo, no se tocó a dias de la entrega.
+  - `_format_yaml_scalar()` en `config.py` no escapa strings (solo
+  bool/float) — no explotable hoy (tolerance_window.py solo manda
+  numeros), pero fragil si `save_scanner_overrides()` se usa a futuro con
+  un valor string.
+- `_set_io_map_inspection_param()` puede crear una linea duplicada si el
+  formato de la linea existente no calza exacto con la regex (espacio
+  extra antes de los dos puntos, etc.) — PyYAML toma el ultimo valor al
+  cargar, asi que el comportamiento sigue siendo correcto, solo queda una
+  linea redundante en el archivo.
+- `src/ui/service.py` tiene ~9 QTimers; se confirmo que `closeEvent` para
+  al menos algunos pero no se pudo verificar los 9 en una sola pasada (
+  archivo de ~6700 lineas) — recomendado una revision manual dedicada.
+- Pipeline de vision: no se llego a auditar en profundidad
+  `align_edge.py`, `preprocess.py`, `detect_holes.py`, `machine_stop.py`
+  (cobertura parcial por presupuesto de la revision) — recomendado una
+  pasada de seguimiento si se quiere cobertura completa.
+
+**Validacion general:** `py_compile` OK en los 5 archivos tocados; suite de
+tests sin regresiones (mismo fallo preexistente no relacionado, Cambio 213).
+
+---
+
 #### Cambio 239 - Gracia adicional POR TIEMPO al iniciar (cubre el retraso mecanico de pistones)
 
 **Pedido:** Tadeo reporta que al dar INICIAR/RUN, a veces salta "PATRON

@@ -57,16 +57,21 @@ class IOMap:
                 logger.debug(f"[no-plc-outputs] {sig}={val} (suprimido)")
             return True
         resolved = []
+        any_blocked = False
         for sig, val in signals:
             sig_type, addr = self._resolve(sig)
             if sig_type != "output":
                 raise ValueError(f"'{sig}' es una entrada — no se puede escribir")
             if sig.endswith(".solenoid") and val and self._safe_mode.get(sig.split(".")[0], True):
                 logger.warning(f"[SAFETY] Escritura bloqueada (modo seguro ON): {sig}=True")
+                any_blocked = True
                 continue
             resolved.append((addr, val))
         if not resolved:
-            return True
+            # Si llegamos aca con signals no vacio, fue porque TODAS las señales
+            # quedaron bloqueadas por modo seguro — debe reportarse como False,
+            # igual que write() en el caso equivalente (no como exito silencioso).
+            return not any_blocked
         resolved.sort(key=lambda x: x[0])
         # Verificar si son contiguos
         addrs = [a for a, _ in resolved]

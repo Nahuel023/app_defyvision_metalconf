@@ -14,6 +14,7 @@ Tema: claro fijo (fondo blanco/gris claro) — legibilidad en entorno industrial
 Header: oscuro — ancla visual y contraste para logos.
 """
 
+import logging
 import sys
 import time
 from datetime import datetime
@@ -48,6 +49,7 @@ from src.utils.license import is_licensed, save_license_file, update_heartbeat, 
 
 from src.utils.paths import app_root
 _ROOT = app_root()
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
 # Constantes
@@ -1254,8 +1256,11 @@ class OperatorWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _refresh_cameras(self) -> None:
-        for panel in self._panels.values():
-            panel.refresh_camera()
+        for sid, panel in self._panels.items():
+            try:
+                panel.refresh_camera()
+            except Exception:
+                logger.exception(f"[{sid}] error en refresh_camera()")
 
     def _refresh_status(self) -> None:
         if self._system.plc.connected:
@@ -1266,8 +1271,14 @@ class OperatorWindow(QMainWindow):
                 "color:#f87171;font-size:11px;font-weight:600;background:transparent;"
             )
             self._plc_badge.show()
-        for panel in self._panels.values():
-            panel.refresh_status()
+        # Aislar cada panel: si uno tira una excepcion (p.ej. una clave faltante
+        # en get_status() tras un cambio futuro), los paneles siguientes deben
+        # seguir actualizandose en vez de congelarse todos en silencio.
+        for sid, panel in self._panels.items():
+            try:
+                panel.refresh_status()
+            except Exception:
+                logger.exception(f"[{sid}] error en refresh_status()")
 
     def _check_license(self) -> None:
         if self.isHidden():

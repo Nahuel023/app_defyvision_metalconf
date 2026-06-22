@@ -246,25 +246,33 @@ class ScannerController:
         AUTO RUNNING   → STOPPED (luces apagadas; espera RESET → IDLE).
         FAULT          → STOPPED (ídem).
         """
+        # Decidir y aplicar el nuevo estado en UNA sola adquisicion del lock:
+        # si se lee el estado, se libera el lock y DESPUES se llama a
+        # _transition(new_state), una transicion concurrente disparada por el
+        # hilo inspector (machine_stop, o un escalado a ERROR por perdida de
+        # camara) podria intercalarse y quedar pisada por esta escritura
+        # "vieja" basada en un estado que ya no es el actual.
         with self._lock:
             if self._state in (ScannerState.IDLE, ScannerState.STOPPED):
                 return
             state = self._state
             mode  = self._mode
 
-        # FAULT siempre → STOPPED; AUTO RUNNING → STOPPED; MANUAL RUNNING → IDLE
-        if state == ScannerState.FAULT or mode == OperationMode.AUTO:
-            new_state = ScannerState.STOPPED
-        else:
-            new_state = ScannerState.IDLE
+            # FAULT siempre → STOPPED; AUTO RUNNING → STOPPED; MANUAL RUNNING → IDLE
+            if state == ScannerState.FAULT or mode == OperationMode.AUTO:
+                new_state = ScannerState.STOPPED
+            else:
+                new_state = ScannerState.IDLE
 
-        if new_state == ScannerState.STOPPED:
-            # Si ya venia de FAULT (racha NOK), es una parada por falla real.
-            # Si venia de RUNNING sin FAULT, fue un DETENER voluntario del
-            # operador sin ningun problema detectado.
-            self._stopped_by_fault = (state == ScannerState.FAULT)
+            if new_state == ScannerState.STOPPED:
+                # Si ya venia de FAULT (racha NOK), es una parada por falla real.
+                # Si venia de RUNNING sin FAULT, fue un DETENER voluntario del
+                # operador sin ningun problema detectado.
+                self._stopped_by_fault = (state == ScannerState.FAULT)
 
-        self._transition(new_state)
+            self._state = new_state
+
+        self._fire_state_changed()
         self._io.write(f"{self._id}.solenoid", False)
         # backlight permanece encendido siempre
 

@@ -109,10 +109,10 @@ def is_licensed() -> bool:
     """
     if _is_permanently_unlocked():
         return True
-    if _detect_clock_rollback():
-        return False
     if datetime.now() < _LOCK_DATE:
         return True
+    if _detect_clock_rollback():
+        return False
     if validate_key(load_license_file()):
         _mark_permanently_unlocked()
         return True
