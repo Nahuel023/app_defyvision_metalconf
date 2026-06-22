@@ -48,6 +48,43 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 234 - Parada por desalineacion severa de 1 frame, ahora tambien en scanner_1
+
+**Pedido:** Tadeo quiere el mismo mecanismo de parada inmediata por
+desalineacion severa que se implemento el viernes para scanner_2
+(Cambio 231) pero para scanner_1 microperforado — que funcione igual:
+1 solo frame muy desalineado detiene la maquina sin esperar racha.
+
+**Decision (consultada con Tadeo):** no hay frames reales de desalineacion
+severa de scanner_1 todavia (a diferencia de scanner_2, calibrado con la
+carpeta "ERROR DE PARADA FRAME DESALINEADO"). Tadeo eligio estimar el
+umbral por la misma proporcion que uso scanner_2 sobre su propio umbral de
+advertencia (12.0/10.0 ≈ 1.2x) en vez de esperar frames reales.
+
+**Cambios:**
+- `config/io_map.yaml` → `scanner_1.inspection`:
+  - `pattern_align_severe_abs_max_px: 27.0` (umbral de advertencia de
+    scanner_1 es 22.0px, heredado de modelo_B; 22.0 × 1.2 ≈ 27.0) — activa
+    el mecanismo de `src/inspection.py` ya existente (Cambio 231), que
+    estaba en 0.0/desactivado para scanner_1.
+  - `pattern_align_min_missing: 1` — mismo gate que usa scanner_2 para
+    evitar que un frame de borde de chapa (zigzag alto pero missing=0)
+    dispare la parada de 1 solo frame.
+- No se tocó `src/inspection.py` ni `src/utils/config.py`: el mecanismo ya
+  existia (Cambio 231) y es generico por scanner via `tolerancias`/io_map;
+  solo faltaba habilitarlo para scanner_1.
+
+**Validacion:** YAML carga los nuevos valores correctamente
+(`pattern_align_severe_abs_max_px=27.0`, `pattern_align_min_missing=1` en
+scanner_1; scanner_2 sin cambios). Suite de tests sin regresiones (mismo
+fallo preexistente no relacionado, Cambio 213).
+**Pendiente:** Tadeo prueba en planta para confirmar que 27.0px no genera
+falsos positivos sobre chapa buena en scanner_1 ni deja pasar
+desalineaciones reales sin frenar; ajustar el umbral con esos resultados,
+igual que se hizo con scanner_2.
+
+---
+
 #### Cambio 233 - Licencia: bloqueo único el 30/07/2026, despues nunca mas
 
 **Pedido:** Tadeo quiere revisar el sistema de licencia para que se bloquee

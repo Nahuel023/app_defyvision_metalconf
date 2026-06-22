@@ -23,6 +23,17 @@ scanner_1:
     pattern_global_offset_max_px: 8.0
     pattern_slope_delta_max_deg: 1.0
     pattern_align_stop_frames: 5
+    # Parada inmediata en 1 SOLO frame para desalineacion severa, sin esperar la
+    # racha de pattern_align_stop_frames (mismo mecanismo que scanner_2, Cambio 231).
+    # Sin frames reales de desalineacion severa de scanner_1 todavia: 27.0px es una
+    # estimacion por proporcion (mismo margen ~1.2x que uso scanner_2: 12.0/10.0)
+    # aplicada sobre el umbral de advertencia de scanner_1 (pattern_align_abs_max_px
+    # heredado de modelo_B = 22.0px) — a confirmar/ajustar probando en planta.
+    pattern_align_severe_abs_max_px: 27.0
+    # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
+    # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
+    # missing=0) que de otra forma podrian disparar la parada de 1 solo frame.
+    pattern_align_min_missing: 1
     # Matching apenas mas permisivo sobre el lote OK del 12-06 para absorber
     # deriva fina sin introducir extras en las pruebas de carpeta.
     tol_xy_px: 38.0
