@@ -48,6 +48,36 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 242 - Contador NOK de la sesion se resetea tras 200 frames OK seguidos
+
+**Pedido:** Tadeo nota que el contador de piezas NOK de la sesion (tarjeta
+en la UI de operador) queda "pegado" en un numero chico (1 o 2) para
+siempre aunque la linea siga produciendo bien — no se nota que el problema
+ya se resolvio. Pide que si pasan 200 frames buenos seguidos, se resetee
+a 0.
+
+**Cambio (`src/controller/scanner_controller.py`):**
+- Nuevo contador `_frames_since_last_nok`: se pone en 0 en cada NOK y
+  se incrementa en cada OK (los frames LOW_QUALITY no lo tocan, igual
+  criterio que ya se usa para `_nok_streak` — son inconclusos, ni cuentan
+  como evidencia buena ni mala).
+- En `_handle_result()`: si `_nok_count > 0` y `_frames_since_last_nok`
+  llega a `nok_count_reset_frames` (nuevo parametro, default 200, en
+  `src/utils/config.py`), se resetea `_nok_count` a 0 y se loguea el
+  evento. Un NOK nuevo en el medio reinicia la cuenta de 200 desde cero
+  (no acumula across multiples rachas aisladas).
+- Reseteado tambien en `start()`, `start_simulate()` y `reset()` (inicio
+  de sesion nueva).
+- Configurable por modelo/scanner como cualquier otro parametro de
+  `tolerancias.yaml`/`io_map.yaml` (`nok_count_reset_frames`).
+
+**Validacion:** simulado con `ScannerController` real: 2 NOK aislados →
+`nok_count=2`; tras 199 OK seguidos sigue en 2 (todavia no llega al
+umbral); en el frame 200 se resetea a 0. Suite de tests sin regresiones
+(mismo fallo preexistente no relacionado, Cambio 213).
+
+---
+
 #### Cambio 241 - Cierra los pendientes de la auditoria + boton de electrovalvula renombrado
 
 **Pedido:** Tadeo pidio continuar y cerrar todos los puntos que habian

@@ -64,6 +64,12 @@ class ScannerController:
                          tols["consecutive_nok_frames"])
         )
         self._low_quality_max_streak = int(tols.get("low_quality_max_streak", 10))
+        # Si el contador de NOK de la sesion queda "pegado" en un numero chico
+        # (p.ej. 1 o 2 piezas NOK aisladas al principio) y la linea sigue
+        # produciendo buenas, tras esta cantidad de frames OK seguidos se
+        # resetea a 0 — evita que el operador vea un NOK viejo colgado en
+        # pantalla por horas cuando la produccion esta corriendo limpia.
+        self._nok_count_reset_frames = int(tols.get("nok_count_reset_frames", 200))
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
@@ -80,6 +86,7 @@ class ScannerController:
         self._mode_switch_raw: Optional[bool] = None  # ultima lectura cruda de la maneta (None=sin leer aun)
         self._nok_streak = 0
         self._lq_streak  = 0
+        self._frames_since_last_nok = 0
         self._last_result: Optional[InspectionResult] = None
         self._streak_start_mono: Optional[float] = None  # time.monotonic() del 1er NOK de la racha activa
 
@@ -210,6 +217,7 @@ class ScannerController:
         with self._lock:
             self._nok_streak              = 0
             self._lq_streak               = 0
+            self._frames_since_last_nok   = 0
             self._streak_start_mono       = None
             self._total_inspections       = 0
             self._ok_count                = 0
@@ -314,6 +322,7 @@ class ScannerController:
                 return False
             self._nok_streak               = 0
             self._lq_streak                = 0
+            self._frames_since_last_nok    = 0
             self._streak_start_mono        = None
             self._last_result               = None
             self._total_inspections        = 0
@@ -362,6 +371,7 @@ class ScannerController:
             self._mode                    = OperationMode.AUTO
             self._nok_streak              = 0
             self._lq_streak               = 0
+            self._frames_since_last_nok   = 0
             self._streak_start_mono       = None
             self._total_inspections       = 0
             self._ok_count                = 0
@@ -1053,10 +1063,23 @@ class ScannerController:
                     self._nok_count  += 1
                     self._total_missing    += result.report.missing
                     self._nok_with_missing += 1
+                    self._frames_since_last_nok = 0
                 else:
                     self._nok_streak = 0
                     self._streak_start_mono = None
                     self._ok_count  += 1
+                    self._frames_since_last_nok += 1
+                    if (
+                        self._nok_count > 0
+                        and self._frames_since_last_nok >= self._nok_count_reset_frames
+                    ):
+                        logger.info(
+                            f"[{self._id}] contador NOK reseteado a 0 tras "
+                            f"{self._frames_since_last_nok} frames OK seguidos "
+                            f"(quedaba en {self._nok_count})"
+                        )
+                        self._nok_count = 0
+                        self._frames_since_last_nok = 0
 
             streak = self._nok_streak
             if streak > self._max_nok_streak:
