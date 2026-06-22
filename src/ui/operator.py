@@ -555,6 +555,7 @@ class ScannerPanel(QWidget):
         fault_cnt   = s["fault_count"]
         camera_missing = bool(s.get("camera_missing", False))
         camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
+        stopped_by_fault = bool(s.get("stopped_by_fault", False))
 
         # Leida directo del IOMap (no via get_status()): el poller que actualiza
         # mode_switch_raw en el controller solo corre mientras el scanner esta
@@ -680,7 +681,7 @@ class ScannerPanel(QWidget):
             self._center_val[1].setText("—")
             self._center_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#94a3b8;")
 
-        self._refresh_buttons(state)
+        self._refresh_buttons(state, stopped_by_fault)
 
     # ------------------------------------------------------------------
     # Modo seguro de este scanner
@@ -862,9 +863,12 @@ class ScannerPanel(QWidget):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _refresh_buttons(self, state: ScannerState) -> None:
+    def _refresh_buttons(self, state: ScannerState, stopped_by_fault: bool = False) -> None:
         is_stopped = (state == ScannerState.STOPPED)
         self.reset_btn.setVisible(is_stopped)
+        if is_stopped:
+            text = "↺  RESET FALLA" if stopped_by_fault else "↺  RESET"
+            self.reset_btn.setText(text)
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
 

@@ -91,6 +91,10 @@ class ScannerController:
         self._max_nok_streak:    int       = 0
         self._fault_count:       int       = 0
         self._machine_stop_count: int      = 0
+        # True si el STOPPED actual vino de una falla real (machine_stop o FAULT
+        # por racha NOK), no de un DETENER voluntario sin ningun problema. Usado
+        # por la UI para decidir si el boton dice "RESET" o "RESET FALLA".
+        self._stopped_by_fault:  bool      = False
         self._startup_grace_remaining: int = 0
         self._total_missing:     int       = 0
         self._nok_with_missing:  int       = 0
@@ -205,6 +209,7 @@ class ScannerController:
             self._max_nok_streak          = 0
             self._fault_count             = 0
             self._machine_stop_count      = 0
+            self._stopped_by_fault        = False
             self._total_missing           = 0
             self._nok_with_missing        = 0
             self._last_position_diff      = 0.0
@@ -248,6 +253,12 @@ class ScannerController:
             new_state = ScannerState.STOPPED
         else:
             new_state = ScannerState.IDLE
+
+        if new_state == ScannerState.STOPPED:
+            # Si ya venia de FAULT (racha NOK), es una parada por falla real.
+            # Si venia de RUNNING sin FAULT, fue un DETENER voluntario del
+            # operador sin ningun problema detectado.
+            self._stopped_by_fault = (state == ScannerState.FAULT)
 
         self._transition(new_state)
         self._io.write(f"{self._id}.solenoid", False)
@@ -340,6 +351,7 @@ class ScannerController:
             self._max_nok_streak          = 0
             self._fault_count             = 0
             self._machine_stop_count      = 0
+            self._stopped_by_fault        = False
             self._total_missing           = 0
             self._nok_with_missing        = 0
             self._last_position_diff      = 0.0
@@ -591,6 +603,7 @@ class ScannerController:
                 "max_nok_streak":       self._max_nok_streak,
                 "fault_count":          self._fault_count,
                 "machine_stop_count":   self._machine_stop_count,
+                "stopped_by_fault":     self._stopped_by_fault,
                 "avg_missing_holes":    avg_missing,
                 "last_position_diff":   self._last_position_diff,
                 "avg_detection_ratio":  avg_detection_ratio,
@@ -1058,6 +1071,7 @@ class ScannerController:
             with self._lock:
                 if self._state == ScannerState.RUNNING:
                     self._state   = ScannerState.STOPPED
+                    self._stopped_by_fault = True
                     _was_running  = True
             if _was_running:
                 self._io.write(f"{self._id}.solenoid", False)

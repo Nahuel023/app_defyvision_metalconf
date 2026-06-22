@@ -48,6 +48,41 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 238 - Boton RESET vs RESET FALLA segun si hubo falla real
+
+**Pedido:** Tadeo nota que el boton siempre dice "RESET FALLA" al detener el
+scanner, incluso cuando estaba funcionando normalmente y no hubo ningun
+machine_stop ni FAULT. Pide que diga "RESET" en ese caso, y "RESET FALLA"
+solo cuando la parada fue realmente por una falla.
+
+**Causa:** `ScannerState.STOPPED` es un estado compartido por 3 caminos
+distintos en `src/controller/scanner_controller.py`: (1) DETENER voluntario
+en RUNNING modo AUTO sin ningun problema, (2) `machine_stop` (zigzag,
+defecto persistente, etc.) que pasa de RUNNING a STOPPED directo, (3) FAULT
+por racha NOK seguido de DETENER. La UI (`src/ui/operator.py`) solo miraba
+el estado STOPPED y por eso mostraba siempre "RESET FALLA", sin distinguir
+el camino (1) de los otros dos.
+
+**Cambios:**
+- `ScannerController`: nuevo flag `_stopped_by_fault: bool`.
+  - `stop()`: al pasar a STOPPED, queda en `True` solo si el estado previo
+    era FAULT; si venia de RUNNING sin FAULT (DETENER voluntario), `False`.
+  - En el camino directo de `machine_stop_triggered` (RUNNING → STOPPED sin
+    pasar por FAULT), se fija en `True`.
+  - Se reinicia a `False` en `start()`/`start_simulate()` (sesion nueva).
+  - Expuesto en `get_status()` como `"stopped_by_fault"`.
+- `OperatorWindow._refresh_buttons()`: ahora recibe `stopped_by_fault` y
+  pone el texto "↺ RESET FALLA" o "↺ RESET" segun corresponda, en vez de un
+  texto fijo puesto una sola vez en el constructor.
+
+**Validacion:** simulado con `ScannerController` real (sin PLC, fixture de
+`tests/test_scanner_controller.py`): (A) start AUTO → stop voluntario sin
+ningun problema → `stopped_by_fault=False`; (B) start AUTO → `force_fault()`
+→ stop() → `stopped_by_fault=True`. Ambos como se esperaba. Suite de tests
+sin regresiones (mismo fallo preexistente no relacionado, Cambio 213).
+
+---
+
 #### Cambio 237 - Ajuste de wording: "Agujeros que sí se ven" → "Agujeros detectados"
 
 **Pedido:** a Tadeo no le gustó el término "Agujeros que sí se ven" (Cambio
