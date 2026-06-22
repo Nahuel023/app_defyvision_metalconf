@@ -273,7 +273,15 @@ def _format_yaml_scalar(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, float):
         return repr(value)
-    return str(value)
+    if isinstance(value, int):
+        return str(value)
+    # Cualquier otro tipo (string u otro): dejar que PyYAML decida si necesita
+    # comillas — p.ej. "null"/"yes", algo con ':' o que arranca con un caracter
+    # especial (@, *, &, #) — en vez de asumir que siempre es seguro sin comillas.
+    dumped = yaml.safe_dump(value, default_flow_style=True).strip()
+    if dumped.endswith("\n..."):
+        dumped = dumped[: -len("\n...")]
+    return dumped
 
 
 def save_scanner_overrides(scanner_id: str, updates: dict[str, Any]) -> None:
@@ -308,7 +316,7 @@ def _set_io_map_inspection_param(
     top_key_re = re.compile(r"^\S")        # columna 0 = nuevo bloque top-level
     inspection_re = re.compile(r"^  inspection:\s*$")
     sibling_re = re.compile(r"^  \S")      # otra clave a 2 espacios (inputs:, outputs:, etc.)
-    param_re = re.compile(rf"^(\s+){re.escape(key)}:\s*.*$")
+    param_re = re.compile(rf"^(\s+){re.escape(key)}\s*:\s*.*$")
 
     start = next((i for i, l in enumerate(lines) if scanner_re.match(l)), None)
     if start is None:

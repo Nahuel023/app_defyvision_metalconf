@@ -195,6 +195,11 @@ class ScannerController:
                 logger.warning(f"[{self._id}] start() ignorado, estado={self._state.value}")
                 return False
             mode = self._mode
+            # Reclamar el slot de inicio dentro del MISMO lock que chequea IDLE:
+            # un start() concurrente (doble click, dos rutas de arranque) ve el
+            # estado ya cambiado y aborta arriba, en vez de pasar el guard
+            # tambien y lanzar un segundo hilo inspector sobre esta instancia.
+            self._state = ScannerState.RUNNING
 
         if mode == OperationMode.AUTO:
             if not self._camera.is_running:
@@ -233,7 +238,9 @@ class ScannerController:
         else:
             self._start_poller_thread()
 
-        self._transition(ScannerState.RUNNING)
+        # El estado ya quedo en RUNNING desde el lock de arriba; solo falta
+        # avisar a los listeners (UI) ahora que camara/hilos estan en marcha.
+        self._fire_state_changed()
         self._io.write(f"{self._id}.solenoid", True)  # bloqueado por IOMap si safe_mode=ON
         self._set_lights(green=True)
         logger.info(f"[{self._id}] iniciado ({mode.value})")

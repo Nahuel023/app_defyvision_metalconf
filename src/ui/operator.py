@@ -691,14 +691,13 @@ class ScannerPanel(QWidget):
 
     def _apply_safe_mode_ui(self) -> None:
         enabled = self._system.safe_mode(self._id)
-        label = "MODO SEGURO: ON" if enabled else "MODO SEGURO: OFF"
-        detail = "ELECTROVALVULAS DESACTIVADAS" if enabled else "ELECTROVALVULAS ACTIVADAS"
+        label = "ELECTROVALVULA DESACTIVADA" if enabled else "ELECTROVALVULA ACTIVA"
         bg = _SAFE_ON_BG if enabled else _SAFE_OFF_BG
         fg = _SAFE_ON_FG if enabled else _SAFE_OFF_FG
         border = "#f87171" if enabled else "#4ade80"
         self._safe_mode_btn.blockSignals(True)
         self._safe_mode_btn.setChecked(enabled)
-        self._safe_mode_btn.setText(f"{label}\n{detail}")
+        self._safe_mode_btn.setText(label)
         self._safe_mode_btn.setStyleSheet(
             "QPushButton {"
             f"background:{bg};color:{fg};border:1px solid {border};"

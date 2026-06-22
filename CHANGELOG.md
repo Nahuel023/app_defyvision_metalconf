@@ -48,6 +48,80 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 241 - Cierra los pendientes de la auditoria + boton de electrovalvula renombrado
+
+**Pedido:** Tadeo pidio continuar y cerrar todos los puntos que habian
+quedado pendientes del Cambio 240 ("dejalo lo mas completo y robusto
+posible"), mas un cambio de texto: el boton de la ventana de operador que
+decia "MODO SEGURO: ON/OFF" + "ELECTROVALVULAS ACTIVADAS/DESACTIVADAS" pasa
+a decir solamente "ELECTROVALVULA ACTIVA" o "ELECTROVALVULA DESACTIVADA".
+
+**Texto del boton (`src/ui/operator.py` → `_apply_safe_mode_ui()`):** se
+eliminó la linea "MODO SEGURO: ON/OFF"; el boton ahora muestra una sola
+linea, en singular: "ELECTROVALVULA ACTIVA" (modo seguro OFF, electrovalula
+liberada) o "ELECTROVALVULA DESACTIVADA" (modo seguro ON, bloqueada).
+
+**Se completaron las 2 revisiones que habian quedado pendientes:**
+- Pipeline de vision (`align_edge.py`, `preprocess.py`, `detect_holes.py`,
+  `machine_stop.py`): sin bugs confirmados — todos los casos borde
+  (sin lineas Hough, contornos degenerados, perimetro=0, imagen vacia)
+  ya estaban bien guardados.
+- Timers de `src/ui/service.py` (~9 QTimers + 1 QThread, archivo de 6700+
+  lineas): se encontraron 4 timers + 1 worker que NO se detenian al cerrar
+  la ventana de Servicio (que `operator.py` reutiliza — cerrar solo oculta,
+  no destruye). El de mayor impacto: `_rec_timer` (loop de grabacion)
+  seguia activo en segundo plano si se cerraba la ventana sin apretar
+  "Detener" antes — grababa a disco sin limite indefinidamente.
+
+**Fix de los timers de servicio
+(`src/ui/service.py` → `ServiceWindow.closeEvent()`):**
+- Si habia una grabacion activa (`_rec_tab._recording`), se llama a
+  `_on_stop()` (no solo se para el timer: tambien cierra el
+  `ThreadPoolExecutor` de escritura, evitando PNGs a medio escribir).
+- Se detienen `_roi_live_timer`, `_rec_timer`, `_fps_cap_timer`
+  (RecordingTab) y `_preview_timer` (CameraCalibTab) incondicionalmente.
+- Si el `_AnalysisWorker` (QThread de analisis de carpeta) seguia
+  corriendo, se le pide `cancel()`.
+- **Validado:** construccion real de `ServiceWindow` con un
+  `InspectionSystem` real (headless, `disable_plc_outputs=True`) +
+  `close()` sin excepciones; y el mismo test forzando una "grabacion
+  olvidada" activa (`_recording=True` + timers corriendo) — tras `close()`
+  ambos timers quedan parados y `_recording=False`, sin crashear.
+
+**3 fixes adicionales de bajo riesgo (documentados como pendientes en
+Cambio 240, ahora cerrados):**
+- `src/utils/config.py` → `_format_yaml_scalar()`: ya no usa `str(value)`
+  crudo para strings — ahora delega en `yaml.safe_dump()` para decidir si
+  hace falta comillas (`"null"`, `"yes"`, algo con `:`, que arranca con
+  `@`/`*`/`&`/`#`). Antes esos valores hubieran roto el YAML o cambiado de
+  significado al releerlos; validado con round-trip real para 9 casos.
+- `_set_io_map_inspection_param()`: la regex que busca la linea del
+  parametro ahora tolera espacios extra antes de los dos puntos
+  (`key : valor`), evitando crear una linea duplicada si el archivo fue
+  editado a mano de forma no exactamente uniforme.
+- `src/controller/scanner_controller.py` → `start()`: tenia una ventana sin
+  lock entre chequear `IDLE` y aplicar `RUNNING`, donde dos `start()`
+  concurrentes (doble click, dos rutas de arranque) podian pasar el guard
+  los dos y lanzar DOS hilos inspectores sobre la misma instancia. Fix: el
+  estado se reclama (`self._state = RUNNING`) dentro del MISMO lock que
+  hace el chequeo, sin ventana de por medio.
+  - **Validado:** 2 `start()` lanzados simultaneamente desde 2 threads con
+  un `threading.Barrier` → exactamente uno devuelve `True` y el otro
+  `False`, y queda un solo hilo `scanner_1-inspector` vivo (antes esta
+  prueba hubiera podido dar 2 `True` y 2 hilos).
+
+**No se tocó** (documentado, riesgo/beneficio no justifica un cambio mas
+invasivo a dias de la entrega): `_join_threads()` con timeout de 5s podria
+en teoria dejar un hilo zombie si `Camera.get_frame()` se cuelga mas de
+ese tiempo — requeriria que `Camera.get_frame()` respete un timeout/stop
+event, cambio de arquitectura mas grande, no de esta sesion.
+
+**Validacion general:** `py_compile` OK en los 4 archivos tocados; suite de
+tests sin regresiones (mismo fallo preexistente no relacionado, Cambio
+213); arranque real de la app (`python -m src.main run`) sin excepciones.
+
+---
+
 #### Cambio 240 - Auditoria pre-entrega: bug critico de licencia + 4 fixes mas
 
 **Pedido:** Tadeo dijo "ya esta la version final para entregar a la empresa,

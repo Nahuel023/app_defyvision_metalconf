@@ -6676,6 +6676,31 @@ class ServiceWindow(QMainWindow):
                 self._cam_tab._disconnect_ip_slot(slot)
         except Exception:
             pass
+        # Cerrar la ventana NO destruye self._rec_tab/self._cam_tab (operator.py
+        # reutiliza la misma instancia de ServiceWindow, solo se oculta) — sin
+        # esto los timers de abajo siguen disparando en segundo plano para
+        # siempre, y si habia una grabacion activa sin "Detener" sigue
+        # escribiendo a disco sin limite.
+        try:
+            if getattr(self._rec_tab, "_recording", False):
+                self._rec_tab._on_stop()
+        except Exception:
+            pass
+        for _timer_name in ("_roi_live_timer", "_rec_timer", "_fps_cap_timer"):
+            try:
+                getattr(self._rec_tab, _timer_name).stop()
+            except Exception:
+                pass
+        try:
+            self._cam_tab._preview_timer.stop()
+        except Exception:
+            pass
+        try:
+            worker = getattr(self._rec_tab, "_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.cancel()
+        except Exception:
+            pass
         event.accept()
 
 
