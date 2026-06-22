@@ -48,6 +48,55 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-06-22 - Tadeo + Claude
 
+#### Cambio 235 - ROI recenter habilitado en modo MOVE, solo ante deriva sostenida
+
+**Pedido:** Tadeo nota que el ROI nunca se corrige (estaba `roi_recenter_enabled:
+false` en los dos scanners desde Cambio 185/189). Pide habilitarlo en modo
+`move` (en vez de `resize`, que causaba el desync historico) con umbrales
+sensibles, pero con una condicion explicita: NO debe reaccionar de golpe si
+todos los frames se desalinean de repente (eso es sintoma de un problema
+mecanico real, no algo que el ROI deba "corregir" solo) — solo debe actuar
+si la desalineacion se sostiene durante una cantidad determinada de frames.
+
+**Diseño:**
+- `roi_recenter_mode: move` en vez del default `resize`: desplaza la ventana
+  en x sin tocar `w`, evitando el desync con `image_size` del patron que
+  causo Cambio 185 (scanner_2) y el bug analogo de scanner_1 (`w=242→259`).
+- `roi_recenter_urgent_delta_px: 1000.0` (antes 15.0 por default): el atajo
+  de "1 solo frame actua de inmediato" de `_update_runtime_roi_drift` en
+  `src/inspection.py` queda inalcanzable a proposito — la deriva max. real
+  (ancho de ROI ~242-265px) nunca llega a ese valor. Todo pasa siempre por
+  el camino normal que exige racha.
+- `roi_recenter_streak_frames: 20` (antes 6-8): exige 20 frames consecutivos
+  con la misma direccion de deriva + faltantes en el borde correspondiente
+  antes de mover el ROI 1px. Una desalineacion puntual de pocos frames se
+  resetea sola sin actuar.
+- `roi_recenter_trigger_delta_px: 4.0` / `edge_missing_min: 2`: mas sensible
+  que el default (5-6px / 3 faltantes) para detectar deriva moderada antes,
+  pero la sensibilidad solo importa porque la racha larga filtra el ruido.
+- `roi_recenter_warmup_frames: 30`: durante los primeros 30 frames tras
+  iniciar, solo se construye la linea base (promedio de `shift_x`); no hay
+  ninguna correccion posible hasta que `baseline_ready=True`.
+- Aplicado igual en `scanner_1` y `scanner_2` (`config/io_map.yaml`), ambos
+  con `roi.w` ya sincronizado con `image_size` del patron (242 y 265px).
+
+**Validacion (simulacion directa de `_update_runtime_roi_drift`, sin tocar
+hardware):**
+1. Salto brusco de 50px sostenido desde el frame 0 (simula problema
+   mecanico real) → no actua en 60 frames (la linea base lo absorbe como
+   "estado inicial"; el freno ante esto es `pattern_align`/`machine_stop`,
+   no el ROI).
+2. Deriva gradual que aparece despues del warmup y persiste → corrige en
+   el frame ~49 (≈19 frames despues de empezar la deriva, cerca del
+   `streak_frames=20`), moviendo de a 1px.
+3. Deriva puntual de 5 frames que se resuelve sola (ruido) → no actua.
+
+Suite de tests sin regresiones (mismo fallo preexistente no relacionado,
+Cambio 213). **Pendiente:** Tadeo prueba en planta; si la deriva real tarda
+mucho mas o menos que 20 frames en confirmarse, ajustar `streak_frames`.
+
+---
+
 #### Cambio 234 - Parada por desalineacion severa de 1 frame, ahora tambien en scanner_1
 
 **Pedido:** Tadeo quiere el mismo mecanismo de parada inmediata por

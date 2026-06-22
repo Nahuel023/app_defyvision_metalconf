@@ -52,10 +52,29 @@ scanner_1:
     # cruzado el gate global de NOK.
     machine_stop_min_missing: 4
     machine_stop_require_frame_nok: false
-    # Deshabilitado: el roi_recenter en modo resize expandio el ROI de w=242 a w=259
-    # desincronizandolo del patron (image_size=241). Sin recenter, el ROI queda fijo
-    # en el valor del roi.json, que ya cubre bien la zona microperforada de scanner_1.
-    roi_recenter_enabled: false
+    # ROI recenter en modo MOVE (Cambio 235): a diferencia del modo resize (que
+    # causaba el desync de Cambio 185/189 al ir agrandando w), move desplaza la
+    # ventana en x sin tocar w, asi el frame post-ROI sigue calzando siempre con
+    # image_size del patron.
+    # No reacciona de golpe ante una desalineacion repentina: urgent_delta_px queda
+    # tan alto que el atajo de 1-solo-frame nunca dispara (un salto brusco de todos
+    # los frames es sintoma de un problema mecanico real, no algo que el ROI deba
+    # "corregir" solo). Solo actua si la deriva se sostiene roi_recenter_streak_frames
+    # frames consecutivos en la misma direccion (mismo signo) con agujeros faltantes
+    # en el borde correspondiente — deriva gradual y persistente, no un salto puntual.
+    roi_recenter_enabled: true
+    roi_recenter_mode: move
+    roi_recenter_warmup_frames: 30
+    roi_recenter_trigger_delta_px: 4.0
+    roi_recenter_edge_missing_min: 2
+    roi_recenter_edge_band_px: 30.0
+    roi_recenter_streak_frames: 20
+    roi_recenter_step_px: 1.0
+    roi_recenter_max_total_shift_px: 20.0
+    roi_recenter_urgent_delta_px: 1000.0
+    roi_recenter_cooldown_frames: 30
+    roi_recenter_cooldown_max_frames: 150
+    roi_recenter_cooldown_mult: 2.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -86,9 +105,28 @@ scanner_2:
     blur_ksize: 3
     open_ksize: 3
     close_ksize: 2
-    # ROI de scanner_2 debe mantenerse en w=265 (igual que image_size del patron).
-    # roi_recenter desactivado para evitar desincronizacion (Cambio 185).
-    roi_recenter_enabled: false
+    # ROI recenter en modo MOVE (Cambio 235): mantiene w=265 fijo (igual que
+    # image_size del patron) y solo desplaza x, evitando el desync de Cambio 185
+    # que causaba el modo resize al ir agrandando w.
+    # No reacciona de golpe ante una desalineacion repentina: urgent_delta_px queda
+    # tan alto que el atajo de 1-solo-frame nunca dispara (un salto brusco de todos
+    # los frames es sintoma de un problema mecanico real, no algo que el ROI deba
+    # "corregir" solo). Solo actua si la deriva se sostiene roi_recenter_streak_frames
+    # frames consecutivos en la misma direccion con agujeros faltantes en el borde
+    # correspondiente — deriva gradual y persistente, no un salto puntual.
+    roi_recenter_enabled: true
+    roi_recenter_mode: move
+    roi_recenter_warmup_frames: 30
+    roi_recenter_trigger_delta_px: 4.0
+    roi_recenter_edge_missing_min: 2
+    roi_recenter_edge_band_px: 30.0
+    roi_recenter_streak_frames: 20
+    roi_recenter_step_px: 1.0
+    roi_recenter_max_total_shift_px: 20.0
+    roi_recenter_urgent_delta_px: 1000.0
+    roi_recenter_cooldown_frames: 30
+    roi_recenter_cooldown_max_frames: 150
+    roi_recenter_cooldown_mult: 2.0
     # Deteccion de desalineamiento geometrico: basada SOLO en metricas de
     # centering (zigzag de borde + inclinacion), SIN gate de missing.
     # Con min_missing=0 no se requieren agujeros faltantes para activar el
