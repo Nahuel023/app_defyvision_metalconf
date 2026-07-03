@@ -101,7 +101,29 @@ de 260 frames de esa carpeta:
 
 ---
 
-#### Cambio 244 - Pestaña de tolerancias: panel de ajuste de ROI con cámara en vivo
+#### Cambio 246 - Ventana de tolerancias dividida en dos pestañas con botones
+
+**Pedido:** Tadeo quiere dividir la ventana de tolerancias en dos páginas
+separadas seleccionables con botones (Tolerancias / Ajuste de ROI), para
+que quede más estético y no todo apilado en una sola vista.
+
+**Cambio (`src/ui/tolerance_window.py`):**
+- `ToleranceWindow` refactorizado con `QStackedWidget` de dos páginas:
+  - **Página 0 — "Tolerancias"** (default al abrir): aviso amarillo +
+    paneles de parámetros por scanner + botón Recargar.
+  - **Página 1 — "Ajuste de ROI"**: el `_RoiPanel` con cámara en vivo,
+    bordes izq/der y botón Guardar.
+- Barra de encabezado fija (56px) con título "TOLERANCIAS" a la izquierda
+  y dos botones tab checkables a la derecha:
+  - **"Tolerancias"** — verde oscuro (#065f46) al estar activo.
+  - **"Ajuste de ROI"** — azul (#0369a1) al estar activo.
+- La cámara en vivo solo arranca al cambiar a la pestaña ROI; se detiene
+  al volver a Tolerancias o al cerrar la ventana.
+- Ventana redimensionada a 1000×820 (una sola página a la vez).
+
+---
+
+#### Cambio 245 - Pestaña de tolerancias: panel de ajuste de ROI con cámara en vivo
 
 **Pedido:** Tadeo quiere que el operario pueda ajustar la ROI directamente desde
 la pestaña de tolerancias, con la misma herramienta que existe en modo servicio
