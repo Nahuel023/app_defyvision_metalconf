@@ -48,6 +48,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 248 - FAULT detiene el hilo; grace period no muestra "DETENCION DE MAQUINA" en UI
+
+**Pedido 1:** Cuando MACHINE FAULT aparece, el scanner sigue generando resultados e inundando la pantalla con más errores. Necesitaba detenerse al instante.
+
+**Pedido 2:** Durante el período de gracia (startup_grace_frames / startup_grace_seconds), si un frame tenía machine_stop=True el overlay mostraba "DETENCION DE MAQUINA" aunque la parada estuviera suprimida.
+
+**Cambios (`src/controller/scanner_controller.py`):**
+1. En el bloque `fault_triggered` de `_handle_result()`, se añade `self._stop_event.set()` tras `self._fire_state_changed()` para terminar inmediatamente el hilo inspector. El operario debe presionar DETENER → RESET → INICIAR para reanudar.
+2. Se añade variable `_ms_suppressed` en `_handle_result()`: se activa cuando machine_stop es suprimido por gracia o por `machine_stop_enabled=false`.
+3. Antes de llamar `on_result()`, si `_ms_suppressed` es True se limpia la bandera en el resultado (`dataclasses.replace(result, machine_stop=False)`) para que la UI no muestre "DETENCION DE MAQUINA" cuando la parada no aplica realmente.
+4. Se añade `import dataclasses` al bloque de imports del módulo.
+
+**Riesgos:**
+- El `_stop_event.set()` en fault hace que el thread inspector salga del loop inmediatamente. El estado FAULT ya actualizaba los semáforos y el solenoide; el thread quedaba vivo pero esperando en el poll_loop. Ahora ya no queda thread en ese limbo.
+- Para reanudar desde FAULT hay que hacer RESET explícito como con machine_stop.
+
+---
+
+#### Cambio 247 - DEFAULT_TOLERANCES: compare_left/right_ignore_px (ya commitado 3b3fd4d)
+
+**Pedido:** El spinbox de `compare_left_ignore_px` / `compare_right_ignore_px` en la ventana de tolerancias quedaba en 0.0 para modelos sin override explícito.
+
+**Causa:** `DEFAULT_TOLERANCES` en `src/utils/config.py` no incluía esas claves → `dict.get()` devolvía `None` → el spinbox no se inicializaba correctamente.
+
+**Cambio:** Añadir `compare_left_ignore_px: 0.0` y `compare_right_ignore_px: 0.0` al diccionario `DEFAULT_TOLERANCES`.
+
+---
+
 #### Cambio 246 - Scanner 2 RUN vivo: desactivar ROI pre-calibration al arranque
 
 **Pedido:** Tadeo aclara que el problema real persiste SOLO en produccion:

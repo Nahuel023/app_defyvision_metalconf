@@ -24,6 +24,7 @@ Threads:
   _inspector_thread — modo AUTO: inspecciona por diferencia de posición
 """
 
+import dataclasses
 import logging
 import queue
 import threading
@@ -1094,14 +1095,17 @@ class ScannerController:
             )
             in_grace = in_grace_frames or in_grace_time
 
+            _ms_suppressed = False
             if getattr(result, "machine_stop", False):
                 if in_grace:
                     logger.debug(
                         "[%s] machine_stop suprimido (grace frames=%d tiempo=%s)",
                         self._id, self._startup_grace_remaining + 1, in_grace_time,
                     )
+                    _ms_suppressed = True
                 elif not self._machine_stop_enabled:
                     logger.debug("[%s] machine_stop suprimido (machine_stop_enabled=false)", self._id)
+                    _ms_suppressed = True
                 else:
                     machine_stop_triggered = True
                     self._machine_stop_count += 1
@@ -1165,10 +1169,19 @@ class ScannerController:
             # backlight permanece encendido siempre
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
             self._fire_state_changed()
+            # Detiene el hilo inspector para que no siga generando resultados en pantalla.
+            # El operario debe presionar DETENER → RESET → INICIAR para reanudar.
+            self._stop_event.set()
         elif streak >= warn_at:
             self._set_lights(green=True, yellow=True)   # poll_loop toma el blink
         else:
             self._set_lights(green=True)
+
+        # Si machine_stop fue suprimido (grace o disabled), limpiar la bandera del
+        # resultado antes de enviarlo a la UI para no mostrar "DETENCION DE MAQUINA"
+        # en el overlay cuando la parada no se aplica realmente.
+        if _ms_suppressed:
+            result = dataclasses.replace(result, machine_stop=False)
 
         if self.on_result:
             try:
