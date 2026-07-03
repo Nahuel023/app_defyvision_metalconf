@@ -46,6 +46,49 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-07-03 - Tadeo + Claude
+
+#### Cambio 243 - Pestaña de tolerancias: 5 nuevos controles para el operario
+
+**Pedido:** Tadeo reporta que el programa no detecta los agujeros del lado derecho y
+quiere que el operario pueda ajustar más parámetros desde la pestaña de tolerancias
+sin necesidad del modo servicio.
+
+**Diagnóstico del problema:** `compare_right_ignore_px` (modelo_B: 30px,
+modelo_A via `grid_compare_margin_x_px`: 40px) excluye una franja del borde
+derecho de la comparación. Si los agujeros de ese borde caen dentro de esa franja,
+el sistema no los compara contra el patrón. Bajar ese valor es la corrección directa.
+También puede influir `tol_xy_px` si la cámara se desplazó levemente.
+
+**Cambio (`src/ui/tolerance_window.py` → `_PARAMS`):** Se agregaron 5 parámetros
+nuevos al panel de tolerancias del operario, con rangos seguros y descripciones
+en lenguaje de planta:
+
+1. `tol_xy_px` — "Tolerancia de posición" (5–80 px): distancia máxima entre
+   donde la cámara ve un agujero y donde el patrón lo espera. Útil si la cámara
+   se movió levemente.
+
+2. `compare_right_ignore_px` — "Ignorar borde DERECHO" (0–200 px, paso 5):
+   franja derecha excluida de la comparación. **Causa directa del problema
+   reportado**; bajar este valor hará que los agujeros del borde derecho
+   vuelvan a compararse.
+
+3. `compare_left_ignore_px` — "Ignorar borde IZQUIERDO" (0–200 px, paso 5):
+   simétrico para el borde izquierdo.
+
+4. `compare_top_ignore_px` — "Ignorar borde SUPERIOR" (0–200 px, paso 5):
+   para falsos faltantes en la parte de arriba.
+
+5. `compare_bottom_ignore_px` — "Ignorar borde INFERIOR" (0–200 px, paso 5):
+   para falsos faltantes en la parte de abajo.
+
+Los 5 parámetros se guardan vía `save_scanner_overrides` (io_map.yaml, bloque
+`inspection` del scanner) y toman efecto inmediato al presionar Guardar, igual
+que los 4 controles preexistentes. Los parámetros de detección más técnicos
+(threshold, CLAHE, morfología) siguen reservados para el modo servicio.
+
+---
+
 ### Sesion 2026-06-22 - Tadeo + Claude
 
 #### Cambio 242 - Contador NOK de la sesion se resetea tras 200 frames OK seguidos

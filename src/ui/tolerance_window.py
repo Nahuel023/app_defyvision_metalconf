@@ -104,6 +104,67 @@ _PARAMS: list[dict[str, Any]] = [
         vtype="float",
         vmin=5.0, vmax=60.0, vstep=1.0, decimals=1,
     ),
+    dict(
+        key="tol_xy_px",
+        label="Tolerancia de posición",
+        desc=(
+            "Distancia máxima (en píxeles) entre donde la cámara ve un agujero y "
+            "donde el patrón lo espera, para considerarlo como detectado. "
+            "MÁS ALTO = más tolerante (útil si la cámara se movió levemente). "
+            "MÁS BAJO = más estricto."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=5.0, vmax=80.0, vstep=1.0, decimals=1,
+    ),
+    dict(
+        key="compare_right_ignore_px",
+        label="Ignorar borde DERECHO",
+        desc=(
+            "Píxeles del borde derecho de la imagen que se excluyen de la comparación. "
+            "Si el programa no detecta agujeros del lado derecho, BAJAR este valor. "
+            "0 = ningún agujero del borde derecho se ignora."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=0.0, vmax=200.0, vstep=5.0, decimals=0,
+    ),
+    dict(
+        key="compare_left_ignore_px",
+        label="Ignorar borde IZQUIERDO",
+        desc=(
+            "Píxeles del borde izquierdo de la imagen que se excluyen de la comparación. "
+            "Si el programa no detecta agujeros del lado izquierdo, BAJAR este valor. "
+            "0 = ningún agujero del borde izquierdo se ignora."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=0.0, vmax=200.0, vstep=5.0, decimals=0,
+    ),
+    dict(
+        key="compare_top_ignore_px",
+        label="Ignorar borde SUPERIOR",
+        desc=(
+            "Píxeles del borde superior de la imagen que se excluyen de la comparación. "
+            "Si hay falsos faltantes en la parte de arriba, SUBIR este valor. "
+            "0 = ningún agujero del borde superior se ignora."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=0.0, vmax=200.0, vstep=5.0, decimals=0,
+    ),
+    dict(
+        key="compare_bottom_ignore_px",
+        label="Ignorar borde INFERIOR",
+        desc=(
+            "Píxeles del borde inferior de la imagen que se excluyen de la comparación. "
+            "Si hay falsos faltantes en la parte de abajo, SUBIR este valor. "
+            "0 = ningún agujero del borde inferior se ignora."
+        ),
+        unit="px",
+        vtype="float",
+        vmin=0.0, vmax=200.0, vstep=5.0, decimals=0,
+    ),
 ]
 
 
