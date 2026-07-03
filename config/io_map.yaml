@@ -187,7 +187,8 @@ scanner_2:
     # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0
-    compare_right_ignore_px: 75.0
+    compare_left_ignore_px: 45.0
+    compare_right_ignore_px: 55.0
     # Con desalineamiento, los faltantes quedan repartidos (1 por columna ci).
     # min_missing=1 permite que cada columna acumule racha aunque falte un solo
     # agujero por frame; frame_missing_nok_threshold=2 sigue siendo el gate global.

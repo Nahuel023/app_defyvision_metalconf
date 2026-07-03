@@ -48,6 +48,18 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 249 - Scanner 2: compare_left_ignore_px=45 / compare_right_ignore_px=55
+
+**Pedido:** Tadeo calibró en producción que ignorar 45px izquierda y 55px derecha elimina los falsos faltantes en scanner_2/modelo_B.
+
+**Cambio (`config/io_map.yaml`, bloque `scanner_2.inspection`):**
+- `compare_left_ignore_px: 45.0` (nuevo override; antes heredaba 40.0 de tolerancias.yaml/modelo_B)
+- `compare_right_ignore_px: 55.0` (antes era 75.0)
+
+**Resultado:** zona de comparación ajustada a los bordes reales del área perforada visible desde scanner_2, sin excluir columnas internas que podrían tener defectos reales.
+
+---
+
 #### Cambio 248 - FAULT detiene el hilo; grace period no muestra "DETENCION DE MAQUINA" en UI
 
 **Pedido 1:** Cuando MACHINE FAULT aparece, el scanner sigue generando resultados e inundando la pantalla con más errores. Necesitaba detenerse al instante.
