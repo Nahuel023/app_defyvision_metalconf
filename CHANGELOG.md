@@ -48,6 +48,44 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 246 - Scanner 2 RUN vivo: desactivar ROI pre-calibration al arranque
+
+**Pedido:** Tadeo aclara que el problema real persiste SOLO en produccion:
+las imagenes aisladas / carpetas pueden dar OK, pero en `RUN` vivo el scanner
+salta `ERROR` o `MACHINE FAULT` casi instantaneamente apenas se presiona
+INICIAR/RUN.
+
+**Hallazgo de Claude:**
+- La ruta de `RUN` no es igual al analisis de carpeta. Antes de empezar la
+  `startup grace`, `ScannerController._continuous_loop_impl()` ejecuta
+  `_run_roi_precalibration()`.
+- `scanner_2` tenia `roi_precal_enabled=True` y `roi_recenter_enabled=True`.
+- Esa pre-calibracion usa frames del arranque mismo (todavia inestables o sin
+  chapa completamente asentada) y puede REESCRIBIR `roi.json` antes de que
+  entre en juego la gracia por frames/tiempo.
+- Eso explica el sintoma observado por Tadeo: `raw` sueltos analizados despues
+  dan OK, pero la corrida viva arranca ya con ROI corrida y por eso se rompe
+  "al instante" aunque la imagen estacionaria se vea bien.
+
+**Cambio (`config/io_map.yaml`, solo `scanner_2`):**
+- `roi_precal_enabled: false`
+
+**Que NO cambia:**
+- `roi_recenter_enabled` sigue en `true`
+- el recenter gradual durante la corrida sigue activo con:
+  `warmup`, `streak`, `step_px` y `max_total_shift_px`
+- o sea: se elimina solo la correccion agresiva al ARRANCAR, pero no la
+  capacidad de corregir deriva lenta una vez estabilizada la marcha
+
+**Riesgos / oportunidades:**
+- Si el problema era efectivamente la ROI pre-cal moviendose mal al inicio,
+  este cambio deberia impactar especificamente el caso "carpeta OK / RUN mal".
+- Si aun asi siguiera parando de inmediato, el siguiente dato clave ya no seria
+  una carpeta de `raw`, sino el log de produccion con timestamps del arranque
+  y el `roi.json` antes/despues de apretar RUN.
+
+---
+
 #### Cambio 245 - MACHINE FAULT: corte de solenoide reforzado con reintentos + verificacion
 
 **Pedido:** despues del Cambio 244, Tadeo reporta que en `run` vivo el problema
