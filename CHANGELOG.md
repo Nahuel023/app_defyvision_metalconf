@@ -48,6 +48,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 244 - Pestaña de tolerancias: panel de ajuste de ROI con cámara en vivo
+
+**Pedido:** Tadeo quiere que el operario pueda ajustar la ROI directamente desde
+la pestaña de tolerancias, con la misma herramienta que existe en modo servicio
+y viendo la cámara en vivo al instante de abrir la ventana.
+
+**Cambio (`src/ui/tolerance_window.py`):**
+- Nuevos imports: `cv2`, `numpy`, `QTimer`, `QComboBox`, `QImage`, `QThread`,
+  `pyqtSignal`, `json`, `os`, `tempfile`.
+- Nueva clase `_RoiPanel(QWidget)`: panel de ajuste de ROI autocontenido,
+  idéntico en funcionalidad al de `service.py` pero simplificado para operario:
+  - Selector de scanner (combo) en el encabezado.
+  - Preview de imagen en vivo (mínimo 220px, expandible).
+  - Controles de borde izquierdo y derecho con flechas ◄ ► y paso configurable.
+  - Indicadores de posición y ancho de ROI en píxeles.
+  - Botón "GUARDAR ROI": escribe `data/patterns/{model}/roi.json` y reconstruye
+    el patrón en background (igual que en servicio), luego llama
+    `scanner.reload_cache()`.
+  - `start_live()` / `stop_live()`: arrancan/detienen el timer de captura (~8 fps).
+- `ToleranceWindow._build_ui()`: agrega el `_RoiPanel` debajo de los paneles de
+  parámetros con stretch 3:2 (parámetros:ROI). Separador visual entre secciones.
+- `ToleranceWindow.showEvent()`: llama `_roi_panel.start_live()` → cámara en vivo
+  automáticamente al abrir la ventana.
+- `ToleranceWindow.closeEvent()`: llama `_roi_panel.stop_live()` para detener
+  el timer al cerrar.
+- Ventana redimensionada a 1000×1020px para acomodar el panel ROI.
+
+**Sin cambios en el comportamiento existente de los parámetros de tolerancia.**
+
+---
+
 #### Cambio 243 - Pestaña de tolerancias: 5 nuevos controles para el operario
 
 **Pedido:** Tadeo reporta que el programa no detecta los agujeros del lado derecho y

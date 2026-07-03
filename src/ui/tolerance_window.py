@@ -13,12 +13,19 @@ Los parámetros técnicos (geometría del patrón, umbrales de detección,
 alineación, etc.) solo se modifican desde el modo servicio.
 """
 
+import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QIcon, QPixmap
+import cv2
+import numpy as np
+
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
+from PyQt6.QtGui import QFont, QIcon, QImage, QPixmap
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
@@ -166,6 +173,445 @@ _PARAMS: list[dict[str, Any]] = [
         vmin=0.0, vmax=200.0, vstep=5.0, decimals=0,
     ),
 ]
+
+
+# ------------------------------------------------------------------
+# Panel de ajuste de ROI (cámara en vivo, bordes izq/der, guardar)
+# ------------------------------------------------------------------
+
+class _RoiPanel(QWidget):
+    """Panel de ajuste de ROI integrado en la ventana de tolerancias.
+
+    Arranca la cámara en vivo automáticamente al hacerse visible.
+    El operario ajusta los bordes izquierdo y derecho con flechas y
+    guarda la ROI; el patrón se reconstruye en segundo plano.
+    """
+
+    _BTN_SS = (
+        f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+        "border-radius:5px;font-size:11px;padding:0 12px;min-height:30px; }}"
+        f"QPushButton:hover {{ border-color:{_ACCENT}; }}"
+    )
+    _BTN_LIVE_SS = (
+        "QPushButton { background:#15803d;color:#ffffff;border:1px solid #16a34a;"
+        "border-radius:5px;font-size:11px;padding:0 12px;min-height:30px; }"
+        "QPushButton:hover { background:#166534; }"
+    )
+    _ARROW_SS = (
+        f"QPushButton {{ background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+        "border-radius:5px;font-size:16px;font-weight:700;"
+        "min-width:38px;min-height:38px; }}"
+        f"QPushButton:hover {{ border-color:{_ACCENT};color:{_ACCENT}; }}"
+        "QPushButton:pressed { background:#0f172a; }"
+    )
+    _CHIP_SS = (
+        f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+        f"background:{_DARK};border:1px solid {_BORDER};"
+        "border-radius:4px;padding:2px 8px;background:transparent;border:none;"
+    )
+
+    def __init__(self, system: "InspectionSystem", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._roi_frame: np.ndarray | None = None
+        self._roi_lx: int = 0
+        self._roi_rx: int = 0
+        self._live_active: bool = False
+        self._live_frame_count: int = 0
+        self._live_timer = QTimer(self)
+        self._live_timer.setInterval(120)   # ~8 fps
+        self._live_timer.timeout.connect(self._grab_live)
+        self._rebuild_worker: QThread | None = None
+        self._build_ui()
+
+    # ── Construcción UI ───────────────────────────────────────────────
+
+    def _build_ui(self) -> None:
+        self.setStyleSheet(f"background:{_PANEL};border-radius:8px;")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
+
+        # ── Encabezado: título + selector de scanner ──────────────────
+        top_row = QHBoxLayout()
+        top_row.setSpacing(10)
+
+        title_lbl = QLabel("AJUSTE DE ROI")
+        title_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:13px;font-weight:700;letter-spacing:2px;"
+            "background:transparent;"
+        )
+        top_row.addWidget(title_lbl)
+        top_row.addStretch()
+
+        sc_lbl = QLabel("Scanner:")
+        sc_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;background:transparent;")
+        top_row.addWidget(sc_lbl)
+
+        self._scanner_combo = QComboBox()
+        for sid in self._system.scanner_ids():
+            num = sid.split("_")[-1]
+            self._scanner_combo.addItem(f"Scanner {num}", userData=sid)
+        self._scanner_combo.setFixedWidth(130)
+        self._scanner_combo.setFixedHeight(30)
+        self._scanner_combo.setStyleSheet(
+            f"QComboBox {{ background:{_CARD};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;font-size:11px;padding:0 8px; }"
+            f"QComboBox::drop-down {{ border:none;width:20px; }}"
+            f"QComboBox QAbstractItemView {{ background:{_CARD};color:{_TEXT}; }}"
+        )
+        self._scanner_combo.currentIndexChanged.connect(self._on_scanner_changed)
+        top_row.addWidget(self._scanner_combo)
+        root.addLayout(top_row)
+
+        # ── ROI guardada ──────────────────────────────────────────────
+        self._roi_saved_lbl = QLabel("ROI guardada: —")
+        self._roi_saved_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;background:transparent;"
+        )
+        root.addWidget(self._roi_saved_lbl)
+
+        # ── Preview imagen en vivo ────────────────────────────────────
+        self._preview_lbl = QLabel("Iniciando cámara…")
+        self._preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_lbl.setMinimumHeight(220)
+        self._preview_lbl.setSizePolicy(
+            self._preview_lbl.sizePolicy().horizontalPolicy(),
+            __import__("PyQt6.QtWidgets", fromlist=["QSizePolicy"]).QSizePolicy.Policy.Expanding,
+        )
+        self._preview_lbl.setStyleSheet(
+            f"background:#0a0f1a;border-radius:6px;border:1px solid {_BORDER};"
+            f"color:{_MUTED};font-size:12px;"
+        )
+        root.addWidget(self._preview_lbl, stretch=1)
+
+        # ── Controles de bordes ───────────────────────────────────────
+        edges_row = QHBoxLayout()
+        edges_row.setSpacing(14)
+
+        # Borde izquierdo
+        lx_chip = QLabel("BORDE IZQ")
+        lx_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
+        )
+        edges_row.addWidget(lx_chip)
+        self._btn_lx_left  = QPushButton("◄")
+        self._btn_lx_right = QPushButton("►")
+        self._btn_lx_left.setStyleSheet(self._ARROW_SS)
+        self._btn_lx_right.setStyleSheet(self._ARROW_SS)
+        self._btn_lx_left.clicked.connect(lambda: self._move("lx", -1))
+        self._btn_lx_right.clicked.connect(lambda: self._move("lx", +1))
+        edges_row.addWidget(self._btn_lx_left)
+        edges_row.addWidget(self._btn_lx_right)
+        self._lx_val_lbl = QLabel("x=—")
+        self._lx_val_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;background:transparent;"
+        )
+        edges_row.addWidget(self._lx_val_lbl)
+
+        edges_row.addStretch()
+
+        # Paso + ancho resultante
+        paso_chip = QLabel("PASO")
+        paso_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
+        )
+        edges_row.addWidget(paso_chip)
+        self._step_spin = QSpinBox()
+        self._step_spin.setRange(1, 100)
+        self._step_spin.setValue(5)
+        self._step_spin.setSuffix(" px")
+        self._step_spin.setFixedWidth(78)
+        self._step_spin.setFixedHeight(32)
+        self._step_spin.setStyleSheet(
+            f"QSpinBox {{ background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:2px 4px;font-size:12px;font-weight:700; }"
+            f"QSpinBox::up-button,QSpinBox::down-button {{ width:20px;background:{_CARD};"
+            f"border-left:1px solid {_BORDER}; }}"
+        )
+        edges_row.addWidget(self._step_spin)
+
+        self._width_lbl = QLabel("w=—")
+        self._width_lbl.setStyleSheet(
+            f"color:{_ACCENT};font-size:12px;font-weight:700;"
+            "font-family:Consolas,monospace;background:transparent;"
+        )
+        edges_row.addWidget(self._width_lbl)
+
+        edges_row.addStretch()
+
+        # Borde derecho
+        rx_chip = QLabel("BORDE DER")
+        rx_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
+        )
+        edges_row.addWidget(rx_chip)
+        self._btn_rx_left  = QPushButton("◄")
+        self._btn_rx_right = QPushButton("►")
+        self._btn_rx_left.setStyleSheet(self._ARROW_SS)
+        self._btn_rx_right.setStyleSheet(self._ARROW_SS)
+        self._btn_rx_left.clicked.connect(lambda: self._move("rx", -1))
+        self._btn_rx_right.clicked.connect(lambda: self._move("rx", +1))
+        edges_row.addWidget(self._btn_rx_left)
+        edges_row.addWidget(self._btn_rx_right)
+        self._rx_val_lbl = QLabel("x=—")
+        self._rx_val_lbl.setStyleSheet(
+            f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;background:transparent;"
+        )
+        edges_row.addWidget(self._rx_val_lbl)
+
+        root.addLayout(edges_row)
+
+        # ── Guardar + live ────────────────────────────────────────────
+        save_row = QHBoxLayout()
+        save_row.setSpacing(12)
+
+        self._live_btn = QPushButton("▶  Cámara en vivo")
+        self._live_btn.setFixedHeight(36)
+        self._live_btn.setCheckable(True)
+        self._live_btn.setStyleSheet(self._BTN_SS)
+        self._live_btn.clicked.connect(self._toggle_live)
+        save_row.addWidget(self._live_btn)
+
+        save_row.addStretch()
+
+        self._save_btn = QPushButton("GUARDAR ROI")
+        self._save_btn.setFixedHeight(36)
+        self._save_btn.setEnabled(False)
+        self._save_btn.setMinimumWidth(180)
+        self._save_btn.setStyleSheet(
+            "QPushButton { background:#15803d;color:#ffffff;"
+            "border-radius:8px;font-size:13px;font-weight:700;border:none; }"
+            "QPushButton:hover { background:#166534; }"
+            "QPushButton:disabled { background:#374151;color:#6b7280; }"
+        )
+        self._save_btn.clicked.connect(self._on_save)
+        save_row.addWidget(self._save_btn)
+        root.addLayout(save_row)
+
+        self._status_lbl = QLabel("")
+        self._status_lbl.setWordWrap(True)
+        self._status_lbl.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-family:Consolas,monospace;background:transparent;"
+        )
+        root.addWidget(self._status_lbl)
+
+        self._refresh_roi_label()
+
+    # ── Helpers ───────────────────────────────────────────────────────
+
+    def _current_sid(self) -> str:
+        return self._scanner_combo.currentData() or ""
+
+    def _model_for(self, sid: str) -> str:
+        try:
+            return self._system.io.scanner_config(sid).get("model", "")
+        except Exception:
+            return ""
+
+    def _refresh_roi_label(self) -> None:
+        from src.patterns.roi import load_roi
+        sid   = self._current_sid()
+        model = self._model_for(sid)
+        roi   = load_roi(model, sid) if model else None
+        if roi:
+            self._roi_saved_lbl.setText(
+                f"ROI guardada:  x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}"
+            )
+        else:
+            self._roi_saved_lbl.setText("ROI guardada: — (sin ROI definida aún)")
+
+    def _init_borders(self, sid: str, W: int) -> None:
+        from src.patterns.roi import load_roi
+        model = self._model_for(sid)
+        roi   = load_roi(model, sid) if model else None
+        if roi:
+            self._roi_lx = roi.x
+            self._roi_rx = roi.x + roi.w
+        else:
+            self._roi_lx = 0
+            self._roi_rx = W
+
+    # ── Cámara en vivo ────────────────────────────────────────────────
+
+    def start_live(self) -> None:
+        sid = self._current_sid()
+        try:
+            self._system.camera(sid)
+        except Exception:
+            self._status_lbl.setText("No hay cámara disponible para este scanner.")
+            return
+        self._live_active = True
+        self._live_frame_count = 0
+        self._live_btn.setText("⏹  Detener live")
+        self._live_btn.setChecked(True)
+        self._live_btn.setStyleSheet(self._BTN_LIVE_SS)
+        self._status_lbl.setText(f"Cámara en vivo: {sid}")
+        self._live_timer.start()
+
+    def stop_live(self) -> None:
+        self._live_active = False
+        self._live_timer.stop()
+        self._live_btn.setText("▶  Cámara en vivo")
+        self._live_btn.setChecked(False)
+        self._live_btn.setStyleSheet(self._BTN_SS)
+        if self._roi_frame is not None:
+            self._status_lbl.setText("Live detenido — frame congelado.")
+        else:
+            self._status_lbl.setText("")
+
+    def _toggle_live(self) -> None:
+        if self._live_active:
+            self.stop_live()
+        else:
+            self.start_live()
+
+    def _grab_live(self) -> None:
+        if not self._live_active:
+            return
+        sid = self._current_sid()
+        try:
+            cam   = self._system.camera(sid)
+            frame = cam.get_frame()
+        except Exception:
+            frame = None
+        if frame is None:
+            return
+        if self._roi_frame is None:
+            self._init_borders(sid, frame.shape[1])
+            self._save_btn.setEnabled(True)
+        self._roi_frame = frame
+        self._redraw()
+
+    def _on_scanner_changed(self) -> None:
+        self._roi_frame = None
+        self._refresh_roi_label()
+        if self._live_active:
+            # Reiniciar captura para el nuevo scanner
+            self._live_timer.stop()
+            self._live_frame_count = 0
+            self._live_timer.start()
+
+    # ── Dibujo del preview ────────────────────────────────────────────
+
+    def _move(self, edge: str, direction: int) -> None:
+        if self._roi_frame is None:
+            return
+        step = self._step_spin.value() * direction
+        W = self._roi_frame.shape[1]
+        if edge == "lx":
+            self._roi_lx = max(0, min(self._roi_rx - 1, self._roi_lx + step))
+        else:
+            self._roi_rx = max(self._roi_lx + 1, min(W, self._roi_rx + step))
+        self._redraw()
+
+    def _redraw(self) -> None:
+        if self._roi_frame is None:
+            return
+        lx, rx = self._roi_lx, self._roi_rx
+        H, W   = self._roi_frame.shape[:2]
+
+        self._lx_val_lbl.setText(f"x={lx}")
+        self._rx_val_lbl.setText(f"x={rx}")
+        self._width_lbl.setText(f"w={rx - lx}")
+
+        vis = self._roi_frame.copy()
+        vis[:, :lx] = (vis[:, :lx] * 0.3).astype("uint8")
+        vis[:, rx:] = (vis[:, rx:] * 0.3).astype("uint8")
+        cv2.line(vis, (lx, 0), (lx, H - 1), (0, 255, 100), 2)
+        cv2.line(vis, (rx, 0), (rx, H - 1), (0, 200, 255), 2)
+        cv2.rectangle(vis, (lx, 2), (rx, H - 3), (255, 255, 255), 1)
+
+        pw    = max(self._preview_lbl.width(), 300)
+        scale = pw / W
+        thumb = cv2.resize(vis, (pw, int(H * scale)), interpolation=cv2.INTER_AREA)
+        th, tw = thumb.shape[:2]
+        rgb   = np.ascontiguousarray(cv2.cvtColor(thumb, cv2.COLOR_BGR2RGB))
+        qimg  = QImage(rgb.data, tw, th, rgb.strides[0], QImage.Format.Format_RGB888).copy()
+        pix   = QPixmap.fromImage(qimg)
+        self._preview_lbl.setPixmap(
+            pix.scaled(
+                self._preview_lbl.width(),
+                self._preview_lbl.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
+    # ── Guardar ROI ───────────────────────────────────────────────────
+
+    def _on_save(self) -> None:
+        if self._roi_frame is None:
+            return
+        lx, rx = self._roi_lx, self._roi_rx
+        if rx <= lx:
+            return
+        H   = self._roi_frame.shape[0]
+        sid = self._current_sid()
+        model = self._model_for(sid)
+        if not model:
+            QMessageBox.warning(self, "Sin modelo", "No hay modelo configurado para este scanner.")
+            return
+
+        from src.patterns.roi import roi_path
+        path = roi_path(model, sid)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2),
+            encoding="utf-8",
+        )
+        self._status_lbl.setText("ROI guardada — reconstruyendo patrón…")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
+        self._refresh_roi_label()
+        self._rebuild_pattern_async(self._roi_frame.copy(), model, sid)
+
+    def _rebuild_pattern_async(self, frame: np.ndarray, model: str, scanner_id: str) -> None:
+        class _Worker(QThread):
+            done = pyqtSignal(str, bool)
+
+            def __init__(self, frame: np.ndarray, model: str, scanner_id: str) -> None:
+                super().__init__()
+                self._frame      = frame
+                self._model      = model
+                self._scanner_id = scanner_id
+
+            def run(self) -> None:
+                tmp = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+                        tmp = f.name
+                    cv2.imwrite(tmp, self._frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    from src.patterns.pattern_build import build_pattern_from_image
+                    out = build_pattern_from_image(
+                        self._model, Path(tmp), scanner_id=self._scanner_id
+                    )
+                    self.done.emit(f"ROI y patron guardados → {out.name}", True)
+                except Exception as exc:
+                    self.done.emit(f"ROI guardada  ·  Error reconstruyendo patron: {exc}", False)
+                finally:
+                    if tmp and os.path.exists(tmp):
+                        os.unlink(tmp)
+
+        _sid = scanner_id
+        worker = _Worker(frame, model, scanner_id)
+
+        def _on_done(msg: str, ok: bool) -> None:
+            color = "#22c55e" if ok else "#f87171"
+            self._status_lbl.setText(msg)
+            self._status_lbl.setStyleSheet(f"color:{color};font-size:10px;")
+            if ok and _sid:
+                try:
+                    self._system.scanner(_sid).reload_cache()
+                except Exception:
+                    pass
+
+        worker.done.connect(_on_done)
+        worker.done.connect(lambda *_: worker.deleteLater())
+        self._rebuild_worker = worker
+        worker.start()
 
 
 # ------------------------------------------------------------------
@@ -382,8 +828,9 @@ class ToleranceWindow(QMainWindow):
         if not icon_pix.isNull():
             self.setWindowIcon(QIcon(icon_pix))
         self.setStyleSheet(f"background:{_DARK};")
-        self.resize(900, 780)
+        self.resize(1000, 1020)
         self._build_ui()
+        self._roi_panel: _RoiPanel | None = None
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -433,7 +880,17 @@ class ToleranceWindow(QMainWindow):
             scroll.setWidget(panel)
             panels_row.addWidget(scroll)
 
-        root.addLayout(panels_row, stretch=1)
+        root.addLayout(panels_row, stretch=3)
+
+        # ── Separador ─────────────────────────────────────────────────
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet(f"color:{_BORDER};")
+        root.addWidget(sep)
+
+        # ── Panel ROI ─────────────────────────────────────────────────
+        self._roi_panel = _RoiPanel(self._system)
+        root.addWidget(self._roi_panel, stretch=2)
 
         # ── Botón recargar ────────────────────────────────────────────
         reload_btn = QPushButton("Recargar valores actuales")
@@ -451,3 +908,13 @@ class ToleranceWindow(QMainWindow):
             panel = scroll.widget()
             if isinstance(panel, _ScannerTolerancePanel):
                 panel._load_values()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if self._roi_panel is not None:
+            self._roi_panel.start_live()
+
+    def closeEvent(self, event) -> None:
+        if self._roi_panel is not None:
+            self._roi_panel.stop_live()
+        super().closeEvent(event)
