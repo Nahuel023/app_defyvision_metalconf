@@ -878,12 +878,12 @@ class ScannerController:
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
-        # Limpiar racha del detector de machine_stop antes de arrancar: el
-        # detector vive cacheado en self._inspector (no se recrea en cada
-        # reinicio del scanner), asi que sin este reset arrastraria zonas ya
-        # disparadas de la corrida anterior y volveria a parar instantaneamente
-        # aunque el defecto fisico ya haya pasado.
-        self._inspector.reset_machine_stop(model_init, self._id)
+        # Invalidar cache del Inspector al arrancar: roi_recenter escribe roi.json
+        # a disco pero NO actualiza self._inspector._roi en memoria. Sin invalidar,
+        # el INICIAR siguiente crea la sesion con el ROI viejo del cache. Invalidar
+        # fuerza releer roi.json (y patron/tolerancias) al crear la nueva sesion.
+        # Tambien elimina el detector de machine_stop del cache (se recrea fresco).
+        self._inspector.invalidate(model=model_init, scanner_id=self._id)
         session = InspectionSession(
             model_init,
             scanner_id=self._id,
@@ -1114,6 +1114,11 @@ class ScannerController:
                     logger.debug("[%s] fault suprimido por grace period (streak=%d)", self._id, streak)
                     self._nok_streak = 0  # reset streak para no acumular durante grace
                     self._streak_start_mono = None
+                    # Resetear tambien el detector de machine_stop: sin esto, el
+                    # historial acumulado durante grace persiste y puede disparar
+                    # machine_stop al primer frame post-grace que coincida con la
+                    # misma zona aunque la pieza sea correcta.
+                    self._inspector.reset_machine_stop(model, self._id)
                 else:
                     self._state     = ScannerState.FAULT
                     fault_triggered = True

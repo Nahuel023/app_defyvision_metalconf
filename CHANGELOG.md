@@ -48,7 +48,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
-#### Cambio 249 - Scanner 2: compare_left_ignore_px=45 / compare_right_ignore_px=55
+#### Cambio 251 - Auditoría pre-24/7: 2 fixes de robustez en scanner_controller
+
+**Hallazgos de la auditoría:**
+
+**Fix 1 — ROI stale tras roi_recenter (ALTO)**
+`roi_recenter` escribe el ROI corregido a roi.json en disco, pero NO actualiza el cache `self._inspector._roi` en memoria. Al hacer RESET+INICIAR, la nueva sesión llama a `_get_roi()` que devuelve el cache viejo. Con el ROI desplazado pueden aparecer missing holes falsos en los primeros ~50 frames (cubiertos por grace, pero solo si el operador no reduce startup_grace_seconds).
+
+Cambio en `_continuous_loop_impl()`: reemplaza `reset_machine_stop()` con `self._inspector.invalidate(model=model_init, scanner_id=self._id)`. Invalida todo el cache (ROI, patrón, tolerancias, detector) forzando releer roi.json actualizado. El detector se recrea fresco en el `_get_detector()` de la siguiente sesión.
+
+**Fix 2 — MachineStopDetector acumula estado durante grace (MEDIO)**
+Cuando FAULT es suprimido por grace (línea ~1113), `_nok_streak` se reinicia a 0 pero el `MachineStopDetector` interno mantiene su historial de zonas/columnas. Al expirar la grace, si el detector ya tiene N-1 frames acumulados, el primer frame post-grace con ≥1 missing dispara machine_stop aunque la pieza sea correcta.
+
+Cambio en `_handle_result()`: en el bloque `if in_grace:`, después de resetear el streak, añade `self._inspector.reset_machine_stop(model, self._id)` para limpiar el historial del detector.
+
+---
+
+#### Cambio 250 - Scanner 2: compare_left_ignore_px=45 / compare_right_ignore_px=55
 
 **Pedido:** Tadeo calibró en producción que ignorar 45px izquierda y 55px derecha elimina los falsos faltantes en scanner_2/modelo_B.
 
@@ -60,7 +76,7 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-#### Cambio 248 - FAULT detiene el hilo; grace period no muestra "DETENCION DE MAQUINA" en UI
+#### Cambio 249 - FAULT detiene el hilo; grace period no muestra "DETENCION DE MAQUINA" en UI
 
 **Pedido 1:** Cuando MACHINE FAULT aparece, el scanner sigue generando resultados e inundando la pantalla con más errores. Necesitaba detenerse al instante.
 
