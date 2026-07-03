@@ -145,6 +145,8 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_slow_ema_warmup_frames": 300,   # frames iniciales para establecer baseline estatico (~60s)
     "compare_top_ignore_px": 0.0,     # recorta solo en comparacion (no en deteccion/alineacion)
     "compare_bottom_ignore_px": 0.0,  # ignora bordes sup/inf del frame/ROI si molestan
+    "compare_left_ignore_px": 0.0,   # ignora franja izquierda en comparacion
+    "compare_right_ignore_px": 0.0,  # ignora franja derecha en comparacion
     "pattern_hull_margin_px": 0.0,    # 0 = deshabilitado; >0 = descarta detectados fuera de la envolvente del patron
     # Per-type hole classification (models with two distinct hole sizes, e.g. modelo_A)
     # 0 = disabled (single-type mode); >0 = area threshold (px²) between small/large holes
