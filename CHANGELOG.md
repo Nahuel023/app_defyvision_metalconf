@@ -48,6 +48,20 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 252 - LOW_QUALITY suprime patron desalineado y zigzag
+
+**Pedido:** si la foto es de calidad baja (blur_score < blur_score_min), no debe saltar nunca por patron desalineado ni zigzag, ya que la lectura no es confiable.
+
+**Causa:** `pattern_align_enabled` ya se saltaba cuando `frame_geometry_quality == "UNSTABLE"` (chapa zigzagueante), pero NO cuando `frame_quality == "LOW_QUALITY"` (imagen borrosa por blur_score). Un frame borroso podía generar medidas de zigzag falsas y disparar `pattern_alignment_warn` + `machine_stop`.
+
+**Cambio (`src/inspection.py`):**
+- Línea ~782: añade `and frame_quality != "LOW_QUALITY"` al guard del bloque principal `pattern_align_enabled` (zigzag + offset + slope).
+- Línea ~932: añade `and frame_quality != "LOW_QUALITY"` al guard del check de parada severa instantánea (`pattern_align_severe_abs_max_px` / `pattern_align_severe_slope_deg`).
+
+Con esto, cualquier frame marcado LOW_QUALITY es ignorado completamente por todos los checks de alineamiento de patrón.
+
+---
+
 #### Cambio 251 - Auditoría pre-24/7: 2 fixes de robustez en scanner_controller
 
 **Hallazgos de la auditoría:**

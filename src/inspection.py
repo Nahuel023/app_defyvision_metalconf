@@ -779,7 +779,7 @@ def _inspect_bgr(
                 frame_geometry_quality = "UNSTABLE"
                 frame_quality = "LOW_QUALITY"  # weak external edge + sheet zigzag
 
-        if pattern_align_enabled and frame_geometry_quality != "UNSTABLE":
+        if pattern_align_enabled and frame_geometry_quality != "UNSTABLE" and frame_quality != "LOW_QUALITY":
             _pattern_align_missing_ok = (
                 pattern_align_min_missing <= 0
                 or report.missing >= pattern_align_min_missing
@@ -933,6 +933,7 @@ def _inspect_bgr(
         not machine_stop
         and pattern_align_enabled
         and frame_geometry_quality != "UNSTABLE"
+        and frame_quality != "LOW_QUALITY"
         and centering is not None
         and (pattern_align_min_missing <= 0 or report.missing >= pattern_align_min_missing)
     ):
