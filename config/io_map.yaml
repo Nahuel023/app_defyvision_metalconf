@@ -143,7 +143,12 @@ scanner_2:
     # (en el lote editado frames 074+075 son la racha consecutiva).
     pattern_align_stop_frames: 2
     pattern_global_offset_max_px: 0.0
-    pattern_slope_delta_max_deg: 0.6
+    # Calibracion 03-07-2026: el baseline bueno de scanner_2 en microperforado
+    # ya vive cerca de 0.7-1.1deg de delta patron/chapa. Con 0.6deg se marcaban
+    # falsos "PATRON DESALINEADO" y, por racha de 2 frames, FAULT instantaneo
+    # aunque la pieza estuviera bien. 1.2deg sigue por debajo de una deriva
+    # mecanica severa, pero deja pasar el offset normal de este scanner.
+    pattern_slope_delta_max_deg: 1.2
     # Parada inmediata en 1 SOLO frame para desalineacion severa, sin esperar la
     # racha de pattern_align_stop_frames: frames reales aportados por Tadeo
     # (carpeta "ERROR DE PARADA FRAME DESALINEADO", 2026-06-19) mostraron zigzag
@@ -166,9 +171,12 @@ scanner_2:
     # Matching mas permisivo solo para scanner_2 en microperforado; reduce
     # missing residuales del lote OK sin afectar scanner_1.
     tol_xy_px: 42.0
-    # Los frames editados con agujeros faltantes reales hoy quedan en 6-9 missing:
-    # con umbral 5 pasan a NOK y permiten acumular la racha de machine_stop.
-    frame_missing_nok_threshold: 2
+    # Calibracion 03-07-2026: en el lote NOK aportado aparecian falsos missing
+    # aislados de 2-4 agujeros sobre piezas sanas. Con umbral 2 esos frames
+    # pasaban a NOK aunque el patron estuviera bien. Subir a 5 mantiene margen
+    # frente a defectos reales grandes (historicamente 6-9 missing en microperforado)
+    # y evita castigar ruido chico de matching.
+    frame_missing_nok_threshold: 5
     # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
     # derecha mas inestable para no penalizar el borde residual.
     pattern_edge_margin_right_px: 15.0

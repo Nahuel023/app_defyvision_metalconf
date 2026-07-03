@@ -48,6 +48,59 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 244 - Scanner 2 microperforado: eliminar falso NOK/FAULT instantaneo por desalineacion demasiado sensible
+
+**Pedido:** Tadeo reporta que `scanner_2` (el unico en uso) empezo a parar
+siempre al arrancar en `run`: salta `NOK` y `MACHINE FAULT` casi al instante,
+pero las imagenes guardadas en `C:\Users\DefyC\Downloads\NOK-03-07-2026`
+estan bien salvo las de `CALIDAD BAJA`. Sospecha inicial: una columna del
+lado derecho no se estaba tomando aunque estuviera dentro del ROI.
+
+**Hallazgo de Claude:** reanalizando los `raw.jpg` con el codigo actual, el
+problema NO era una columna completa perdida ni una ROI corrida. En una muestra
+de 260 frames de esa carpeta:
+- `258/260` daban `OK` con la calibracion vigente, pero quedaban `2` falsos `NOK`;
+- uno de esos 2, al repetirse en 2 frames seguidos, disparaba `machine_stop`;
+- la causa real no era `zigzag` ni una columna ausente, sino el check
+  `pattern_slope_delta_max_deg=0.6` de `scanner_2`, demasiado estricto para
+  su baseline real: frames buenos mostraban delta patron/chapa de hasta
+  `~1.10 deg`;
+- ademas, `frame_missing_nok_threshold=2` castigaba como `NOK` falsos missing
+  chicos de `2-4` agujeros en piezas correctas.
+
+**Cambios hechos por Tadeo + Claude (`config/io_map.yaml`):**
+- `scanner_2.inspection.pattern_slope_delta_max_deg: 0.6 -> 1.2`
+  - Motivo: el baseline bueno del scanner ya vive cerca de `0.7-1.1 deg`;
+    con `0.6` se marcaba falso `PATRON DESALINEADO` y por racha de 2 frames
+    terminaba en `FAULT`.
+- `scanner_2.inspection.frame_missing_nok_threshold: 2 -> 5`
+  - Motivo: las piezas sanas del lote aportado tenian falsos missing aislados
+    de `2-4` agujeros; con umbral `2` quedaban como `NOK` aunque el patron
+    estuviera bien. `5` sigue dejando margen frente a defectos reales grandes
+    del microperforado (historicamente `6-9 missing`).
+
+**Validacion en `C:\Users\DefyC\Downloads\NOK-03-07-2026`:**
+- Antes del ajuste (muestra de 260 `raw.jpg`):
+  - `258 OK`, `2 NOK`, `1 machine_stop`
+  - los 2 falsos NOK eran `scanner_2_cont_052425_26252_raw` y
+    `scanner_2_cont_052954_37300_raw`
+  - ambos tenian `pattern_alignment_warn=True` con `slope_delta=0.87` y `0.66`
+    respectivamente; el segundo acumulaba la racha y disparaba `machine_stop`
+- Despues del ajuste:
+  - la misma muestra debe quedar sin esos falsos NOK/FAULT instantaneos; el
+    lote aportado pasa a comportarse como OK/LQ en vez de frenar la maquina por
+    una desalineacion inexistente.
+
+**Riesgos / oportunidades:**
+- Este fix baja sensibilidad SOLO para `scanner_2` en `modelo_B`; no toca
+  `scanner_1` ni `modelo_A`.
+- Si mas adelante aparecen defectos reales finos que ahora queden demasiado
+  permisivos, el siguiente ajuste sano es reconstruir el patron de
+  `scanner_2/modelo_B` con 3-5 frames muy nitidos del setup actual, en vez de
+  volver a endurecer agresivamente `pattern_slope_delta_max_deg`.
+
+---
+
 #### Cambio 244 - Pestaña de tolerancias: panel de ajuste de ROI con cámara en vivo
 
 **Pedido:** Tadeo quiere que el operario pueda ajustar la ROI directamente desde
