@@ -288,7 +288,7 @@ class ScannerController:
             self._state = new_state
 
         self._fire_state_changed()
-        self._io.write(f"{self._id}.solenoid", False)
+        self._cut_solenoid_critical("detener scanner")
         # backlight permanece encendido siempre
 
         if new_state == ScannerState.IDLE:
@@ -418,7 +418,7 @@ class ScannerController:
             self._fault_count += 1
 
         logger.warning(f"[{self._id}] FAULT forzado (simulación)")
-        self._io.write(f"{self._id}.solenoid", False)
+        self._cut_solenoid_critical("fault forzado")
         # backlight permanece encendido siempre
         self._set_lights(red=True)   # poll_loop toma el blink
         self._fire_state_changed()
@@ -861,7 +861,7 @@ class ScannerController:
                 self._id, exc, exc_info=True,
             )
             try:
-                self._io.write(f"{self._id}.solenoid", False)
+                self._cut_solenoid_critical("crash del inspector")
                 self._set_lights(red=True)
             except Exception:
                 pass
@@ -891,7 +891,7 @@ class ScannerController:
             resource_owner=self._inspector,
         )
         if not self._run_startup_selftest(model_init):
-            self._io.write(f"{self._id}.solenoid", False)
+            self._cut_solenoid_critical("selftest inicial fallido")
             self._set_lights(red=True)
             self._transition(ScannerState.ERROR)
             return
@@ -945,7 +945,7 @@ class ScannerController:
                         f"[{self._id}] ERROR por perdida de camara - "
                         f"sin frames durante {missing_sec:.1f}s"
                     )
-                    self._io.write(f"{self._id}.solenoid", False)
+                    self._cut_solenoid_critical("perdida de camara")
                     self._set_lights(red=True)
                     self._transition(ScannerState.ERROR)
                     return
@@ -976,7 +976,7 @@ class ScannerController:
                     _lg.getLogger(__name__).critical(
                         "[%s] sistema no autorizado — deteniendo scanner", self._id
                     )
-                    self._io.write(f"{self._id}.solenoid", False)
+                    self._cut_solenoid_critical("licencia invalida")
                     self._set_lights()
                     with self._lock:
                         if self._state == ScannerState.RUNNING:
@@ -1129,7 +1129,7 @@ class ScannerController:
                     self._stopped_by_fault = True
                     _was_running  = True
             if _was_running:
-                self._io.write(f"{self._id}.solenoid", False)
+                self._cut_solenoid_critical("machine fault")
                 # backlight permanece encendido siempre
                 self._set_lights(red=True)   # rojo fijo = intervención requerida
                 self._stop_event.set()
@@ -1161,7 +1161,7 @@ class ScannerController:
                     self._recorder.flush_event("fault", f"racha NOK {streak}")
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
-            self._io.write(f"{self._id}.solenoid", False)
+            self._cut_solenoid_critical("fault por racha NOK")
             # backlight permanece encendido siempre
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
             self._fire_state_changed()
@@ -1351,13 +1351,26 @@ class ScannerController:
 
     def _handle_license_failure(self) -> None:
         logger.critical("[%s] licencia invalida o vencida - deteniendo scanner", self._id)
-        self._io.write(f"{self._id}.solenoid", False)
+        self._cut_solenoid_critical("licencia invalida")
         self._set_lights()
         with self._lock:
             if self._state == ScannerState.RUNNING:
                 self._state = ScannerState.STOPPED
         self._stop_event.set()
         self._fire_state_changed()
+
+    def _cut_solenoid_critical(self, context: str) -> bool:
+        """Corta la electroválvula con reintentos y verificación de coil."""
+        ok = self._io.write_critical(
+            f"{self._id}.solenoid",
+            False,
+            retries=5,
+            retry_delay_s=0.15,
+            verify=True,
+        )
+        if not ok:
+            logger.error("[%s] NO se pudo confirmar solenoid=OFF tras %s", self._id, context)
+        return ok
 
     @staticmethod
     def _derive_stop_reason(result: InspectionResult) -> str:

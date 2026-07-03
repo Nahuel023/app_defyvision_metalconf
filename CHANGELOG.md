@@ -48,6 +48,58 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-03 - Tadeo + Claude
 
+#### Cambio 245 - MACHINE FAULT: corte de solenoide reforzado con reintentos + verificacion
+
+**Pedido:** despues del Cambio 244, Tadeo reporta que en `run` vivo el problema
+seguia: al disparar `MACHINE FAULT`, la maquina no siempre se detenia
+fisicamente y seguia corriendo / largando errores. Aporta ademas la carpeta
+`C:\Users\DefyC\Downloads\nok`.
+
+**Hallazgo de Claude:**
+- La carpeta `C:\Users\DefyC\Downloads\nok\nok` mezcla `*_raw.jpg` y
+  `*_overlay.png`. Si se reanaliza TODO junto, los overlays dibujados se toman
+  como si fueran frames reales y disparan muchisimos falsos `NOK` /
+  `machine_stop`.
+  - `RAW only`: `306 total`, `301 OK`, `5 NOK`, `0 machine_stop`
+  - `OVERLAY only`: `304 total`, `58 OK`, `246 NOK`, `203 machine_stop`
+- El bug de runtime mas grave estaba en el corte fisico: ante `machine_stop`,
+  `fault`, perdida de camara, selftest fallido o licencia invalida,
+  `ScannerController` hacia un solo `write(solenoid=False)` y enseguida cortaba
+  los threads. Si esa escritura coincidia con un reconnect del PLC o fallaba
+  una sola vez, no quedaba ningun loop vivo que insistiera con el corte.
+
+**Cambios hechos por Tadeo + Claude:**
+- `src/plc/io_map.py`
+  - nuevo `IOMap.write_critical(signal, value, retries=5, retry_delay_s=0.15, verify=True)`
+  - reintenta varias veces, fuerza reconnect inmediato entre intentos y
+    verifica por lectura que el coil haya quedado en el valor pedido.
+- `src/controller/scanner_controller.py`
+  - nuevo helper `_cut_solenoid_critical(context)`
+  - reemplaza los cortes simples de solenoide por corte critico en rutas de:
+    - `machine_stop`
+    - `FAULT` por racha NOK
+    - crash del inspector
+    - selftest fallido
+    - perdida de camara
+    - stop/reset de licencia
+    - `stop()` / `force_fault()`
+
+**Validacion:**
+- `py_compile` OK en `src/plc/io_map.py` y `src/controller/scanner_controller.py`.
+- Analisis de `C:\Users\DefyC\Downloads\nok\nok` confirma que los overlays NO
+  sirven para diagnosticar la deteccion en bruto; los `raw` de esa misma tanda
+  quedan casi todos OK con la calibracion actual y no disparan `machine_stop`.
+
+**Riesgos / oportunidades:**
+- Este cambio hace mucho mas robusto el corte fisico, pero si el PLC estuviera
+  totalmente fuera de linea durante todos los reintentos, igual quedara logueado
+  que NO se pudo confirmar `solenoid=OFF`. En ese caso el problema ya no seria
+  de vision sino de comunicacion PLC.
+- Mas adelante conviene ignorar `*_overlay.png` automaticamente en analisis por
+  carpeta para evitar diagnosticos falsos cuando se reusan carpetas de salida.
+
+---
+
 #### Cambio 244 - Scanner 2 microperforado: eliminar falso NOK/FAULT instantaneo por desalineacion demasiado sensible
 
 **Pedido:** Tadeo reporta que `scanner_2` (el unico en uso) empezo a parar

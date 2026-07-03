@@ -10,6 +10,7 @@ El código de control nunca usa offsets o bases hexadecimales directamente.
 
 import logging
 from pathlib import Path
+import time
 from typing import Any, Optional
 
 import yaml
@@ -102,6 +103,68 @@ class IOMap:
             )
             return False
         return self._client.write_coil(address, value)
+
+    def write_critical(
+        self,
+        signal: str,
+        value: bool,
+        *,
+        retries: int = 5,
+        retry_delay_s: float = 0.15,
+        verify: bool = True,
+    ) -> bool:
+        """Escritura reforzada para salidas críticas.
+
+        Reintenta la escritura varias veces y, opcionalmente, verifica por lectura
+        que el coil haya quedado en el valor pedido. Pensado especialmente para
+        cortes de solenoide ante FAULT/MACHINE FAULT.
+        """
+        sig_type, address = self._resolve(signal)
+        if sig_type != "output":
+            raise ValueError(f"'{signal}' es una entrada — no se puede escribir")
+        if self._disable_outputs:
+            logger.debug(f"[no-plc-outputs] {signal}={value} (suprimido)")
+            return True
+        if signal.endswith(".solenoid") and value and self._safe_mode.get(signal.split(".")[0], True):
+            logger.warning(
+                f"[SAFETY] Escritura critica bloqueada (modo seguro ON): {signal}=True"
+            )
+            return False
+
+        attempts = max(1, int(retries))
+        last_read: Optional[bool] = None
+        for attempt in range(1, attempts + 1):
+            ok = self._client.write_coil(address, value)
+            if ok:
+                if not verify:
+                    return True
+                last_read = self._client.read_coil(address)
+                if last_read == value:
+                    return True
+                logger.warning(
+                    "[CRITICAL-OUTPUT] verificacion inconsistente %s=%s "
+                    "(lectura=%s, intento=%d/%d)",
+                    signal, value, last_read, attempt, attempts,
+                )
+            else:
+                logger.warning(
+                    "[CRITICAL-OUTPUT] escritura fallida %s=%s "
+                    "(intento=%d/%d)",
+                    signal, value, attempt, attempts,
+                )
+
+            if attempt < attempts:
+                # Fuerza un reconnect inmediato sin esperar al siguiente ciclo del
+                # poller; en una parada real preferimos insistir agresivamente.
+                self._client.connect()
+                time.sleep(max(0.0, retry_delay_s))
+
+        logger.error(
+            "[CRITICAL-OUTPUT] no se pudo confirmar %s=%s tras %d intentos "
+            "(ultima lectura=%s)",
+            signal, value, attempts, last_read,
+        )
+        return False
 
     def set_safe_mode(self, scanner_id: str, enabled: bool) -> None:
         """Activa o desactiva el bloqueo de solenoide de UN scanner puntual."""
