@@ -171,3 +171,44 @@
 2026-06-17 10:49:46,769 [INFO] src.vision.camera: Camera http://192.168.1.2/oneshotimage.jpg: detenida
 2026-06-17 10:49:46,770 [INFO] src.plc.client: PLC disconnected
 2026-06-17 10:49:46,770 [INFO] src.controller.system: Sistema detenido
+2026-07-03 08:47:24,763 [INFO] src.controller.scanner_controller: [scanner_1] EventRecorder activo — 60.0s pre / 30.0s post
+2026-07-03 08:47:24,815 [INFO] src.controller.scanner_controller: [scanner_2] EventRecorder activo — 60.0s pre / 30.0s post
+2026-07-03 08:47:24,866 [INFO] src.metrics.recorder: MetricsRecorder iniciado — intervalo=60.0s, DB=data\metrics\metrics.db
+2026-07-03 08:47:27,950 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:47:27,950 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:27,951 [ERROR] src.controller.system: No se pudo conectar al PLC
+2026-07-03 08:47:27,953 [INFO] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: iniciando en background...
+2026-07-03 08:47:27,953 [INFO] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: modo snapshot keep-alive @ 25.0 fps (decode async)
+2026-07-03 08:47:27,954 [INFO] src.vision.camera: Camera http://192.168.1.2/oneshotimage.jpg: iniciando en background...
+2026-07-03 08:47:28,122 [INFO] src.vision.camera: Camera http://192.168.1.2/oneshotimage.jpg: modo snapshot keep-alive @ 25.0 fps (decode async)
+2026-07-03 08:47:30,782 [WARNING] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: error #1: [WinError 10061] No se puede establecer una conexión ya que el equipo de destino denegó expresamente dicha conexión
+2026-07-03 08:47:31,095 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:47:34,108 [ERROR] pymodbus.logging: Repeating....
+2026-07-03 08:47:34,109 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:36,135 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:47:39,142 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:47:39,142 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:39,434 [WARNING] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: error #2: [WinError 10060] Se produjo un error durante el intento de conexión ya que la parte conectada no respondió adecuadamente tras un periodo de tiempo, o bien se produjo un error en la conexión establecida ya que el host conectado no ha podido responder
+2026-07-03 08:47:41,209 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:47:44,225 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:47:44,227 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:46,288 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:47:49,300 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:47:49,301 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:49,641 [WARNING] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: error #3: timed out
+2026-07-03 08:47:51,368 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:47:54,377 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:47:54,377 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:47:59,410 [ERROR] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: el hilo no termino tras stop(); se bloquea un restart duplicado
+2026-07-03 08:47:59,410 [INFO] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: detenida
+2026-07-03 08:47:59,442 [INFO] src.vision.camera: Camera http://192.168.1.2/oneshotimage.jpg: detenida
+2026-07-03 08:47:59,445 [INFO] src.plc.client: PLC disconnected
+2026-07-03 08:47:59,446 [INFO] src.controller.system: Sistema detenido
+2026-07-03 08:47:59,508 [INFO] src.plc.client: PLC reconnecting...
+2026-07-03 08:48:00,048 [WARNING] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: error #4: timed out
+2026-07-03 08:48:02,525 [ERROR] pymodbus.logging: Connection to (192.168.10.175, 502) failed: timed out
+2026-07-03 08:48:02,525 [WARNING] src.plc.client: PLC connection failed: 192.168.10.175:502
+2026-07-03 08:48:02,526 [INFO] src.vision.camera: Camera http://192.168.1.3/oneshotimage.jpg: detenida
+2026-07-03 08:48:02,526 [INFO] src.vision.camera: Camera http://192.168.1.2/oneshotimage.jpg: detenida
+2026-07-03 08:48:02,526 [INFO] src.plc.client: PLC disconnected
+2026-07-03 08:48:02,526 [INFO] src.controller.system: Sistema detenido

@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -814,7 +815,7 @@ class _ScannerTolerancePanel(QWidget):
 
 
 # ------------------------------------------------------------------
-# Ventana principal
+# Ventana principal con dos pestañas: Tolerancias | Ajuste de ROI
 # ------------------------------------------------------------------
 
 class ToleranceWindow(QMainWindow):
@@ -823,32 +824,86 @@ class ToleranceWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self._system = system
+        self._roi_panel: _RoiPanel | None = None
+        self._stack: QStackedWidget | None = None
         self.setWindowTitle("Tolerancias — DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
             self.setWindowIcon(QIcon(icon_pix))
         self.setStyleSheet(f"background:{_DARK};")
-        self.resize(1000, 1020)
+        self.resize(1000, 820)
         self._build_ui()
-        self._roi_panel: _RoiPanel | None = None
+
+    # ── Construcción ─────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
         central.setStyleSheet(f"background:{_DARK};")
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
 
-        # ── Título ───────────────────────────────────────────────────
-        title = QLabel("TOLERANCIAS")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            f"color:{_TEXT};font-size:20px;font-weight:700;"
-            f"letter-spacing:4px;background:{_PANEL};"
-            f"border-radius:8px;padding:10px;"
+        # ── Barra de encabezado: título + tabs ────────────────────────
+        root.addWidget(self._build_header())
+
+        # ── Stacked widget ────────────────────────────────────────────
+        self._stack = QStackedWidget()
+        self._stack.setStyleSheet("background:transparent;")
+        self._stack.addWidget(self._build_params_page())   # índice 0
+        self._roi_panel = _RoiPanel(self._system)
+        self._stack.addWidget(self._roi_panel)              # índice 1
+        root.addWidget(self._stack, stretch=1)
+
+    def _build_header(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(56)
+        bar.setStyleSheet(
+            f"background:{_PANEL};border-radius:8px;border:1px solid {_BORDER};"
         )
-        root.addWidget(title)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(12)
+
+        title = QLabel("TOLERANCIAS")
+        title.setStyleSheet(
+            f"color:{_TEXT};font-size:18px;font-weight:700;"
+            "letter-spacing:4px;background:transparent;border:none;"
+        )
+        lay.addWidget(title)
+        lay.addStretch()
+
+        def _tab(label: str, idx: int, active_color: str) -> QPushButton:
+            btn = QPushButton(label)
+            btn.setFixedHeight(34)
+            btn.setMinimumWidth(160)
+            btn.setCheckable(True)
+            btn.setStyleSheet(
+                f"QPushButton {{ background:transparent; color:{_MUTED};"
+                f"border:1px solid {_BORDER}; border-radius:7px;"
+                f"font-size:12px; font-weight:700; padding:0 16px; }}"
+                f"QPushButton:checked {{ background:{active_color};"
+                f"color:#ffffff; border-color:{active_color}; }}"
+                f"QPushButton:hover:!checked {{ background:{active_color}22;"
+                f"border-color:{active_color}; color:{_TEXT}; }}"
+            )
+            btn.clicked.connect(lambda: self._switch_tab(idx))
+            return btn
+
+        self._tab_tol = _tab("Tolerancias",   0, "#065f46")
+        self._tab_roi = _tab("Ajuste de ROI", 1, "#0369a1")
+        self._tab_tol.setChecked(True)
+
+        lay.addWidget(self._tab_tol)
+        lay.addWidget(self._tab_roi)
+        return bar
+
+    def _build_params_page(self) -> QWidget:
+        page = QWidget()
+        page.setStyleSheet(f"background:{_DARK};")
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 8, 0, 0)
+        root.setSpacing(10)
 
         # ── Aviso ─────────────────────────────────────────────────────
         warn = QLabel(
@@ -858,16 +913,15 @@ class ToleranceWindow(QMainWindow):
         warn.setWordWrap(True)
         warn.setAlignment(Qt.AlignmentFlag.AlignCenter)
         warn.setStyleSheet(
-            f"color:#78350f;font-size:11px;font-weight:600;"
-            f"background:#fef3c7;border:1px solid #fbbf24;"
+            "color:#78350f;font-size:11px;font-weight:600;"
+            "background:#fef3c7;border:1px solid #fbbf24;"
             "border-radius:6px;padding:8px 14px;"
         )
         root.addWidget(warn)
 
-        # ── Paneles de scanners ────────────────────────────────────────
+        # ── Paneles por scanner ────────────────────────────────────────
         panels_row = QHBoxLayout()
         panels_row.setSpacing(12)
-
         for sid in self._system.scanner_ids():
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
@@ -879,20 +933,9 @@ class ToleranceWindow(QMainWindow):
             panel = _ScannerTolerancePanel(sid, self._system)
             scroll.setWidget(panel)
             panels_row.addWidget(scroll)
+        root.addLayout(panels_row, stretch=1)
 
-        root.addLayout(panels_row, stretch=3)
-
-        # ── Separador ─────────────────────────────────────────────────
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet(f"color:{_BORDER};")
-        root.addWidget(sep)
-
-        # ── Panel ROI ─────────────────────────────────────────────────
-        self._roi_panel = _RoiPanel(self._system)
-        root.addWidget(self._roi_panel, stretch=2)
-
-        # ── Botón recargar ────────────────────────────────────────────
+        # ── Botón recargar ─────────────────────────────────────────────
         reload_btn = QPushButton("Recargar valores actuales")
         reload_btn.setFixedHeight(32)
         reload_btn.setStyleSheet(
@@ -901,6 +944,22 @@ class ToleranceWindow(QMainWindow):
         )
         reload_btn.clicked.connect(self._reload_all)
         root.addWidget(reload_btn)
+        return page
+
+    # ── Navegación de pestañas ────────────────────────────────────────
+
+    def _switch_tab(self, idx: int) -> None:
+        prev = self._stack.currentIndex() if self._stack else 0
+        self._stack.setCurrentIndex(idx)
+        self._tab_tol.setChecked(idx == 0)
+        self._tab_roi.setChecked(idx == 1)
+        # Gestionar cámara en vivo
+        if idx == 1 and prev != 1 and self._roi_panel is not None:
+            self._roi_panel.start_live()
+        elif idx != 1 and prev == 1 and self._roi_panel is not None:
+            self._roi_panel.stop_live()
+
+    # ── Eventos de ventana ────────────────────────────────────────────
 
     def _reload_all(self) -> None:
         central = self.centralWidget()
@@ -911,7 +970,10 @@ class ToleranceWindow(QMainWindow):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        if self._roi_panel is not None:
+        # Solo arrancar live si la pestaña ROI está activa al abrir
+        if (self._roi_panel is not None
+                and self._stack is not None
+                and self._stack.currentIndex() == 1):
             self._roi_panel.start_live()
 
     def closeEvent(self, event) -> None:
