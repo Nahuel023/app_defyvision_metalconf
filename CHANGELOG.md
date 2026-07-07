@@ -48,6 +48,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-07 - Tadeo + Claude
 
+#### Cambio 255 - Racha de 2 frames para desalineacion en scanner_1 y scanner_2; se desactiva la parada de 1 solo frame
+
+**Pedido:** Tadeo queria bajar la sensibilidad al error de "patron desalineado": que no dispare nunca con un solo frame, sino con una racha de 2 frames desalineados seguidos (probo pedir 3, despues bajo a 2).
+
+**Contexto (ver Cambio 253/254 mas abajo primero para el flujo de merge de tolerancias):** habia DOS mecanismos independientes disparando desalineacion:
+1. `pattern_align_stop_frames` — racha normal (scanner_1=5, scanner_2=2).
+2. `pattern_align_severe_abs_max_px` — parada INSTANTANEA de 1 solo frame, disenada justamente para saltear la racha cuando el zigzag es muy grande (scanner_1=27.0px, scanner_2=12.0px).
+
+El disparo de "1 solo frame" que preocupaba a Tadeo venia del mecanismo #2, no del #1.
+
+**Cambio (`config/io_map.yaml`):**
+- `scanner_1.inspection.pattern_align_stop_frames`: 5 → **2**
+- `scanner_1.inspection.pattern_align_severe_abs_max_px`: 27.0 → **0.0** (deshabilitado; `0.0` es el valor que el codigo en `src/inspection.py` interpreta como "sin check severo", linea ~941-943)
+- `scanner_2.inspection.pattern_align_stop_frames`: ya estaba en 2, sin cambios
+- `scanner_2.inspection.pattern_align_severe_abs_max_px`: 12.0 → **0.0** (deshabilitado)
+
+**Resultado:** en ambos escaneres, CUALQUIER desalineacion de patron (por severa que sea) ahora tiene que sostenerse 2 frames consecutivos antes de disparar `machine_stop`. Ya no hay ningun camino que pare la maquina con un unico frame por este motivo (el resto de mecanismos de parada de 1 frame — verticalidad/tilt, faltantes persistentes, desalineacion geometrica masiva — no se tocaron, son checks distintos que Tadeo no pidio modificar).
+
+**Verificado:** `load_tolerances("modelo_B", scanner_id="scanner_1"/"scanner_2")` devuelve `pattern_align_stop_frames=2` y `pattern_align_severe_abs_max_px=0.0` para ambos. `pytest tests/` sigue 25/27 (mismos 2 failures preexistentes de `test_scanner_controller.py`, sin relacion).
+
+**Riesgo:** si el zigzag/inclinacion severos aparecen en un unico frame aislado (chapa que se corrio un instante y volvio), con `stop_frames=2` la maquina ya NO va a parar en ese frame — necesita 2 frames seguidos. Si en planta se ve que corrimientos mecanicos reales pero breves dejan de detectarse, hay que subir de nuevo `severe_abs_max_px` por scanner en vez de bajar `stop_frames`.
+
+---
+
 #### Cambio 253 - Zoom digital + paneo para camaras IP, nueva tab "Zoom" en modo servicio
 
 **Pedido:** agregar zoom artificial a ambas camaras IP (scanner_1 y scanner_2 leen de `http://192.168.1.3/oneshotimage.jpg` y `http://192.168.1.2/oneshotimage.jpg`, no hay zoom optico). Luego se pidio ademas mover el recorte en las 4 direcciones (arriba/abajo/izquierda/derecha) y una tab nueva dedicada llamada "Zoom" en modo servicio.

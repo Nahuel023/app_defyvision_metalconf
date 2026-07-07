@@ -22,14 +22,12 @@ scanner_1:
     pattern_align_enabled: true
     pattern_global_offset_max_px: 8.0
     pattern_slope_delta_max_deg: 1.0
-    pattern_align_stop_frames: 5
-    # Parada inmediata en 1 SOLO frame para desalineacion severa, sin esperar la
-    # racha de pattern_align_stop_frames (mismo mecanismo que scanner_2, Cambio 231).
-    # Sin frames reales de desalineacion severa de scanner_1 todavia: 27.0px es una
-    # estimacion por proporcion (mismo margen ~1.2x que uso scanner_2: 12.0/10.0)
-    # aplicada sobre el umbral de advertencia de scanner_1 (pattern_align_abs_max_px
-    # heredado de modelo_B = 22.0px) — a confirmar/ajustar probando en planta.
-    pattern_align_severe_abs_max_px: 27.0
+    # Cambio 255 (07-07-2026): racha de 2 frames para disparar desalineacion,
+    # y se desactiva la parada instantanea de 1 solo frame (severe_abs_max_px=0.0)
+    # a pedido de Tadeo — ya no se quiere ningun disparo por desalineacion en un
+    # unico frame, todo pasa por la racha.
+    pattern_align_stop_frames: 2
+    pattern_align_severe_abs_max_px: 0.0
     # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
     # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
     # missing=0) que de otra forma podrian disparar la parada de 1 solo frame.
@@ -156,16 +154,11 @@ scanner_2:
     # aunque la pieza estuviera bien. 1.2deg sigue por debajo de una deriva
     # mecanica severa, pero deja pasar el offset normal de este scanner.
     pattern_slope_delta_max_deg: 1.2
-    # Parada inmediata en 1 SOLO frame para desalineacion severa, sin esperar la
-    # racha de pattern_align_stop_frames: frames reales aportados por Tadeo
-    # (carpeta "ERROR DE PARADA FRAME DESALINEADO", 2026-06-19) mostraron zigzag
-    # de borde muy por encima del umbral de advertencia (13.7px y 16.1px vs
-    # pattern_align_abs_max_px=10.0) en UN SOLO frame aislado — la racha nunca
-    # llegaba a 2 frames seguidos y la maquina no paraba pese a la desalineacion
-    # mecanica real. 12.0px deja margen sobre el umbral de advertencia (10.0) y
-    # bajo el menor caso real observado (13.7) — a confirmar/ajustar probando en
-    # planta si da falsos positivos.
-    pattern_align_severe_abs_max_px: 12.0
+    # Cambio 255 (07-07-2026): a pedido de Tadeo se desactiva la parada
+    # instantanea de 1 solo frame por desalineacion severa (severe_abs_max_px=0.0).
+    # Ahora toda desalineacion, por severa que sea, tiene que sostenerse
+    # pattern_align_stop_frames=2 frames seguidos antes de parar la maquina.
+    pattern_align_severe_abs_max_px: 0.0
     # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo
     # 2-3 columnas al construir el patron. Usar margen pequeño para capturar
     # todos los agujeros; los bordes se excluyen en comparacion via compare_*_ignore_px.
