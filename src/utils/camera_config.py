@@ -24,9 +24,6 @@ DEFAULTS: dict[str, Any] = {
     "sharpness": 160,
     "gamma": 110,
     "backlight_compensation": 0,
-    "zoom": 100,    # % digital zoom; 100 = sin zoom
-    "pan_x": 0,     # -100..100, desplazamiento horizontal del recorte
-    "pan_y": 0,     # -100..100, desplazamiento vertical del recorte
 }
 
 
@@ -41,13 +38,12 @@ def load_camera_settings(scanner_id: str) -> dict[str, Any]:
 
 
 def save_camera_settings(scanner_id: str, settings: dict[str, Any]) -> None:
-    """Merge and persist settings for scanner_id; preserves other scanners
-    and any existing keys for this scanner not present in `settings`."""
+    """Persist settings for scanner_id; preserves other scanners."""
     existing: dict[str, Any] = {}
     if _PATH.exists():
         with _PATH.open("r", encoding="utf-8") as f:
             existing = yaml.safe_load(f) or {}
-    existing.setdefault(scanner_id, {}).update(settings)
+    existing[scanner_id] = settings
     with _PATH.open("w", encoding="utf-8") as f:
         yaml.dump(existing, f, default_flow_style=False,
                   allow_unicode=True, sort_keys=False)
