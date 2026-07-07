@@ -148,11 +148,7 @@ class InspectionSystem:
             for sid, cam in cameras.items():
                 if sid == scanner_id:
                     continue
-                # get_raw_frame() (no get_frame()): frame aca es el candidato crudo
-                # recien capturado (sin zoom); comparar contra el frame YA ZOOMEADO
-                # del otro scanner es una comparacion inconsistente que puede dar
-                # falsos positivos/negativos de "bleed" segun el zoom de cada uno.
-                other = cam.get_raw_frame()
+                other = cam.get_frame()
                 if other is None or other.shape != frame.shape:
                     continue
                 # Sample the center 200×200 patch for speed (avoid full-frame diff)

@@ -48,20 +48,6 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-07 - Tadeo + Claude
 
-#### Cambio 256 - Fix: validador de bleed entre camaras comparaba frame crudo vs frame YA ZOOMEADO
-
-**Contexto:** Tadeo reporto que tras ajustar el zoom, un escaner (scanner_1 en la primera sesion del log) no sumaba ninguna imagen OK/NOK. Revisando `logs/defyvision.log` de planta aparecian varios `[scanner_1] Camera validation FAILED: frame near-identical to scanner_2 (diff=1.7-4.4px) — DSHOW bleed, liberando` justo al arrancar, seguidos de reconexiones en loop.
-
-**Causa:** `InspectionSystem._make_bleed_validator()` (`src/controller/system.py`) compara, para cada frame nuevo que llega a una camara, un patch central 200x200 contra `cam.get_frame()` de CUALQUIER otro escaner — pero desde el Cambio 253, `get_frame()` aplica zoom/pan. El `frame` que llega al validator es el candidato CRUDO recien capturado (las camaras guardan el frame crudo internamente y solo aplican zoom en `get_frame()`), asi que la comparacion terminaba siendo crudo-vs-zoomeado: inconsistente y cada vez mas propensa a falsos positivos/negativos cuanto mas distinto sea el zoom entre los dos escaneres. Esta validacion fue pensada originalmente para bleed de camaras USB/DSHOW (reenumeracion de indices); aplicarla igual a camaras IP HTTP separadas por distinta IP ya era cuestionable, pero con zoom de por medio quedaba directamente incorrecta.
-
-**Cambio:**
-- `src/vision/camera.py`: nuevo metodo `get_raw_frame()` que devuelve el frame SIN zoom/paneo (para uso interno, comparaciones que deben ignorar el recorte digital).
-- `src/controller/system.py`: `_make_bleed_validator()` ahora compara contra `cam.get_raw_frame()` en vez de `cam.get_frame()` — crudo contra crudo, sin importar el zoom configurado en cada escaner.
-
-**Nota:** esto no fue necesariamente la causa raiz del "no suma imagenes" que reporto Tadeo (el log tambien muestra que scanner_2 arranca, pasa ROI pre-cal, y se detiene a los ~10-40s — posiblemente porque se prueba sin chapa real pasando por el sensor, dentro de la ventana de startup grace). Pero es una inconsistencia real que la sesion de zoom introdujo y que hacia falta corregir de todos modos.
-
----
-
 #### Cambio 255 - Racha de 2 frames para desalineacion en scanner_1 y scanner_2; se desactiva la parada de 1 solo frame
 
 **Pedido:** Tadeo queria bajar la sensibilidad al error de "patron desalineado": que no dispare nunca con un solo frame, sino con una racha de 2 frames desalineados seguidos (probo pedir 3, despues bajo a 2).

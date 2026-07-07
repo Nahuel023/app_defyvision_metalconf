@@ -121,15 +121,6 @@ class Camera:
     _PAN_MIN      = -100.0
     _PAN_MAX      = 100.0
 
-    def get_raw_frame(self) -> Optional[np.ndarray]:
-        """Devuelve una copia del ultimo frame capturado SIN zoom/paneo aplicado.
-        Uso interno para comparaciones que deben ignorar el recorte digital
-        (ej. validacion de bleed entre camaras)."""
-        with self._lock:
-            if self._frame is None:
-                return None
-            return self._frame.copy()
-
     def get_frame(self) -> Optional[np.ndarray]:
         """Devuelve una copia del ultimo frame capturado (con zoom digital
         aplicado si esta configurado), o None si no hay."""
