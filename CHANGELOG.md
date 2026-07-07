@@ -48,27 +48,6 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-07 - Tadeo + Claude
 
-#### Cambio 257 - Auto-escalado de tolerancias en pixeles segun el zoom digital de cada escaner
-
-**Pedido:** tras el Cambio 253 (zoom digital), Tadeo confirmo con imagenes reales (medicion de separacion entre agujeros, normalizada por ancho de imagen) que zoom=150% estira la geometria real en ~1.51x — matematicamente correcto, pero rompe TODA tolerancia en pixeles calibrada a mano para scanner_2 a zoom=100% (`grid_dx`, `grid_dy`, `tol_xy_px`, `compare_left/right_ignore_px`, `pattern_align_*_px`, `roi_recenter_*_px`, `max_area`, etc. — unas 15 claves). Volver a zoom=100% resuelve el problema pero Tadeo necesita el zoom porque a 100% los agujeros del microperforado se ven demasiado chicos para calibrar bien. Se opto por la solucion robusta: auto-escalar las tolerancias en vez de fijar un zoom.
-
-**Cambio (`src/utils/config.py`):**
-- Nueva funcion `_scale_pixel_tolerances(cfg, zoom_pct)`: reescala en el lugar, sobre el dict de tolerancias YA mergeado (defaults + tolerancias.yaml + overrides de modelo + overrides de `io_map.yaml` del escaner), toda clave que:
-  - termine en `"_px"` (o este en `_LINEAR_PX_EXTRA_KEYS = {grid_min_spacing, grid_dx, grid_dy, grid_stagger_x_odd}`, que son distancias en pixeles sin ese sufijo) → `valor *= zoom/100`.
-  - contenga `"area"` en el nombre (`min_area`, `max_area`, `hole_type_split_area`, `min/max_area_small/large`) → `valor *= (zoom/100)**2` (las areas escalan al cuadrado de una distancia lineal).
-  - Todo lo demas (angulos `_deg`, conteos de frames, ratios 0-1, `blur_score_min` — que no es una medida espacial lineal, ver riesgo abajo) queda sin tocar.
-- Nueva funcion `_current_zoom_pct(scanner_id)`: lee el zoom (%) guardado en `config/camera.yaml` para ese escaner (100 si no hay nada guardado o falla la lectura).
-- `load_tolerances()` llama `_scale_pixel_tolerances(cfg, _current_zoom_pct(scanner_id))` justo antes de cachear/devolver el resultado final. El cache (`_TOLERANCES_MERGED_CACHE`) ahora incluye el mtime de `config/camera.yaml` en su clave, asi que un cambio de zoom guardado invalida el cache igual que un cambio en tolerancias.yaml/io_map.yaml.
-- Efecto prctico: **cualquier zoom que se guarde para un escaner escala automaticamente TODA su calibracion en pixeles** — no hace falta recalcular nada a mano, y el trabajo de calibracion fino de Tadeo sigue siendo valido a cualquier zoom (es la misma proporcion, solo reexpresada a otra escala).
-
-**Cambio (`src/ui/service.py`, `ZoomTab`):** texto de advertencia actualizado para dejar explicito el ORDEN obligatorio: 1) Guardar el zoom en la tab Zoom primero, 2) reconstruir patron+ROI en Cámara→CALIBRACIÓN despues. Si se reconstruye el patron ANTES de guardar el zoom, `load_tolerances()` todavia ve el zoom viejo (lee `camera.yaml`, no el valor en memoria de la camara) y usa un factor de escala equivocado para `grid_dx`/`grid_dy` al construir el patron.
-
-**Riesgo real, sin resolver:** `blur_score_min` (varianza del Laplaciano, umbral de nitidez) NO es una distancia espacial lineal — el `cv2.resize` del zoom introduce suavizado que baja la nitidez aparente de forma no lineal. Se dejo A PROPOSITO sin escalar (no hay una formula simple), asi que con zoom alto puede hacer falta bajar `blur_score_min` a mano y probando en planta si empiezan a aparecer falsos `LOW_QUALITY`.
-
-**Verificado:** script ad-hoc que guarda `zoom=100` y `zoom=150` en `camera.yaml` (restaurando el archivo original al final) y compara `load_tolerances("modelo_B", scanner_id="scanner_2")`: `grid_dx` 35.5→53.25, `grid_dy` 13.6→20.4, `tol_xy_px` 42.0→63.0, `max_area` 250.0→562.5 (factor al cuadrado), `pattern_slope_delta_max_deg` y `blur_score_min` sin cambios — todos los factores exactos (1.5x y 1.5²x). `pytest tests/` sigue 25/27 (mismos 2 failures preexistentes sin relacion).
-
----
-
 #### Cambio 256 - Fix: validador de bleed entre camaras comparaba frame crudo vs frame YA ZOOMEADO
 
 **Contexto:** Tadeo reporto que tras ajustar el zoom, un escaner (scanner_1 en la primera sesion del log) no sumaba ninguna imagen OK/NOK. Revisando `logs/defyvision.log` de planta aparecian varios `[scanner_1] Camera validation FAILED: frame near-identical to scanner_2 (diff=1.7-4.4px) — DSHOW bleed, liberando` justo al arrancar, seguidos de reconexiones en loop.
