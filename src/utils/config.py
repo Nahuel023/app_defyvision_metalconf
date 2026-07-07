@@ -162,10 +162,53 @@ def tolerances_path() -> Path:
     return Path("config/tolerancias.yaml")
 
 
+# Claves espaciales que NO terminan en "_px" pero igual son distancias en pixeles
+# (separacion de grilla), y por lo tanto deben reescalarse con el zoom digital.
+_LINEAR_PX_EXTRA_KEYS = {"grid_min_spacing", "grid_dx", "grid_dy", "grid_stagger_x_odd"}
+
+
+def _scale_pixel_tolerances(cfg: dict[str, Any], zoom_pct: float) -> None:
+    """Reescala en el lugar toda tolerancia expresada en pixeles segun el zoom
+    digital activo de la camara, para que la calibracion fina (hecha a zoom=100%)
+    siga siendo valida a cualquier nivel de zoom.
+
+    - Distancias lineales (sufijo "_px", o en _LINEAR_PX_EXTRA_KEYS): *= ratio
+    - Areas en px^2 (cualquier clave con "area" en el nombre): *= ratio**2
+    - Angulos ("_deg"), conteos de frames, ratios 0-1, etc: sin tocar — no
+      escalan con el zoom, son invariantes de la geometria del recorte digital.
+    """
+    ratio = zoom_pct / 100.0
+    if ratio == 1.0:
+        return
+    for key, value in list(cfg.items()):
+        if value is None or isinstance(value, bool):
+            continue
+        is_area = "area" in key
+        is_linear = key.endswith("_px") or key in _LINEAR_PX_EXTRA_KEYS
+        if not (is_area or is_linear):
+            continue
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            continue
+        cfg[key] = numeric * (ratio ** 2 if is_area else ratio)
+
+
+def _current_zoom_pct(scanner_id: str | None) -> float:
+    """Zoom digital (%) guardado en config/camera.yaml para este scanner (100 = sin zoom)."""
+    if not scanner_id:
+        return 100.0
+    try:
+        from src.utils.camera_config import load_camera_settings
+        return float(load_camera_settings(scanner_id).get("zoom", 100) or 100)
+    except Exception:
+        return 100.0
+
+
 _TOLERANCES_CACHE_KEY: tuple[float | None, float | None] | None = None
 _TOLERANCES_CACHE_DATA: dict[str, Any] | None = None
 _TOLERANCES_MERGED_CACHE: dict[
-    tuple[str | None, str | None, tuple[float | None, float | None]],
+    tuple[str | None, str | None, tuple[float | None, float | None], float | None],
     dict[str, Any],
 ] = {}
 
@@ -214,7 +257,8 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
         _TOLERANCES_CACHE_DATA = data if isinstance(data, dict) else {}
         _TOLERANCES_MERGED_CACHE.clear()
 
-    merged_cache_key = (model, scanner_id, cache_key)
+    camera_cfg_mtime = _mtime_or_none(Path("config") / "camera.yaml")
+    merged_cache_key = (model, scanner_id, cache_key, camera_cfg_mtime)
     cached = _TOLERANCES_MERGED_CACHE.get(merged_cache_key)
     if cached is not None:
         return dict(cached)
@@ -241,6 +285,10 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
                 cfg.update({k: v for k, v in insp_cfg.items() if v is not None})
             except Exception:
                 pass
+
+    # Reescalar tolerancias en pixeles segun el zoom digital activo del escaner,
+    # para que la calibracion fina siga siendo valida a cualquier nivel de zoom.
+    _scale_pixel_tolerances(cfg, _current_zoom_pct(scanner_id))
 
     _TOLERANCES_MERGED_CACHE[merged_cache_key] = dict(cfg)
     return cfg

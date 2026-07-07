@@ -6294,9 +6294,12 @@ class ZoomTab(QWidget):
         root.addLayout(top)
 
         self._warn_lbl = QLabel(
-            "⚠ Cambiar zoom/paneo desplaza la geometría del frame: después de guardar hay "
-            "que reconstruir el patrón (build-pattern) y el ROI de este escáner, si no las "
-            "inspecciones van a fallar. No se puede ajustar mientras el escáner está en RUNNING."
+            "⚠ Orden obligatorio al cambiar zoom/paneo: 1) Guardar acá primero, "
+            "2) recién después reconstruir el patrón y el ROI de este escáner en "
+            "Cámara → CALIBRACIÓN (las tolerancias en píxeles se reescalan solas "
+            "con el zoom guardado, pero el patrón necesita una imagen real a la "
+            "escala nueva). Si reconstruís el patrón ANTES de guardar acá, va a "
+            "quedar mal. No se puede ajustar mientras el escáner está en RUNNING."
         )
         self._warn_lbl.setWordWrap(True)
         self._warn_lbl.setStyleSheet(
