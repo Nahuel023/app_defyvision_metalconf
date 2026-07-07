@@ -6293,6 +6293,18 @@ class ZoomTab(QWidget):
         top.addWidget(self._status_lbl)
         root.addLayout(top)
 
+        self._warn_lbl = QLabel(
+            "⚠ Cambiar zoom/paneo desplaza la geometría del frame: después de guardar hay "
+            "que reconstruir el patrón (build-pattern) y el ROI de este escáner, si no las "
+            "inspecciones van a fallar. No se puede ajustar mientras el escáner está en RUNNING."
+        )
+        self._warn_lbl.setWordWrap(True)
+        self._warn_lbl.setStyleSheet(
+            f"color:{_WARN};background:#1c1507;border:1px solid #b45309;"
+            "border-radius:6px;padding:6px 10px;font-size:11px;"
+        )
+        root.addWidget(self._warn_lbl)
+
         main = QHBoxLayout()
         main.setSpacing(12)
 
@@ -6330,6 +6342,7 @@ class ZoomTab(QWidget):
             )
         zoom_out_btn.clicked.connect(lambda: self._nudge_zoom(-self._ZOOM_STEP))
         zoom_in_btn.clicked.connect(lambda: self._nudge_zoom(self._ZOOM_STEP))
+        self._gated_widgets: list = [zoom_out_btn, zoom_in_btn]
 
         self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self._zoom_slider.setRange(self._ZOOM_MIN, self._ZOOM_MAX)
@@ -6341,6 +6354,7 @@ class ZoomTab(QWidget):
             f"QSlider::sub-page:horizontal {{ background:{_ACCENT};border-radius:2px; }}"
         )
         self._zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
+        self._gated_widgets.append(self._zoom_slider)
 
         self._zoom_spin = QSpinBox()
         self._zoom_spin.setRange(self._ZOOM_MIN, self._ZOOM_MAX)
@@ -6351,6 +6365,7 @@ class ZoomTab(QWidget):
             "border-radius:4px;padding:2px 4px;font-size:12px;"
         )
         self._zoom_spin.valueChanged.connect(self._on_zoom_spin_changed)
+        self._gated_widgets.append(self._zoom_spin)
 
         zoom_row.addWidget(zoom_out_btn)
         zoom_row.addWidget(self._zoom_slider, stretch=1)
@@ -6392,6 +6407,7 @@ class ZoomTab(QWidget):
         left_btn.clicked.connect(lambda: self._nudge_pan(-self._PAN_STEP, 0))
         right_btn.clicked.connect(lambda: self._nudge_pan(self._PAN_STEP, 0))
         center_btn.clicked.connect(self._center_pan)
+        self._gated_widgets.extend([up_btn, down_btn, left_btn, right_btn, center_btn])
 
         pad.addWidget(up_btn,     0, 1)
         pad.addWidget(left_btn,   1, 0)
@@ -6427,6 +6443,7 @@ class ZoomTab(QWidget):
         btn_row.addWidget(save_btn)
         btn_row.addWidget(reset_btn)
         btn_row.addStretch()
+        self._gated_widgets.append(reset_btn)
         ctrl_lay.addLayout(btn_row)
 
         main.addWidget(ctrl_grp, stretch=2)
@@ -6455,18 +6472,38 @@ class ZoomTab(QWidget):
         cam = self._current_camera()
         if cam is None:
             return
-        self._block_apply = True
-        try:
-            self._zoom_slider.setValue(int(round(cam.zoom)))
-            self._zoom_spin.setValue(int(round(cam.zoom)))
-            pan_x, pan_y = cam.pan
-            self._pan_lbl.setText(f"Paneo: x={pan_x:.0f}  y={pan_y:.0f}")
-        finally:
-            self._block_apply = False
+        self._sync_widgets_from_camera(cam)
+        self._update_running_gate()
+
+    def _update_running_gate(self) -> None:
+        """Deshabilita los controles de zoom/paneo mientras el escáner esté
+        en RUNNING, para no desalinear la geometría del frame en producción."""
+        running = self._is_scanner_running()
+        for w in getattr(self, "_gated_widgets", []):
+            w.setEnabled(not running)
+        if running:
+            self._warn_lbl.setStyleSheet(
+                f"color:{_NOK};background:#1f0606;border:1px solid #dc2626;"
+                "border-radius:6px;padding:6px 10px;font-size:11px;font-weight:700;"
+            )
+            self._warn_lbl.setText(
+                "⛔ Escáner en RUNNING: zoom/paneo bloqueados. Detené el escáner para ajustar."
+            )
+        else:
+            self._warn_lbl.setStyleSheet(
+                f"color:{_WARN};background:#1c1507;border:1px solid #b45309;"
+                "border-radius:6px;padding:6px 10px;font-size:11px;"
+            )
+            self._warn_lbl.setText(
+                "⚠ Cambiar zoom/paneo desplaza la geometría del frame: después de guardar hay "
+                "que reconstruir el patrón (build-pattern) y el ROI de este escáner, si no las "
+                "inspecciones van a fallar. No se puede ajustar mientras el escáner está en RUNNING."
+            )
 
     def _update_preview(self) -> None:
         if not self.isVisible():
             return
+        self._update_running_gate()
         cam = self._current_camera()
         if cam is None or not cam.is_running:
             return
@@ -6487,6 +6524,23 @@ class ZoomTab(QWidget):
     # Zoom / pan actions
     # ------------------------------------------------------------------
 
+    def _is_scanner_running(self) -> bool:
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return False
+        try:
+            return self._system.scanner(scanner_id).state == ScannerState.RUNNING
+        except KeyError:
+            return False
+
+    def _refuse_running(self) -> bool:
+        """Si el escáner está en RUNNING, bloquea el cambio y avisa. True = bloqueado."""
+        if not self._is_scanner_running():
+            return False
+        self._status_lbl.setStyleSheet(f"color:{_NOK};font-size:11px;")
+        self._status_lbl.setText("Bloqueado: detené el escáner antes de ajustar zoom/paneo")
+        return True
+
     def _on_zoom_slider_changed(self, value: int) -> None:
         if not self._block_apply:
             self._zoom_spin.blockSignals(True)
@@ -6502,6 +6556,8 @@ class ZoomTab(QWidget):
             self._apply_zoom(value)
 
     def _nudge_zoom(self, delta: int) -> None:
+        if self._refuse_running():
+            return
         new_val = max(self._ZOOM_MIN, min(self._ZOOM_MAX, self._zoom_spin.value() + delta))
         self._zoom_spin.setValue(new_val)  # triggers _on_zoom_spin_changed
 
@@ -6509,13 +6565,18 @@ class ZoomTab(QWidget):
         cam = self._current_camera()
         if cam is None:
             return
+        if self._refuse_running():
+            # Revertir el widget al valor real de la cámara para no mostrar
+            # un valor que en verdad no se aplicó.
+            self._sync_widgets_from_camera(cam)
+            return
         cam.set_zoom(float(value))
         self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
         self._status_lbl.setText(f"Zoom={value}%")
 
     def _nudge_pan(self, dx: int, dy: int) -> None:
         cam = self._current_camera()
-        if cam is None:
+        if cam is None or self._refuse_running():
             return
         pan_x, pan_y = cam.pan
         pan_x = max(-100.0, min(100.0, pan_x + dx))
@@ -6527,12 +6588,22 @@ class ZoomTab(QWidget):
 
     def _center_pan(self) -> None:
         cam = self._current_camera()
-        if cam is None:
+        if cam is None or self._refuse_running():
             return
         cam.set_pan(0.0, 0.0)
         self._pan_lbl.setText("Paneo: x=0  y=0")
         self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
         self._status_lbl.setText("Paneo centrado")
+
+    def _sync_widgets_from_camera(self, cam) -> None:
+        self._block_apply = True
+        try:
+            self._zoom_slider.setValue(int(round(cam.zoom)))
+            self._zoom_spin.setValue(int(round(cam.zoom)))
+            pan_x, pan_y = cam.pan
+            self._pan_lbl.setText(f"Paneo: x={pan_x:.0f}  y={pan_y:.0f}")
+        finally:
+            self._block_apply = False
 
     def _save_settings(self) -> None:
         scanner_id = self._scanner_combo.currentText()
@@ -6544,13 +6615,16 @@ class ZoomTab(QWidget):
         try:
             camera_config.save_camera_settings(scanner_id, settings)
             self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
-            self._status_lbl.setText("Guardado en config/camera.yaml")
+            self._status_lbl.setText(
+                "Guardado en config/camera.yaml — recordá reconstruir "
+                "patrón + ROI de este escáner"
+            )
         except Exception as exc:
             QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
 
     def _restore_defaults(self) -> None:
         cam = self._current_camera()
-        if cam is None:
+        if cam is None or self._refuse_running():
             return
         cam.set_zoom(100.0)
         cam.set_pan(0.0, 0.0)
