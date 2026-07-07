@@ -46,6 +46,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-07-07 - Tadeo + Claude
+
+#### Cambio 253 - Zoom digital + paneo para camaras IP, nueva tab "Zoom" en modo servicio
+
+**Pedido:** agregar zoom artificial a ambas camaras IP (scanner_1 y scanner_2 leen de `http://192.168.1.3/oneshotimage.jpg` y `http://192.168.1.2/oneshotimage.jpg`, no hay zoom optico). Luego se pidio ademas mover el recorte en las 4 direcciones (arriba/abajo/izquierda/derecha) y una tab nueva dedicada llamada "Zoom" en modo servicio.
+
+**Cambio (`src/vision/camera.py`):**
+- `Camera.get_frame()` ahora aplica `_apply_zoom()` sobre la copia del frame antes de devolverla: si `settings["zoom"] > 100` (%), recorta el centro del frame (desplazado por `pan_x`/`pan_y`, cada uno -100..100) y lo reescala con `cv2.resize` al tamaño original. zoom=100 (default) es no-op.
+- Nuevos metodos `set_zoom(value_pct)`, `set_pan(pan_x, pan_y)` y properties `zoom`/`pan` para ajustar en caliente sin reabrir la conexion (se aplica en el siguiente `get_frame()`).
+- Como el zoom se aplica en `get_frame()`, afecta a cualquier tipo de fuente (snapshot HTTP, MJPEG HTTP, OpenCV/DSHOW) con un unico punto de codigo.
+
+**Cambio (`src/utils/camera_config.py`):**
+- `DEFAULTS` agrega `zoom: 100`, `pan_x: 0`, `pan_y: 0`.
+- `save_camera_settings()` cambia de reemplazo completo (`existing[scanner_id] = settings`) a merge (`existing.setdefault(scanner_id, {}).update(settings)`). Necesario porque ahora hay dos paneles de UI (CameraCalibTab y la nueva ZoomTab) que guardan subconjuntos distintos de claves del mismo scanner_id; con reemplazo completo, guardar desde un panel borraba las claves guardadas por el otro.
+
+**Cambio (`src/ui/service.py`):**
+- Nueva clase `ZoomTab(QWidget)`: selector de scanner, vista en vivo (timer 150ms sobre `cam.get_frame()`), slider+spinbox de zoom (100-300%, botones +/-), D-pad de paneo (▲▼◀▶ + centrar, paso 5%), botones "Guardar configuración" (persiste zoom/pan a `camera.yaml` via el merge de arriba) y "Restablecer".
+- Se agrega como tab de nivel superior en `ServiceWindow`: `self._tabs.addTab(self._zoom_tab, "  Zoom  ")`, junto a PLC I/O, Diagnóstico, Sistema, Logs, Config, Evidencias, Cámara.
+
+**Riesgo:** zoom>100% reduce el campo de vision real disponible para el pipeline (recorta antes de reescalar), lo que puede exigir recalibrar ROI/patron si se sube mucho. Con zoom=100 (default) el comportamiento es identico al anterior.
+
+---
+
 ### Sesion 2026-07-03 - Tadeo + Claude
 
 #### Cambio 252 - LOW_QUALITY suprime patron desalineado y zigzag

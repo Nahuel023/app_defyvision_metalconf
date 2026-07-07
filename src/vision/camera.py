@@ -117,11 +117,60 @@ class Camera:
     # ------------------------------------------------------------------
 
     def get_frame(self) -> Optional[np.ndarray]:
-        """Devuelve una copia del ultimo frame capturado, o None si no hay."""
+        """Devuelve una copia del ultimo frame capturado (con zoom digital
+        aplicado si esta configurado), o None si no hay."""
         with self._lock:
             if self._frame is None:
                 return None
-            return self._frame.copy()
+            frame = self._frame.copy()
+        return self._apply_zoom(frame)
+
+    def _apply_zoom(self, frame: np.ndarray) -> np.ndarray:
+        """Zoom + pan digital: recorta el frame (centro desplazado por pan_x/pan_y)
+        y reescala al tamano original. zoom=100 (%) no hace nada; zoom=200 duplica
+        el acercamiento. pan_x/pan_y en -100..100 mueven el recorte dentro del
+        margen disponible (0 = centrado, +100 = extremo derecho/abajo)."""
+        zoom_pct = float(self._settings.get("zoom", 100) or 100)
+        if zoom_pct <= 100.0:
+            return frame
+        ratio = zoom_pct / 100.0
+        h, w = frame.shape[:2]
+        crop_w = max(1, int(round(w / ratio)))
+        crop_h = max(1, int(round(h / ratio)))
+        max_x = w - crop_w
+        max_y = h - crop_h
+        pan_x = max(-100.0, min(100.0, float(self._settings.get("pan_x", 0) or 0)))
+        pan_y = max(-100.0, min(100.0, float(self._settings.get("pan_y", 0) or 0)))
+        x0 = int(round((max_x / 2) * (1 + pan_x / 100.0)))
+        y0 = int(round((max_y / 2) * (1 + pan_y / 100.0)))
+        x0 = max(0, min(max_x, x0))
+        y0 = max(0, min(max_y, y0))
+        cropped = frame[y0:y0 + crop_h, x0:x0 + crop_w]
+        return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    def set_zoom(self, value_pct: float) -> None:
+        """Ajusta el zoom digital (%) en caliente (se aplica en el proximo get_frame)."""
+        with self._lock:
+            self._settings["zoom"] = max(100.0, float(value_pct))
+
+    def set_pan(self, pan_x: float, pan_y: float) -> None:
+        """Ajusta el desplazamiento del recorte (-100..100 cada eje) en caliente."""
+        with self._lock:
+            self._settings["pan_x"] = max(-100.0, min(100.0, float(pan_x)))
+            self._settings["pan_y"] = max(-100.0, min(100.0, float(pan_y)))
+
+    @property
+    def zoom(self) -> float:
+        """Zoom digital actual, en porcentaje (100 = sin zoom)."""
+        return float(self._settings.get("zoom", 100) or 100)
+
+    @property
+    def pan(self) -> tuple[float, float]:
+        """Desplazamiento actual del recorte (pan_x, pan_y), -100..100."""
+        return (
+            float(self._settings.get("pan_x", 0) or 0),
+            float(self._settings.get("pan_y", 0) or 0),
+        )
 
     @property
     def is_running(self) -> bool:

@@ -6240,6 +6240,340 @@ class CameraCalibTab(QWidget):
 
 
 # ==================================================================
+# Tab: Zoom digital + paneo de cámaras IP
+# ==================================================================
+
+class ZoomTab(QWidget):
+    """Zoom digital (crop + reescalado) y paneo (arriba/abajo/izq/der) sobre
+    el frame entregado por cada cámara IP, con vista en vivo."""
+
+    _ZOOM_MIN  = 100
+    _ZOOM_MAX  = 300
+    _ZOOM_STEP = 10
+    _PAN_STEP  = 5
+
+    def __init__(self, system: InspectionSystem, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._system = system
+        self._block_apply = False
+        self._preview_timer = QTimer(self)
+        self._preview_timer.setInterval(150)
+        self._preview_timer.timeout.connect(self._update_preview)
+        self._build_ui()
+        self._populate_scanner_selector()
+        self._preview_timer.start()
+
+    def _build_ui(self) -> None:
+        from PyQt6.QtWidgets import QGridLayout
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 14, 16, 14)
+        root.setSpacing(10)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        lbl = QLabel("Cámara:")
+        lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        top.addWidget(lbl)
+
+        self._scanner_combo = QComboBox()
+        self._scanner_combo.setFixedWidth(130)
+        self._scanner_combo.setStyleSheet(
+            f"QComboBox {{ background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:5px;padding:5px 9px;font-size:12px; }"
+            f"QComboBox QAbstractItemView {{ background:{_PANEL};color:{_TEXT};"
+            f"selection-background-color:{_ACCENT}; }}"
+        )
+        self._scanner_combo.currentTextChanged.connect(self._on_scanner_changed)
+        top.addWidget(self._scanner_combo)
+        top.addStretch()
+
+        self._status_lbl = QLabel("-")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        top.addWidget(self._status_lbl)
+        root.addLayout(top)
+
+        main = QHBoxLayout()
+        main.setSpacing(12)
+
+        # Left: live preview
+        prev_grp = QGroupBox("Vista en vivo")
+        prev_grp.setStyleSheet(self._grp_style())
+        prev_grp.setMinimumWidth(520)
+        prev_lay = QVBoxLayout(prev_grp)
+        self._preview_lbl = QLabel("Sin señal de cámara")
+        self._preview_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_lbl.setMinimumSize(520, 340)
+        self._preview_lbl.setStyleSheet(
+            f"background:{_DARK};color:{_MUTED};border-radius:6px;font-size:13px;"
+        )
+        prev_lay.addWidget(self._preview_lbl, stretch=1)
+        main.addWidget(prev_grp, stretch=3)
+
+        # Right: zoom + pan controls
+        ctrl_grp = QGroupBox("Zoom / Paneo")
+        ctrl_grp.setStyleSheet(self._grp_style())
+        ctrl_lay = QVBoxLayout(ctrl_grp)
+        ctrl_lay.setSpacing(14)
+
+        # Zoom row
+        zoom_row = QHBoxLayout()
+        zoom_row.setSpacing(6)
+        zoom_out_btn = QPushButton("−")
+        zoom_in_btn  = QPushButton("+")
+        for b in (zoom_out_btn, zoom_in_btn):
+            b.setFixedSize(34, 34)
+            b.setStyleSheet(
+                f"QPushButton {{ background:{_PANEL};color:{_TEXT};"
+                f"border:1px solid {_BORDER};border-radius:6px;font-size:16px;font-weight:700; }}"
+                f"QPushButton:hover {{ background:{_ACCENT};color:#000; }}"
+            )
+        zoom_out_btn.clicked.connect(lambda: self._nudge_zoom(-self._ZOOM_STEP))
+        zoom_in_btn.clicked.connect(lambda: self._nudge_zoom(self._ZOOM_STEP))
+
+        self._zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self._zoom_slider.setRange(self._ZOOM_MIN, self._ZOOM_MAX)
+        self._zoom_slider.setValue(self._ZOOM_MIN)
+        self._zoom_slider.setStyleSheet(
+            f"QSlider::groove:horizontal {{ height:4px;background:{_BORDER};border-radius:2px; }}"
+            f"QSlider::handle:horizontal {{ width:14px;height:14px;margin:-5px 0;"
+            f"background:{_ACCENT};border-radius:7px; }}"
+            f"QSlider::sub-page:horizontal {{ background:{_ACCENT};border-radius:2px; }}"
+        )
+        self._zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
+
+        self._zoom_spin = QSpinBox()
+        self._zoom_spin.setRange(self._ZOOM_MIN, self._ZOOM_MAX)
+        self._zoom_spin.setSuffix(" %")
+        self._zoom_spin.setFixedWidth(80)
+        self._zoom_spin.setStyleSheet(
+            f"background:{_DARK};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:4px;padding:2px 4px;font-size:12px;"
+        )
+        self._zoom_spin.valueChanged.connect(self._on_zoom_spin_changed)
+
+        zoom_row.addWidget(zoom_out_btn)
+        zoom_row.addWidget(self._zoom_slider, stretch=1)
+        zoom_row.addWidget(zoom_in_btn)
+        zoom_row.addWidget(self._zoom_spin)
+
+        zoom_lbl = QLabel("<b>Zoom</b>")
+        zoom_lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        ctrl_lay.addWidget(zoom_lbl)
+        ctrl_lay.addLayout(zoom_row)
+
+        # Pan D-pad
+        pan_lbl = QLabel("<b>Paneo</b>")
+        pan_lbl.setStyleSheet(f"color:{_TEXT};font-size:12px;")
+        ctrl_lay.addWidget(pan_lbl)
+
+        pad = QGridLayout()
+        pad.setSpacing(6)
+
+        def _arrow_btn(text: str) -> QPushButton:
+            b = QPushButton(text)
+            b.setFixedSize(44, 34)
+            b.setStyleSheet(
+                f"QPushButton {{ background:{_PANEL};color:{_TEXT};"
+                f"border:1px solid {_BORDER};border-radius:6px;font-size:14px;font-weight:700; }}"
+                f"QPushButton:hover {{ background:{_ACCENT};color:#000; }}"
+            )
+            return b
+
+        up_btn    = _arrow_btn("▲")
+        down_btn  = _arrow_btn("▼")
+        left_btn  = _arrow_btn("◀")
+        right_btn = _arrow_btn("▶")
+        center_btn = _arrow_btn("●")
+        center_btn.setToolTip("Centrar")
+
+        up_btn.clicked.connect(lambda: self._nudge_pan(0, -self._PAN_STEP))
+        down_btn.clicked.connect(lambda: self._nudge_pan(0, self._PAN_STEP))
+        left_btn.clicked.connect(lambda: self._nudge_pan(-self._PAN_STEP, 0))
+        right_btn.clicked.connect(lambda: self._nudge_pan(self._PAN_STEP, 0))
+        center_btn.clicked.connect(self._center_pan)
+
+        pad.addWidget(up_btn,     0, 1)
+        pad.addWidget(left_btn,   1, 0)
+        pad.addWidget(center_btn, 1, 1)
+        pad.addWidget(right_btn,  1, 2)
+        pad.addWidget(down_btn,   2, 1)
+
+        pad_wrap = QHBoxLayout()
+        pad_wrap.addLayout(pad)
+        pad_wrap.addStretch()
+        ctrl_lay.addLayout(pad_wrap)
+
+        self._pan_lbl = QLabel("Paneo: x=0  y=0")
+        self._pan_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        ctrl_lay.addWidget(self._pan_lbl)
+
+        ctrl_lay.addStretch()
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        save_btn = QPushButton("Guardar configuración")
+        save_btn.clicked.connect(self._save_settings)
+        save_btn.setStyleSheet(
+            f"background:{_ACCENT};color:#000;font-weight:700;"
+            "border-radius:6px;padding:7px 18px;"
+        )
+        reset_btn = QPushButton("Restablecer (sin zoom)")
+        reset_btn.clicked.connect(self._restore_defaults)
+        reset_btn.setStyleSheet(
+            f"background:{_PANEL};color:{_TEXT};border:1px solid {_BORDER};"
+            "border-radius:6px;padding:7px 18px;"
+        )
+        btn_row.addWidget(save_btn)
+        btn_row.addWidget(reset_btn)
+        btn_row.addStretch()
+        ctrl_lay.addLayout(btn_row)
+
+        main.addWidget(ctrl_grp, stretch=2)
+        root.addLayout(main)
+
+    # ------------------------------------------------------------------
+    # Scanner selection / preview
+    # ------------------------------------------------------------------
+
+    def _populate_scanner_selector(self) -> None:
+        ids = self._system.scanner_ids()
+        self._scanner_combo.addItems(ids)
+        if ids:
+            self._on_scanner_changed(ids[0])
+
+    def _current_camera(self):
+        scanner_id = self._scanner_combo.currentText()
+        if not scanner_id:
+            return None
+        try:
+            return self._system.camera(scanner_id)
+        except KeyError:
+            return None
+
+    def _on_scanner_changed(self, _scanner_id: str) -> None:
+        cam = self._current_camera()
+        if cam is None:
+            return
+        self._block_apply = True
+        try:
+            self._zoom_slider.setValue(int(round(cam.zoom)))
+            self._zoom_spin.setValue(int(round(cam.zoom)))
+            pan_x, pan_y = cam.pan
+            self._pan_lbl.setText(f"Paneo: x={pan_x:.0f}  y={pan_y:.0f}")
+        finally:
+            self._block_apply = False
+
+    def _update_preview(self) -> None:
+        if not self.isVisible():
+            return
+        cam = self._current_camera()
+        if cam is None or not cam.is_running:
+            return
+        frame = cam.get_frame()
+        if frame is None:
+            return
+        h, w = frame.shape[:2]
+        rgb = np.ascontiguousarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        img = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888).copy()
+        pix = QPixmap.fromImage(img)
+        target = self._preview_lbl.size()
+        self._preview_lbl.setPixmap(
+            pix.scaled(target, Qt.AspectRatioMode.KeepAspectRatio,
+                       Qt.TransformationMode.FastTransformation)
+        )
+
+    # ------------------------------------------------------------------
+    # Zoom / pan actions
+    # ------------------------------------------------------------------
+
+    def _on_zoom_slider_changed(self, value: int) -> None:
+        if not self._block_apply:
+            self._zoom_spin.blockSignals(True)
+            self._zoom_spin.setValue(value)
+            self._zoom_spin.blockSignals(False)
+            self._apply_zoom(value)
+
+    def _on_zoom_spin_changed(self, value: int) -> None:
+        if not self._block_apply:
+            self._zoom_slider.blockSignals(True)
+            self._zoom_slider.setValue(value)
+            self._zoom_slider.blockSignals(False)
+            self._apply_zoom(value)
+
+    def _nudge_zoom(self, delta: int) -> None:
+        new_val = max(self._ZOOM_MIN, min(self._ZOOM_MAX, self._zoom_spin.value() + delta))
+        self._zoom_spin.setValue(new_val)  # triggers _on_zoom_spin_changed
+
+    def _apply_zoom(self, value: int) -> None:
+        cam = self._current_camera()
+        if cam is None:
+            return
+        cam.set_zoom(float(value))
+        self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+        self._status_lbl.setText(f"Zoom={value}%")
+
+    def _nudge_pan(self, dx: int, dy: int) -> None:
+        cam = self._current_camera()
+        if cam is None:
+            return
+        pan_x, pan_y = cam.pan
+        pan_x = max(-100.0, min(100.0, pan_x + dx))
+        pan_y = max(-100.0, min(100.0, pan_y + dy))
+        cam.set_pan(pan_x, pan_y)
+        self._pan_lbl.setText(f"Paneo: x={pan_x:.0f}  y={pan_y:.0f}")
+        self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+        self._status_lbl.setText(f"Paneo x={pan_x:.0f} y={pan_y:.0f}")
+
+    def _center_pan(self) -> None:
+        cam = self._current_camera()
+        if cam is None:
+            return
+        cam.set_pan(0.0, 0.0)
+        self._pan_lbl.setText("Paneo: x=0  y=0")
+        self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+        self._status_lbl.setText("Paneo centrado")
+
+    def _save_settings(self) -> None:
+        scanner_id = self._scanner_combo.currentText()
+        cam = self._current_camera()
+        if not scanner_id or cam is None:
+            return
+        pan_x, pan_y = cam.pan
+        settings = {"zoom": cam.zoom, "pan_x": pan_x, "pan_y": pan_y}
+        try:
+            camera_config.save_camera_settings(scanner_id, settings)
+            self._status_lbl.setStyleSheet(f"color:{_OK};font-size:11px;")
+            self._status_lbl.setText("Guardado en config/camera.yaml")
+        except Exception as exc:
+            QMessageBox.warning(self, "Error", f"No se pudo guardar: {exc}")
+
+    def _restore_defaults(self) -> None:
+        cam = self._current_camera()
+        if cam is None:
+            return
+        cam.set_zoom(100.0)
+        cam.set_pan(0.0, 0.0)
+        self._block_apply = True
+        try:
+            self._zoom_slider.setValue(self._ZOOM_MIN)
+            self._zoom_spin.setValue(self._ZOOM_MIN)
+        finally:
+            self._block_apply = False
+        self._pan_lbl.setText("Paneo: x=0  y=0")
+        self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:11px;")
+        self._status_lbl.setText("Restablecido (no guardado)")
+
+    def _grp_style(self) -> str:
+        return (
+            f"QGroupBox {{ background:{_PANEL};border:1px solid {_BORDER};"
+            f"border-radius:8px;margin-top:12px;padding-top:10px;"
+            f"font-size:12px;font-weight:700;color:{_ACCENT}; }}"
+            f"QGroupBox::title {{ subcontrol-origin:margin;left:12px;padding:0 4px; }}"
+        )
+
+
+# ==================================================================
 # Tab: Simulación de FSM de scanner
 # ==================================================================
 
@@ -6500,6 +6834,7 @@ class ServiceWindow(QMainWindow):
         self._rec_tab    = RecordingTab(self._system)
         self._events_tab = EventBrowserTab(self._system)
         self._cam_tab    = CameraCalibTab(self._system)
+        self._zoom_tab   = ZoomTab(self._system)
 
         # ── Tab "Cámara": sub-tabs GRABACIÓN / ANÁLISIS / CALIBRACIÓN ─
         _sub_style = (
@@ -6524,6 +6859,7 @@ class ServiceWindow(QMainWindow):
         self._tabs.addTab(self._cfg_tab,    "  Config  ")
         self._tabs.addTab(self._events_tab, "  Evidencias  ")
         self._tabs.addTab(cam_tabs,         "  Cámara  ")
+        self._tabs.addTab(self._zoom_tab,   "  Zoom  ")
 
         # Health bar — referencia al cam_tab se pasa por lista mutable
         self._cam_ref: list = [self._cam_tab]
