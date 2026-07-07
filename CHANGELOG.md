@@ -93,24 +93,6 @@ El disparo de "1 solo frame" que preocupaba a Tadeo venia del mecanismo #2, no d
 
 ---
 
-#### Cambio 254 - Endurecer zoom/paneo para uso 24/7 en planta
-
-**Pedido:** Tadeo pidio revisar que el zoom quedara estable y robusto para produccion, no solo funcional.
-
-**Riesgos identificados y resueltos:**
-
-1. **Crash en el hilo de captura por config corrupta (CRITICO).** `_apply_zoom()` hacia `float(self._settings.get("zoom", 100))` sin manejo de excepcion; un `camera.yaml` editado a mano con un valor no numerico (ej. `zoom: "auto"`) tiraba `ValueError` dentro de `get_frame()`, que se llama en el loop de inspeccion de `ScannerController` — hubiese tumbado la adquisicion de frames en produccion. Fix: `get_frame()` envuelve `_apply_zoom()` en try/except, loguea y devuelve el frame sin zoom si falla; `_clamped_zoom_raw()`/`_clamped_pan_raw()` capturan `TypeError`/`ValueError` y caen a los defaults (100/0/0).
-
-2. **Sin limite superior de zoom.** `set_zoom()` solo clampeaba el minimo (100%); un valor absurdo en `camera.yaml` (ej. `zoom: 999999`) generaba `crop_w=crop_h=1` (recorte de 1px reescalado a full frame), inservible para inspeccion pero sin crash. Se agrega `_ZOOM_MAX_PCT = 400.0` como tope defensivo en `set_zoom()` y en la lectura (`_clamped_zoom_raw()`), y la UI (`ZoomTab`) ya limitaba el slider a 100-300%.
-
-3. **Riesgo operativo: zoom/paneo desalinea ROI/patron sin que el operador se de cuenta.** El zoom se aplica en `Camera.get_frame()` *antes* de que el frame llegue a `inspect_image()`, pero `roi.json` y `holes.json` (patron) estan calibrados en el espacio de pixeles del frame SIN zoom/paneo. Cambiar el zoom de un escaner sin reconstruir ROI+patron rompe la deteccion (missing falsos, machine_stop, FAULT). Mitigacion en `ZoomTab`:
-   - Banner de advertencia permanente explicando que hay que reconstruir patron+ROI tras guardar.
-   - Los controles de zoom/paneo (sliders, botones +/-, D-pad, restablecer) se deshabilitan automaticamente y el banner cambia a rojo "BLOQUEADO" mientras `scanner.state == ScannerState.RUNNING` (chequeo cada 150ms via el timer de preview, mas un guard `_refuse_running()` en cada handler por si el estado cambia entre el tick y el click).
-
-**Verificacion:** script ad-hoc con `Camera._apply_zoom()` cubriendo passthrough (zoom=100), zoom+pan centrado, pan en valores extremos (clamp), settings corruptos (`"not-a-number"`, `None`, `[]`) sin excepcion, zoom absurdo clampeado a 400%, y `set_zoom`/`set_pan` clampeando rangos — todos pasaron. Suite `pytest tests/` sigue en 25/27 (los 2 failures son preexistentes en `test_scanner_controller.py`, no relacionados: `_FakeIO` de los tests no tiene `write_critical`).
-
----
-
 ### Sesion 2026-07-03 - Tadeo + Claude
 
 #### Cambio 252 - LOW_QUALITY suprime patron desalineado y zigzag
