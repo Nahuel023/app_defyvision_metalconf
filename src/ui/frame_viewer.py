@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 from src.utils.paths import app_root
 _ROOT = app_root()
 
-# ── Paleta ────────────────────────────────────────────────────────────────────
+# ── Paleta ────────────────────────────────────────────────────────────
 _BG      = "#0d1117"
 _PANEL   = "#161b22"
 _CARD    = "#21262d"
@@ -76,7 +76,7 @@ _THUMB_H = 60
 _MAX_VIEWER_FRAMES = 300
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
+# ── Helper ────────────────────────────────────────────────────────────
 
 def _bgr_to_pixmap(img: np.ndarray, max_w: int, max_h: int) -> QPixmap:
     h, w = img.shape[:2]
@@ -145,7 +145,7 @@ def _scanner_display(scanner_id: str) -> str:
     return f"Scanner {num}"
 
 
-# ── Worker de carga de miniaturas ─────────────────────────────────────────────
+# ── Worker de carga de miniaturas ─────────────────────────────────────
 
 class _ThumbLoader(QThread):
     """Carga miniaturas en segundo plano para no congelar la UI."""
@@ -161,7 +161,7 @@ class _ThumbLoader(QThread):
             self.thumb_ready.emit(i, pix)
 
 
-# ── Widget: visor de un único frame con zoom y pan ───────────────────────────
+# ── Widget: visor de un único frame con zoom y pan ────────────────────
 
 class ZoomableFrameView(QWidget):
     """Visor de frame con zoom (rueda) y pan (arrastrar). API: set_image / clear_image / fit."""
@@ -290,7 +290,7 @@ class _InspectWorker(QThread):
             pass
 
 
-# ── Panel de navegación de un evento ─────────────────────────────────────────
+# ── Panel de navegación de un evento ──────────────────────────────────
 
 class _EventNavPanel(QWidget):
     """Visor de frames de un evento: imagen grande + tira de miniaturas + navegación."""
@@ -419,7 +419,7 @@ class _EventNavPanel(QWidget):
 
         root.addLayout(nav)
 
-        # ── Paginación (buffers grandes: ok_buffer / timeline) ─────────
+        # ── Paginación (buffers grandes: ok_buffer / timeline) ────────
         load_more_row = QHBoxLayout()
         load_more_row.addStretch()
         self._load_more_btn = QPushButton("⏮  Cargar más antiguos")
@@ -811,7 +811,7 @@ class _EventNavPanel(QWidget):
         self._show_frame(idx)
 
 
-# ── Visor principal ──────────────────────────────────────────────────────────
+# ── Visor principal ───────────────────────────────────────────────────
 
 class OperatorFrameViewer(QMainWindow):
     """
@@ -837,7 +837,7 @@ class OperatorFrameViewer(QMainWindow):
         self.resize(1280, 780)
         self._build_ui()
 
-    # ── Construcción de UI ─────────────────────────────────────────────
+    # ── Construcción de UI ────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()

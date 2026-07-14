@@ -54,14 +54,14 @@ def build():
 
     story = []
 
-    # ── Encabezado ──────────────────────────────────────────────────────────
+    # ── Encabezado ────────────────────────────────────────────────────
     story.append(Paragraph("DefyVision Metalconf", title_s))
     story.append(Paragraph("Reporte de avances — semana del 9 al 12 de junio 2026", sub_s))
     story.append(Paragraph(f"Emitido: {datetime.date.today().strftime('%d/%m/%Y')}", sub_s))
     story.append(HRFlowable(width="100%", thickness=2,
         color=colors.HexColor("#1a1a2e"), spaceAfter=14))
 
-    # ── Resumen ejecutivo ────────────────────────────────────────────────────
+    # ── Resumen ejecutivo ─────────────────────────────────────────────
     story.append(Paragraph("Estado actual del sistema", section_s))
     story.append(Paragraph(
         "El sistema de inspección visual automática para chapas microperforadas opera "
@@ -98,7 +98,7 @@ def build():
     story.append(tbl)
     story.append(Spacer(1, 10))
 
-    # ── Avances de la semana ─────────────────────────────────────────────────
+    # ── Avances de la semana ──────────────────────────────────────────
     story.append(Paragraph("Avances realizados esta semana", section_s))
 
     avances = [
@@ -160,7 +160,7 @@ def build():
         story.append(Paragraph(desc_fmt, bullet_s))
         story.append(Spacer(1, 4))
 
-    # ── Próximos pasos ───────────────────────────────────────────────────────
+    # ── Próximos pasos ────────────────────────────────────────────────
     story.append(HRFlowable(width="100%", thickness=1,
         color=colors.HexColor("#ccccdd"), spaceAfter=6))
     story.append(Paragraph("Próximos pasos", section_s))
@@ -176,7 +176,7 @@ def build():
     for p in proximos:
         story.append(Paragraph(f"• {p}", bullet_s))
 
-    # ── Pie ──────────────────────────────────────────────────────────────────
+    # ── Pie ───────────────────────────────────────────────────────────
     story.append(Spacer(1, 20))
     story.append(HRFlowable(width="100%", thickness=1,
         color=colors.HexColor("#ccccdd"), spaceAfter=6))

@@ -272,7 +272,7 @@ def grid_compare_points(
     mx = margin if margin_x is None else margin_x
     my = margin if margin_y is None else margin_y
 
-    # ── Step 1: global X-phase ──────────────────────────────────────────────
+    # ── Step 1: global X-phase ────────────────────────────────────────
     ci_arr  = np.array([ci for ci, _ in cells], dtype=np.float32)
     cj_arr  = np.array([cj for _, cj in cells], dtype=np.float32)
     parity  = (cj_arr % 2).astype(np.float32)         # 0=even, 1=odd
@@ -309,7 +309,7 @@ def grid_compare_points(
 
     origin_x = best_phase_x
 
-    # ── Step 1: global Y-phase (2-D scan using already-fixed origin_x) ─────
+    # ── Step 1: global Y-phase (2-D scan, origin_x ya fijo) ───────────
     tol_y   = max(dy * 0.45, 4.0)
 
     # Per-cell expected X, accounting for stagger on odd-cj rows (with modulo)
@@ -346,7 +346,7 @@ def grid_compare_points(
 
     origin_y = best_phase_y
 
-    # ── Step 2: optional affine refinement ─────────────────────────────────
+    # ── Step 2: optional affine refinement ────────────────────────────
     corrected_xy: np.ndarray | None = None
     if tol_affine > 0:
         corrected_xy = _fit_affine_to_grid(
@@ -357,7 +357,7 @@ def grid_compare_points(
             stagger_x_odd=stagger_x_odd,
         )
 
-    # ── Build final expected positions (with deduplication + margin filter) ─
+    # ── Build final expected positions (dedup + margen) ───────────────
     result:       list[tuple[float, float]] = []
     result_cells: list[tuple[int, int]]     = []
     seen:         set[tuple[int, int]]      = set()

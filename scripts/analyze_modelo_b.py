@@ -39,7 +39,7 @@ def analyze():
 
     tols = load_tolerances()
 
-    # ── 1. Scan completo ──────────────────────────────────────────────────────
+    # ── 1. Scan completo ──────────────────────────────────────────────
     print("\n=== SCAN COMPLETO ===")
     print(f"{'IDX':>5}  {'Holes':>6}  {'Diff-prev':>10}  {'Diff-last-insp':>15}")
     all_data = []
@@ -79,7 +79,7 @@ def analyze():
             note = " ** buen candidato **"
         print(f"  {d['idx']:>3}  {d['holes']:>6}  {d['d_prev']:>9.2f}  {d['d_last']:>9.2f}  {note}")
 
-    # ── 2. Mejores candidatos ─────────────────────────────────────────────────
+    # ── 2. Mejores candidatos ─────────────────────────────────────────
     print("\n=== MEJORES CANDIDATOS REFERENCIA (holes aprox moda, primeros frames) ===")
     candidates = [d for d in all_data if abs(d["holes"] - mode_count) <= 3]
     print(f"  Total candidatos: {len(candidates)}")
@@ -87,7 +87,7 @@ def analyze():
     for d in best:
         print(f"  Frame {d['idx']:>4}  {d['path'].name}  holes={d['holes']}")
 
-    # ── 3. Geometria: espaciado entre agujeros ────────────────────────────────
+    # ── 3. Geometria: espaciado entre agujeros ────────────────────────
     print("\n=== GEOMETRIA: ESPACIADO (frame de referencia candidato) ===")
     if candidates:
         ref_frame = candidates[0]["path"]
@@ -125,7 +125,7 @@ def analyze():
             if len(y_small) > 0:
                 print(f"  Spacing Y (intra-row): med={np.median(y_small):.1f}  std={np.std(y_small):.1f}")
 
-    # ── 4. Recomendaciones de threshold ──────────────────────────────────────
+    # ── 4. Recomendaciones de threshold ───────────────────────────────
     print("\n=== RECOMENDACION continuous_position_threshold ===")
     print("  Diffs entre frames consecutivos a 10fps:")
     print(f"    min={min(diffs_prev):.2f}  max={max(diffs_prev):.2f}  "
@@ -138,7 +138,7 @@ def analyze():
         sim_insp = sum(1 for d in diffs_last if d >= t)
         print(f"    thr={t:.1f}: ~{sim_insp} inspecciones simuladas en esta grabacion")
 
-    # ── 5. Inspeccion con modelo_B actual ─────────────────────────────────────
+    # ── 5. Inspeccion con modelo_B actual ─────────────────────────────
     print("\n=== INSPECCION CON MODELO_B ACTUAL ===")
     try:
         from src.inspection import inspect_image

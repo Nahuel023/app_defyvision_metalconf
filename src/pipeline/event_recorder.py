@@ -111,7 +111,7 @@ class EventRecorder:
         data: bytes = bytes(buf)
         ts = time.time()
 
-        # ── Determinar modo actual (bajo lock mínimo) ──────────────────
+        # ── Determinar modo actual (bajo lock mínimo) ─────────────────
         post_write: Optional[tuple[Path, int]] = None
         finalize_dir: Optional[Path] = None
 
@@ -127,7 +127,7 @@ class EventRecorder:
                     self._post_dir = None
                     self._post_idx = 0
 
-        # ── Post-evento activo: escribir directo a disco ───────────────
+        # ── Post-evento activo: escribir directo a disco ──────────────
         if post_write is not None:
             post_dir, idx = post_write
             try:
@@ -142,11 +142,11 @@ class EventRecorder:
                 logger.error(f"[{self._id}] post-evento write: {exc}")
             return  # no buffering mientras se graba post-evento
 
-        # ── Post-evento expiró: actualizar manifest en background ──────
+        # ── Post-evento expiró: actualizar manifest en background ─────
         if finalize_dir is not None:
             self._enqueue_task("finalize", finalize_dir)
 
-        # ── Buffer circular normal ─────────────────────────────────────
+        # ── Buffer circular normal ────────────────────────────────────
         with self._lock:
             self._buf.append((ts, data))
             self._buf_bytes += len(data)

@@ -63,8 +63,8 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "grid_lateral_shift_max_px": 0.0,
     # Desalineacion del patron (corrimiento de verticalidad/cizalla): si la fraccion de
     # esperados sin ajustar supera el ratio → DETENER MAQUINA (un frame alcanza).
-    # ── Grabación de evidencia pre-evento ────────────────────────────────
-    # ── Buffer circular de frames OK en disco ───────────────────────────
+    # ── Grabación de evidencia pre-evento ─────────────────────────────
+    # ── Buffer circular de frames OK en disco ─────────────────────────
     "ok_buffer_enabled": True,         # guarda las últimas N inspecciones OK
     "ok_buffer_count": 200,            # cuántos frames OK mantener por scanner
     "ok_buffer_every": 3,              # guardar 1 de cada N frames OK (throttle)
@@ -72,7 +72,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "timeline_buffer_enabled": True,   # buffer cronológico de todos los frames (OK+NOK+LQ+STOP)
     "timeline_buffer_count": 500,      # últimos N frames a mantener por scanner
     "disk_writer_queue_max": 256,      # cola máxima del writer serial de disco por scanner
-    # ─────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────
     "events_enabled": False,           # activar en producción
     "events_max_disk_gb": 10.0,        # presupuesto total de data/events
     "pre_event_seconds": 60.0,         # 1 minuto antes de la parada
@@ -81,7 +81,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pre_event_jpeg_quality": 80,      # calidad JPEG del buffer (10-95)
     "pre_event_max_ram_mb": 256.0,     # 1 min × 5 fps × ~100 KB ≈ 30 MB; 256 con margen
     "camera_missing_error_timeout_s": 3.0,  # segundos sin frames antes de ERROR en AUTO
-    # ─────────────────────────────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────────────
     "pattern_desalign_enabled": False,
     "pattern_desalign_missing_ratio": 0.5,
     "pattern_desalign_min_angle_deg": 0.0,

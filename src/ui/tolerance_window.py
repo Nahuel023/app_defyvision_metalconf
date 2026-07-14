@@ -47,9 +47,9 @@ from src.utils.model_names import to_display
 from src.utils.paths import app_root
 _ROOT = app_root()
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Paleta (coherente con metrics_window.py / service.py)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 _DARK   = "#0f172a"
 _PANEL  = "#1e293b"
 _CARD   = "#243044"
@@ -61,9 +61,9 @@ _OK     = "#4ade80"
 _WARN   = "#fbbf24"
 _NOK    = "#f87171"
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Definición de parámetros expuestos al operario
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Solo incluir params cuyo rango restringido NO puede romper la detección.
 _PARAMS: list[dict[str, Any]] = [
     dict(
@@ -176,9 +176,9 @@ _PARAMS: list[dict[str, Any]] = [
 ]
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Panel de ajuste de ROI (cámara en vivo, bordes izq/der, guardar)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class _RoiPanel(QWidget):
     """Panel de ajuste de ROI integrado en la ventana de tolerancias.
@@ -615,9 +615,9 @@ class _RoiPanel(QWidget):
         worker.start()
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Panel de un scanner
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class _ScannerTolerancePanel(QWidget):
     def __init__(
@@ -644,7 +644,7 @@ class _ScannerTolerancePanel(QWidget):
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(10)
 
-        # ── Título: scanner + tipo de placa ──────────────────────────
+        # ── Título: scanner + tipo de placa ───────────────────────────
         _num = self._id.split("_")[-1]
         self._model_lbl = QLabel(f"Scanner {_num}  ·  —")
         self._model_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -814,9 +814,9 @@ class _ScannerTolerancePanel(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{exc}")
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Ventana principal con dos pestañas: Tolerancias | Ajuste de ROI
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class ToleranceWindow(QMainWindow):
     def __init__(
@@ -834,7 +834,7 @@ class ToleranceWindow(QMainWindow):
         self.resize(1000, 820)
         self._build_ui()
 
-    # ── Construcción ─────────────────────────────────────────────────
+    # ── Construcción ──────────────────────────────────────────────────
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -919,7 +919,7 @@ class ToleranceWindow(QMainWindow):
         )
         root.addWidget(warn)
 
-        # ── Paneles por scanner ────────────────────────────────────────
+        # ── Paneles por scanner ───────────────────────────────────────
         panels_row = QHBoxLayout()
         panels_row.setSpacing(12)
         for sid in self._system.scanner_ids():
@@ -935,7 +935,7 @@ class ToleranceWindow(QMainWindow):
             panels_row.addWidget(scroll)
         root.addLayout(panels_row, stretch=1)
 
-        # ── Botón recargar ─────────────────────────────────────────────
+        # ── Botón recargar ────────────────────────────────────────────
         reload_btn = QPushButton("Recargar valores actuales")
         reload_btn.setFixedHeight(32)
         reload_btn.setStyleSheet(

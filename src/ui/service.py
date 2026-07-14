@@ -72,9 +72,9 @@ _ROOT = app_root()
 # Ancho fijo de cada ala del header - igualar ambos lados centra el título
 _HEADER_WING_W = 310
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Paleta
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 _DARK   = "#0f172a"
 _PANEL  = "#1e293b"
 _BORDER = "#334155"
@@ -86,9 +86,9 @@ _NOK    = "#f87171"
 _WARN   = "#fbbf24"
 
 
-# ==================================================================
+# ======================================================================
 # Barra de salud del sistema
-# ==================================================================
+# ======================================================================
 
 class _HealthChip(QLabel):
     """Chip pill colorizado que muestra el estado de un componente."""
@@ -204,9 +204,9 @@ class _HealthBar(QWidget):
                 chip.set_state("Sin señal", "neutral")
 
 
-# ==================================================================
+# ======================================================================
 # Qt logging handler
-# ==================================================================
+# ======================================================================
 
 class _LogEmitter(QObject):
     record = pyqtSignal(str, int)   # (formatted_message, levelno)
@@ -231,9 +231,9 @@ class QtLogHandler(logging.Handler):
             self.handleError(record)
 
 
-# ==================================================================
+# ======================================================================
 # Tab 1: PLC I/O
-# ==================================================================
+# ======================================================================
 
 class PLCIOTab(QWidget):
     """Tabla de señales PLC con lectura en vivo y toggle de salidas."""
@@ -352,9 +352,9 @@ class PLCIOTab(QWidget):
         logger.info(f"[Servicio] Toggle {name} -> {'ON' if new_val else 'OFF'}")
 
 
-# ==================================================================
+# ======================================================================
 # Tab: Diagnóstico HW - X0-X15 / Y0-Y15
-# ==================================================================
+# ======================================================================
 
 class PLCDiagTab(QWidget):
     """Vista de bajo nivel: 16 entradas X (LEDs) y 16 salidas Y (LEDs + toggle)."""
@@ -503,9 +503,9 @@ class PLCDiagTab(QWidget):
         logger.info(f"[Diagnóstico] Toggle Y{idx} -> {'ON' if new_val else 'OFF'}")
 
 
-# ==================================================================
+# ======================================================================
 # Tab: Prueba de Salidas PLC
-# ==================================================================
+# ======================================================================
 
 class PLCOutputTestTab(QWidget):
     """Botones de prueba visual para todas las salidas PLC por scanner."""
@@ -642,9 +642,9 @@ class PLCOutputTestTab(QWidget):
         )
 
 
-# ==================================================================
+# ======================================================================
 # Tab 2: Sistema
-# ==================================================================
+# ======================================================================
 
 class SystemTab(QWidget):
     """Métricas de sesión por scanner y estado general del sistema."""
@@ -898,9 +898,9 @@ class SystemTab(QWidget):
         logger.info(f"[{scanner_id}] frame guardado: {path}")
 
 
-# ==================================================================
+# ======================================================================
 # Tab 3: Logs
-# ==================================================================
+# ======================================================================
 
 class LogsTab(QWidget):
     """Visor de logs del sistema Python en tiempo real."""
@@ -980,9 +980,9 @@ class LogsTab(QWidget):
         self._handler.setLevel(getattr(logging, level_name, logging.INFO))
 
 
-# ==================================================================
+# ======================================================================
 # Tab 4: Configuración
-# ==================================================================
+# ======================================================================
 
 class ConfigTab(QWidget):
     """Visualización read-only de archivos YAML de configuración."""
@@ -1041,9 +1041,9 @@ class ConfigTab(QWidget):
             return f"# Error al cargar: {exc}"
 
 
-# ==================================================================
+# ======================================================================
 # Tab 5: Grabación / Análisis / Navegador
-# ==================================================================
+# ======================================================================
 
 class _AnalysisWorker(QThread):
     progress  = pyqtSignal(int, int)          # (done, total)
@@ -1702,7 +1702,7 @@ class RecordingTab(QWidget):
         row1.addStretch()
         lay.addLayout(row1)
 
-        # ── Fila 2: FPS + análisis en vivo + info cámara ─────────────
+        # ── Fila 2: FPS + análisis en vivo + info cámara ──────────────
         row2 = QHBoxLayout()
         row2.setSpacing(8)
         row2.addWidget(_chip("FPS"))
@@ -1744,7 +1744,7 @@ class RecordingTab(QWidget):
 
         lay.addLayout(row2)
 
-        # ── Action row: buttons + state badge ────────────────────────
+        # ── Action row: buttons + state badge ─────────────────────────
         act = QHBoxLayout()
         act.setSpacing(10)
 
@@ -1832,7 +1832,7 @@ class RecordingTab(QWidget):
             "border-radius:4px;padding:2px 8px;"
         )
 
-        # ── Selector de scanner ──────────────────────────────────────
+        # ── Selector de scanner ───────────────────────────────────────
         sc_row = QHBoxLayout()
         sc_row.setSpacing(8)
         sc_chip = QLabel("SCANNER")
@@ -1844,14 +1844,14 @@ class RecordingTab(QWidget):
         sc_row.addStretch()
         lay.addLayout(sc_row)
 
-        # ── ROI actual (cargada del archivo) ─────────────────────────
+        # ── ROI actual (cargada del archivo) ──────────────────────────
         self._roi_current_lbl = QLabel("ROI actual: —")
         self._roi_current_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;"
         )
         lay.addWidget(self._roi_current_lbl)
 
-        # ── Fuente ───────────────────────────────────────────────────
+        # ── Fuente ────────────────────────────────────────────────────
         src_row = QHBoxLayout()
         src_row.setSpacing(6)
         self._btn_roi_pick_img = QPushButton("Abrir imagen")
@@ -1891,7 +1891,7 @@ class RecordingTab(QWidget):
         )
         lay.addWidget(self._roi_health_lbl)
 
-        # ── Controles borde izquierdo ────────────────────────────────
+        # ── Controles borde izquierdo ─────────────────────────────────
         lx_row = QHBoxLayout()
         lx_row.setSpacing(6)
         lx_chip = QLabel("BORDE IZQ")
@@ -1911,7 +1911,7 @@ class RecordingTab(QWidget):
         lx_row.addWidget(self._roi_lx_lbl)
         lay.addLayout(lx_row)
 
-        # ── Controles borde derecho ──────────────────────────────────
+        # ── Controles borde derecho ───────────────────────────────────
         rx_row = QHBoxLayout()
         rx_row.setSpacing(6)
         rx_chip = QLabel("BORDE DER")
@@ -1931,7 +1931,7 @@ class RecordingTab(QWidget):
         rx_row.addWidget(self._roi_rx_lbl)
         lay.addLayout(rx_row)
 
-        # ── Paso + resultado ─────────────────────────────────────────
+        # ── Paso + resultado ──────────────────────────────────────────
         bot_row = QHBoxLayout()
         bot_row.setSpacing(8)
         paso_chip = QLabel("PASO px")
@@ -1959,7 +1959,7 @@ class RecordingTab(QWidget):
         bot_row.addWidget(self._roi_result_lbl)
         lay.addLayout(bot_row)
 
-        # ── Guardar + estado ─────────────────────────────────────────
+        # ── Guardar + estado ──────────────────────────────────────────
         save_row = QHBoxLayout()
         save_row.setSpacing(10)
         self._btn_roi_save = self._mk_btn("GUARDAR ROI", "#15803d", h=36, fs=12)
@@ -2356,7 +2356,7 @@ class RecordingTab(QWidget):
         lay.setContentsMargins(14, 20, 14, 14)
         lay.setSpacing(8)
 
-        # ── URL row ──────────────────────────────────────────────────
+        # ── URL row ───────────────────────────────────────────────────
         url_row = QHBoxLayout()
         url_row.setSpacing(8)
 
@@ -2396,7 +2396,7 @@ class RecordingTab(QWidget):
 
         lay.addLayout(url_row)
 
-        # ── Preview ──────────────────────────────────────────────────
+        # ── Preview ───────────────────────────────────────────────────
         self._ip_preview = QLabel("Sin señal")
         self._ip_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._ip_preview.setMinimumHeight(280)
@@ -2514,7 +2514,7 @@ class RecordingTab(QWidget):
         lay.setContentsMargins(16, 20, 16, 16)
         lay.setSpacing(12)
 
-        # ── Fila 0: selector de modelo (replica de GRABACIÓN) ──────────
+        # ── Fila 0: selector de modelo (replica de GRABACIÓN) ─────────
         model_row = QHBoxLayout()
         model_row.setSpacing(8)
 
@@ -2595,7 +2595,7 @@ class RecordingTab(QWidget):
 
         lay.addLayout(btn_row)
 
-        # ── Fila 2: barra de progreso ────────────────────────────────
+        # ── Fila 2: barra de progreso ─────────────────────────────────
         self._ana_progress_bar = QProgressBar()
         self._ana_progress_bar.setRange(0, 100)
         self._ana_progress_bar.setValue(0)
@@ -2779,7 +2779,7 @@ class RecordingTab(QWidget):
         nav.addWidget(self._btn_fit)
         nav.addStretch()
 
-        # ── Model chip - shows which pattern type was used for analysis ─
+        # ── Model chip: patrón usado en el análisis ───────────────────
         self._model_chip = QLabel("-")
         self._model_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._model_chip.setFixedHeight(38)
@@ -4083,9 +4083,9 @@ class RecordingTab(QWidget):
         )
 
 
-# ==================================================================
+# ======================================================================
 # Evidencias / Eventos
-# ==================================================================
+# ======================================================================
 
 class _EvOverlayWorker(QThread):
     """Corre inspect_image en background y emite (idx, QPixmap) con el overlay."""
@@ -4908,9 +4908,9 @@ class EventBrowserTab(QWidget):
         )
 
 
-# ==================================================================
+# ======================================================================
 # Calibración de cámara
-# ==================================================================
+# ======================================================================
 
 @dataclass
 class _ParamDef:
@@ -5016,7 +5016,7 @@ class CameraCalibTab(QWidget):
         root.setContentsMargins(14, 12, 14, 14)
         root.setSpacing(10)
 
-        # ── top bar ──────────────────────────────────────────────────
+        # ── top bar ───────────────────────────────────────────────────
         top = QHBoxLayout()
         top.setSpacing(10)
 
@@ -5052,7 +5052,7 @@ class CameraCalibTab(QWidget):
         root.addLayout(top)
         root.addWidget(self._build_ip_camera_section(), stretch=4)
 
-        # ── main split ───────────────────────────────────────────────
+        # ── main split ────────────────────────────────────────────────
         main = QHBoxLayout()
         main.setSpacing(12)
 
@@ -5137,7 +5137,7 @@ class CameraCalibTab(QWidget):
         )
         _lbl_ss = f"color:{_MUTED};font-size:11px;"
 
-        # ── Fila 1: selector + URL + botones ─────────────────────────
+        # ── Fila 1: selector + URL + botones ──────────────────────────
         row1 = QHBoxLayout()
         row1.setSpacing(10)
 
@@ -5269,7 +5269,7 @@ class CameraCalibTab(QWidget):
         lay.addLayout(row2)
         lay.addSpacing(4)
 
-        # ── Separador ────────────────────────────────────────────────
+        # ── Separador ─────────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet(f"color:{_BORDER};background:{_BORDER};max-height:1px;")
@@ -5296,7 +5296,7 @@ class CameraCalibTab(QWidget):
         btn_row.addStretch()
         lay.addLayout(btn_row)
 
-        # ── Separador ────────────────────────────────────────────────
+        # ── Separador ─────────────────────────────────────────────────
         sep2 = QFrame()
         sep2.setFrameShape(QFrame.Shape.HLine)
         sep2.setStyleSheet(f"color:{_BORDER};background:{_BORDER};max-height:1px;")
@@ -5315,7 +5315,7 @@ class CameraCalibTab(QWidget):
         )
         lay.addWidget(self._ip_preview, stretch=4)
 
-        # ── Barra inferior: Capturar + info FPS ──────────────────────
+        # ── Barra inferior: Capturar + info FPS ───────────────────────
         bottom_row = QHBoxLayout()
         bottom_row.setSpacing(10)
 
@@ -6239,9 +6239,9 @@ class CameraCalibTab(QWidget):
         )
 
 
-# ==================================================================
+# ======================================================================
 # Tab: Simulación de FSM de scanner
-# ==================================================================
+# ======================================================================
 
 class ScannerSimTab(QWidget):
     """
@@ -6320,7 +6320,7 @@ class ScannerSimTab(QWidget):
             grp_lay.setContentsMargins(14, 16, 14, 14)
             grp_lay.setSpacing(12)
 
-            # ── Estado actual ───────────────────────────────────────
+            # ── Estado actual ─────────────────────────────────────────
             info_row = QHBoxLayout()
             info_row.setSpacing(16)
 
@@ -6345,7 +6345,7 @@ class ScannerSimTab(QWidget):
             info_row.addStretch()
             grp_lay.addLayout(info_row)
 
-            # ── Botones de acción ────────────────────────────────────
+            # ── Botones de acción ─────────────────────────────────────
             btn_row = QHBoxLayout()
             btn_row.setSpacing(8)
 
@@ -6381,7 +6381,7 @@ class ScannerSimTab(QWidget):
             btn_row.addStretch()
             grp_lay.addLayout(btn_row)
 
-            # ── Secuencia sugerida ───────────────────────────────────
+            # ── Secuencia sugerida ────────────────────────────────────
             seq = QLabel(
                 "Secuencia: Iniciar -> Inyectar OK -> 1/3 NOK -> Forzar FAULT -> Detener -> Reset"
             )
@@ -6420,9 +6420,9 @@ class ScannerSimTab(QWidget):
         )
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def _logo_label(rel_path: str, max_h: int) -> QLabel:
     """Carga logo desde raíz del proyecto escalado a max_h px de alto."""
@@ -6442,9 +6442,9 @@ def _logo_label(rel_path: str, max_h: int) -> QLabel:
     return lbl
 
 
-# ==================================================================
+# ======================================================================
 # Ventana de servicio
-# ==================================================================
+# ======================================================================
 
 class ServiceWindow(QMainWindow):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
@@ -6501,7 +6501,7 @@ class ServiceWindow(QMainWindow):
         self._events_tab = EventBrowserTab(self._system)
         self._cam_tab    = CameraCalibTab(self._system)
 
-        # ── Tab "Cámara": sub-tabs GRABACIÓN / ANÁLISIS / CALIBRACIÓN ─
+        # ── Tab "Cámara": GRABACIÓN / ANÁLISIS / CALIBRACIÓN ──────────
         _sub_style = (
             f"QTabWidget::pane {{ border:none; background:{_DARK}; }}"
             f"QTabBar::tab {{ background:{_PANEL};color:{_MUTED};"
@@ -6551,7 +6551,7 @@ class ServiceWindow(QMainWindow):
         outer.setContentsMargins(18, 0, 18, 0)
         outer.setSpacing(0)
 
-        # ── Ala izquierda: logo Metalconf ────────────────────────────
+        # ── Ala izquierda: logo Metalconf ─────────────────────────────
         left_wing = QWidget()
         left_wing.setFixedWidth(_HEADER_WING_W)
         left_wing.setStyleSheet("background:transparent;")
@@ -6586,7 +6586,7 @@ class ServiceWindow(QMainWindow):
         center_lay.addWidget(subtitle)
         outer.addWidget(center, stretch=1)
 
-        # ── Ala derecha: PLC badge + logo DEFYMOTION ─────────────────
+        # ── Ala derecha: PLC badge + logo DEFYMOTION ──────────────────
         right_wing = QWidget()
         right_wing.setFixedWidth(_HEADER_WING_W)
         right_wing.setStyleSheet("background:transparent;")
@@ -6704,9 +6704,9 @@ class ServiceWindow(QMainWindow):
         event.accept()
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Lanzador
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def launch_service_ui(system: InspectionSystem) -> None:
     try:

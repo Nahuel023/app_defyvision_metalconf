@@ -448,7 +448,7 @@ def _inspect_bgr(
         tol_affine = tol_xy_px * 1.5 if grid_affine_refinement else 0.0
         stagger_x_odd = float(pattern.stagger_x_odd) if pattern.stagger_x_odd is not None else 0.0
 
-        # ── De-rotación por inclinación de la chapa ────────────────────────────
+        # ── De-rotación por inclinación de la chapa ───────────────────
         # grid_compare_points asume grilla alineada a los ejes (barre fase X/Y). Con
         # la chapa inclinada una fila ya no está a `y` constante y la fase no engancha
         # → muchos falsos faltantes. Medimos el tilt de la grilla desde los agujeros,

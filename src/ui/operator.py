@@ -51,9 +51,9 @@ from src.utils.paths import app_root
 _ROOT = app_root()
 logger = logging.getLogger(__name__)
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Constantes
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Paleta industrial oscura
 _BG      = "#0d1117"   # fondo ventana
 _PANEL   = "#161b22"   # fondo panel scanner
@@ -95,9 +95,9 @@ _SAFE_OFF_BG   = "#14532d"
 _SAFE_OFF_FG   = "#bbf7d0"
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Diálogo de bloqueo de sistema (licencia vencida)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class LicenseBlockDialog(QDialog):
     """Diálogo modal que bloquea el sistema hasta ingresar un código válido.
@@ -257,9 +257,9 @@ def ensure_license_or_prompt(parent=None) -> bool:
     return dlg.exec() == QDialog.DialogCode.Accepted and is_licensed()
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Panel de un scanner
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class ScannerPanel(QWidget):
     """Panel de un scanner: cámara + estado + métricas + controles."""
@@ -316,7 +316,7 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self._title_lbl)
 
-        # ── Estado real de la maneta MANUAL/AUTOMATICO de este scanner ─
+        # ── Estado real de la maneta MANUAL/AUTO del scanner ──────────
         self._mode_switch_lbl = QLabel("MANETA: —")
         self._mode_switch_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._mode_switch_lbl.setStyleSheet(
@@ -326,8 +326,9 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self._mode_switch_lbl)
 
-        # ── Modo seguro de ESTE scanner (la maneta lo controla automaticamente;
-        # el boton permite al operador forzarlo manualmente entre cambios de maneta) ─
+        # ── Modo seguro de ESTE scanner ───────────────────────────────
+        # La maneta lo controla automaticamente; el boton permite al operador
+        # forzarlo manualmente entre cambios de maneta.
         self._safe_mode_btn = QPushButton()
         self._safe_mode_btn.setCheckable(True)
         self._safe_mode_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -347,7 +348,7 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.camera_label, stretch=1)
 
-        # ── Info de cámara: IP · FPS · estado de conexión ────────────
+        # ── Info de cámara: IP · FPS · estado de conexión ─────────────
         self._cam_info_lbl = QLabel("● —")
         self._cam_info_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._cam_info_lbl.setStyleSheet(
@@ -368,7 +369,7 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
-        # ── Tres métricas operativas: OK / TIEMPO / NOK ────────────
+        # ── Tres métricas operativas: OK / TIEMPO / NOK ───────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
         self._ok_val    = self._metric_card("Imagenes OK",   "0",      _OK_CLR,  word_wrap=True, title_size=11)
@@ -400,7 +401,7 @@ class ScannerPanel(QWidget):
         model_row.addWidget(self.model_combo, stretch=1)
         root.addLayout(model_row)
 
-        # ── RESET FALLA — aparece encima de INICIAR/DETENER al detenerse ──
+        # ── RESET FALLA — sobre INICIAR/DETENER al detenerse ──────────
         self.reset_btn = self._primary_btn("↺  RESET FALLA", "#b45309")
         self.reset_btn.clicked.connect(self._on_reset)
         self.reset_btn.setVisible(False)
@@ -894,9 +895,9 @@ class ScannerPanel(QWidget):
         self.model_combo.blockSignals(False)
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Helper: razón de parada legible desde InspectionResult
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def _stop_reason(result: InspectionResult) -> str:
     if getattr(result, "tilt_warn", False):
@@ -907,9 +908,9 @@ def _stop_reason(result: InspectionResult) -> str:
     return f"{missing} agujero{'s' if missing != 1 else ''} faltante{'s' if missing != 1 else ''} persistente{'s' if missing != 1 else ''}"
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Diálogo de alerta de parada — ocupa toda la ventana
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class MachineStopDialog(QDialog):
     """
@@ -980,7 +981,7 @@ class MachineStopDialog(QDialog):
         top_lay.addWidget(instruction_lbl)
         root.addWidget(top)
 
-        # ── Imagen del frame con el defecto — ocupa el máximo espacio ─
+        # ── Imagen del frame con el defecto — máximo espacio ──────────
         self._img_lbl = QLabel()
         self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_lbl.setStyleSheet(
@@ -1050,9 +1051,9 @@ class MachineStopDialog(QDialog):
         self._img_lbl.setPixmap(pix)
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Ventana principal
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 class OperatorWindow(QMainWindow):
     def __init__(self, system: InspectionSystem) -> None:
@@ -1154,7 +1155,7 @@ class OperatorWindow(QMainWindow):
         outer.setContentsMargins(18, 0, 18, 0)
         outer.setSpacing(0)
 
-        # ── Ala izquierda: logo Metalconf ────────────────────────────
+        # ── Ala izquierda: logo Metalconf ─────────────────────────────
         left_wing = QWidget()
         left_wing.setFixedWidth(_HEADER_WING_W)
         left_wing.setStyleSheet("background:transparent;")
@@ -1189,7 +1190,7 @@ class OperatorWindow(QMainWindow):
         center_lay.addWidget(subtitle)
         outer.addWidget(center, stretch=1)
 
-        # ── Ala derecha: controles + logo DEFYMOTION ─────────────────
+        # ── Ala derecha: controles + logo DEFYMOTION ──────────────────
         right_wing = QWidget()
         right_wing.setFixedWidth(_HEADER_WING_W)
         right_wing.setStyleSheet("background:transparent;")
@@ -1372,9 +1373,9 @@ class OperatorWindow(QMainWindow):
             event.ignore()
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def _logo_label(rel_path: str, max_h: int) -> QLabel:
     """Carga logo desde raíz del proyecto escalado a max_h px de alto.
@@ -1411,9 +1412,9 @@ def _bgr_to_pixmap(frame: np.ndarray, max_w: int, max_h: int) -> QPixmap:
     )
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Lanzador
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def launch_operator_ui(system: InspectionSystem) -> None:
     # Registrar AppUserModelID antes de crear QApplication para que Windows

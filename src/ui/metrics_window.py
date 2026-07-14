@@ -49,9 +49,9 @@ except ImportError:
     _MPL = False
     logger.warning("matplotlib no disponible — pestaña Historial deshabilitada")
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Paleta (dark, igual que service.py)
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 _DARK   = "#0f172a"
 _PANEL  = "#1e293b"
 _BORDER = "#334155"
@@ -68,12 +68,12 @@ _HEADER_LINE = "#67e8f9"
 
 _HEADER_WING_W = 310
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Definición de métricas de tiempo real
 # (id, etiqueta, unidad, tooltip para el operador)
 # Lenguaje simple a propósito: esta pantalla la lee el operario en planta,
 # no un técnico. Sin siglas ni palabras en inglés (uptime, fps, ratio, etc.).
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 _METRICS_DEF = [
     ("inspection_uptime_pct", "Tiempo trabajando", "%",
      "De todo el tiempo que el scanner estuvo encendido, qué porcentaje\n"
@@ -163,9 +163,9 @@ _TIME_RANGES = [
 ]
 
 
-# ==================================================================
+# ======================================================================
 # Widget: tarjeta de una sola métrica
-# ==================================================================
+# ======================================================================
 
 class _MetricCard(QWidget):
     """Tarjeta compacta: título + valor grande + unidad + tooltip."""
@@ -221,9 +221,9 @@ class _MetricCard(QWidget):
         )
 
 
-# ==================================================================
+# ======================================================================
 # Pestaña: Tiempo Real
-# ==================================================================
+# ======================================================================
 
 class _RealTimeTab(QWidget):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
@@ -405,9 +405,9 @@ class _RealTimeTab(QWidget):
         self._timer.stop()
 
 
-# ==================================================================
+# ======================================================================
 # Pestaña: Historial
-# ==================================================================
+# ======================================================================
 
 class _HistoricalTab(QWidget):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
@@ -492,7 +492,7 @@ class _HistoricalTab(QWidget):
         chart_lay = QVBoxLayout(chart_box)
         chart_lay.setContentsMargins(14, 14, 14, 14)
 
-        # ── área de gráficos ──────────────────────────────────────
+        # ── área de gráficos ──────────────────────────────────────────
         if _MPL:
             self._fig = Figure(figsize=(12, 6), facecolor=_SURFACE)
             self._axes = []
@@ -616,9 +616,9 @@ class _HistoricalTab(QWidget):
         self._canvas.draw()
 
 
-# ==================================================================
+# ======================================================================
 # Ventana principal
-# ==================================================================
+# ======================================================================
 
 class MetricsWindow(QMainWindow):
     def __init__(self, system: InspectionSystem, parent=None) -> None:
@@ -732,9 +732,9 @@ class MetricsWindow(QMainWindow):
         event.accept()
 
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # Helpers
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 def _logo_label(rel_path: str, max_h: int) -> QLabel:
     lbl = QLabel()

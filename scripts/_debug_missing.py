@@ -26,7 +26,7 @@ from src.utils.config import load_tolerances
 MODEL      = "modelo_B"
 SCANNER_ID = "scanner_1"
 
-# ── Elegí el frame problemático ───────────────────────────────────────────────
+# ── Elegí el frame problemático ───────────────────────────────────────
 FRAME_PATH = Path("C:/Tadeo/METALCONF/imagenes_prueba_METALCONF/20260519_121741/frame_0001.png")
 # Si no existe, busca el primer frame disponible de los datos de debug
 
@@ -101,7 +101,7 @@ if false_missing:
     print(f"  → Aumentar tol_xy_px a >{max(dists_falsos):.0f}px para eliminarlos")
     print(f"    (verificar que sigue siendo < dx={tol.get('dx', 28)} para no crear ambigüedad)")
 
-# ── Imagen de diagnóstico ─────────────────────────────────────────────────────
+# ── Imagen de diagnóstico ─────────────────────────────────────────────
 out = result.overlay.copy()
 
 # Re-dibujar en la ROI del overlay

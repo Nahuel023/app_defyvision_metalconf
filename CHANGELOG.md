@@ -46,6 +46,38 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-07-14 - Tadeo + Claude
+
+#### Cambio 256 - Estetica: divisores de comentario normalizados a 72 columnas en todo el repo
+
+**Pedido:** Tadeo pidio dejar el codigo mas estetico: habia lineas de division y
+separadores de comentario con largos irregulares que quedaban feos.
+
+**Hallazgo:** convivian 3 estilos de divisor con anchos inconsistentes:
+- `# ----` ASCII en 3 largos distintos (68/72/77 columnas, 164 lineas)
+- `# ── Etiqueta ───` unicode con borde derecho irregular (68 a 81 columnas, ~120 lineas)
+- `# ====` en `metrics_window.py` (34 lineas)
+Ademas un comentario divisor partido en 2 lineas en `operator.py` (~linea 329).
+
+**Cambio (solo comentarios, cero cambios de logica):**
+- Script one-shot que normalizo TODOS los divisores de `src/`, `tests/` y `scripts/`
+  a un ancho uniforme de **72 columnas**, respetando la indentacion y el estilo de
+  cada tipo (`-`, `=`, `─` con y sin etiqueta).
+- 7 etiquetas demasiado largas para entrar en 72 col se acortaron (grid_fitting.py x2,
+  operator.py x3, service.py x2) sin perder significado.
+- El divisor de 2 lineas de `operator.py` ("Modo seguro de ESTE scanner") se convirtio
+  en divisor corto + comentario normal de 2 lineas.
+- Total: 14 archivos, ~166 lineas de comentario.
+
+**Verificado:** `git diff` solo toca lineas de comentario; `compileall` OK sobre
+`src/` y `tests/`; `pytest` sigue 25/27 (mismos 2 failures preexistentes de
+`test_scanner_controller.py` por `_FakeIO` sin `write_critical`, sin relacion).
+
+**Nota:** `scripts/_tmp_analyze.py` tiene un SyntaxError preexistente (f-string con
+comillas escapadas) — no se toco; candidato a borrarse por ser script temporal.
+
+---
+
 ### Sesion 2026-07-07 - Tadeo + Claude
 
 #### Cambio 255 - Racha de 2 frames para desalineacion en scanner_1 y scanner_2; se desactiva la parada de 1 solo frame
