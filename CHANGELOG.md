@@ -48,6 +48,48 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-14 - Tadeo + Claude
 
+#### Cambio 259 - Fix crashes y trabas del visor de grabaciones y frames NOK
+
+**Pedido:** Tadeo reporto que (a) al abrir frames NOK la UI se traba bastante, y
+(b) el programa se suele crashear al abrir una grabacion.
+
+**Causa raiz:** la misma familia de bugs del Cambio 258 (QThread vivo cuya referencia
+se pisa -> Python lo destruye en ejecucion -> Qt aborta el proceso), repetida en
+4 lugares, mas creacion de QPixmap fuera del hilo de GUI (no soportado por Qt,
+causa trabas/crashes intermitentes en Windows):
+
+1. `frame_viewer.py` `load_event()`/`_render_window()`: `quit()` (no-op sobre un run()
+   plano) + `wait(200)` (bloqueaba la UI 200ms) + pisada de `self._loader` corriendo.
+   Clickear otro evento/grupo mientras cargaban miniaturas = crash.
+2. `frame_viewer.py` `_launch_inspect()`: pisaba `_inspect_worker` vivo al navegar
+   frames rapido con overlay activo.
+3. `frame_viewer.py` `_ThumbLoader`: creaba QPixmap dentro del hilo de fondo.
+4. `operator.py` `_open_errors()`: recreaba `OperatorFrameViewer` en cada reapertura
+   de la ventana; si quedo un loader corriendo de la instancia anterior -> crash.
+5. `service.py` `_launch_overlay_worker()` (visor de eventos/grabaciones en modo
+   servicio): mismo patron quit()+pisada, y `_EvOverlayWorker` emitia QPixmap
+   creado en el worker. Navegar rapido los frames de una grabacion = crash.
+
+**Cambios:**
+- `frame_viewer.py`: nuevo protocolo de retiro (`_retire_worker`/`_purge_retired`):
+  desconectar senal, `requestInterruption()`, retener en `_retired_workers` hasta
+  `finished`, recien ahi `deleteLater()`. Sin esperas bloqueantes en la UI.
+- `_ThumbLoader`: emite `QImage` (thread-safe); chequea `isInterruptionRequested()`
+  por frame; la conversion a QPixmap se hace en `_on_thumb_ready` (hilo GUI).
+  Eliminados `_load_thumb`/`_bgr_to_pixmap` (quedaron muertos).
+- `operator.py` `_open_errors()`: la ventana del visor se crea una sola vez y se
+  reutiliza (reload() ya refrescaba el contenido).
+- `service.py`: `_EvOverlayWorker` emite `QImage`; `_launch_overlay_worker` usa el
+  mismo protocolo de retiro con `_retired_overlay_workers`/`_purge_overlay_worker`.
+
+**Resultado:** abrir grabaciones, cambiar de evento durante la carga, navegar frames
+rapido y reabrir el visor ya no pueden abortar el proceso; se van las trabas de
+`wait(200)` y las del QPixmap fuera del hilo GUI.
+
+**Verificado:** `compileall` OK, imports OK, `pytest` 31/31.
+
+---
+
 #### Cambio 258 - Fix crash al apretar GUARDAR ROI varias veces seguidas
 
 **Pedido:** Tadeo reporto que a veces, al dar "GUARDAR ROI" varias veces, la aplicacion

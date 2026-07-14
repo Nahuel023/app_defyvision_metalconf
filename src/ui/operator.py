@@ -1294,9 +1294,14 @@ class OperatorWindow(QMainWindow):
         ensure_license_or_prompt(self)
 
     def _open_errors(self) -> None:
-        """Abre el visor de frames para el operario (paradas + OK recientes)."""
+        """Abre el visor de frames para el operario (paradas + OK recientes).
+
+        La ventana se crea UNA vez y se reutiliza: recrearla en cada apertura
+        podía destruir un cargador de miniaturas todavía corriendo de la
+        instancia anterior y abortar el proceso completo.
+        """
         from src.ui.frame_viewer import OperatorFrameViewer
-        if self._errors_win is None or not self._errors_win.isVisible():
+        if self._errors_win is None:
             self._errors_win = OperatorFrameViewer(self._system, parent=None)
         self._errors_win.show()
         self._errors_win.raise_()

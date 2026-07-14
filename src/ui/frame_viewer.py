@@ -78,24 +78,6 @@ _MAX_VIEWER_FRAMES = 300
 
 # ── Helper ────────────────────────────────────────────────────────────
 
-def _bgr_to_pixmap(img: np.ndarray, max_w: int, max_h: int) -> QPixmap:
-    h, w = img.shape[:2]
-    scale = min(max_w / w, max_h / h, 1.0)
-    if scale < 0.999:
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    h, w = img.shape[:2]
-    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    qimg = QImage(rgb.data, w, h, 3 * w, QImage.Format.Format_RGB888)
-    return QPixmap.fromImage(qimg)
-
-
-def _load_thumb(path: Path) -> QPixmap:
-    img = cv2.imread(str(path))
-    if img is None:
-        return QPixmap()
-    return _bgr_to_pixmap(img, _THUMB_W, _THUMB_H)
-
-
 def _event_summary(event_dir: Path) -> dict:
     """Lee manifest.json y devuelve un dict con los campos clave."""
     manifest_path = event_dir / "manifest.json"
@@ -148,8 +130,13 @@ def _scanner_display(scanner_id: str) -> str:
 # ── Worker de carga de miniaturas ─────────────────────────────────────
 
 class _ThumbLoader(QThread):
-    """Carga miniaturas en segundo plano para no congelar la UI."""
-    thumb_ready = pyqtSignal(int, QPixmap)  # (index, pixmap)
+    """Carga miniaturas en segundo plano para no congelar la UI.
+
+    Emite QImage y no QPixmap: QPixmap solo puede crearse en el hilo de GUI
+    (crearlo en un worker causa trabas y crashes intermitentes en Windows).
+    Respeta requestInterruption() para poder retirarlo sin bloquear la UI.
+    """
+    thumb_ready = pyqtSignal(int, QImage)  # (index, imagen ya reducida)
 
     def __init__(self, paths: list[Path], parent=None):
         super().__init__(parent)
@@ -157,8 +144,21 @@ class _ThumbLoader(QThread):
 
     def run(self):
         for i, p in enumerate(self._paths):
-            pix = _load_thumb(p)
-            self.thumb_ready.emit(i, pix)
+            if self.isInterruptionRequested():
+                return
+            img = cv2.imread(str(p))
+            if img is None:
+                continue
+            h, w = img.shape[:2]
+            scale = min(_THUMB_W / w, _THUMB_H / h, 1.0)
+            if scale < 0.999:
+                img = cv2.resize(img, (int(w * scale), int(h * scale)),
+                                 interpolation=cv2.INTER_AREA)
+            rgb = np.ascontiguousarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+            th, tw = rgb.shape[:2]
+            qimg = QImage(rgb.data, tw, th, rgb.strides[0],
+                          QImage.Format.Format_RGB888).copy()
+            self.thumb_ready.emit(i, qimg)
 
 
 # ── Widget: visor de un único frame con zoom y pan ────────────────────
@@ -309,6 +309,10 @@ class _EventNavPanel(QWidget):
         self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
         self._inspect_worker: Optional[_InspectWorker] = None
         self._current_dir: Optional[Path] = None
+        # Workers retirados pero posiblemente aún corriendo: se retienen hasta
+        # que emiten finished. Perder la referencia de un QThread vivo hace
+        # que Python lo destruya en ejecución y Qt aborte el proceso.
+        self._retired_workers: list[QThread] = []
         # Paginación para buffers grandes (ok_buffer / timeline): self._all_frames
         # tiene el set completo (orden ascendente); self._frames es la ventana
         # actualmente cargada/renderizada (las más recientes, o más tras "cargar más").
@@ -502,9 +506,7 @@ class _EventNavPanel(QWidget):
             self._thumb_widgets.append(lbl)
 
         # Cargar miniaturas en segundo plano
-        if self._loader is not None:
-            self._loader.quit()
-            self._loader.wait(200)
+        self._retire_thumb_loader()
         self._loader = _ThumbLoader(self._frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
@@ -601,9 +603,7 @@ class _EventNavPanel(QWidget):
             self._thumb_lay.insertWidget(self._thumb_lay.count() - 1, lbl)
             self._thumb_widgets.append(lbl)
 
-        if self._loader is not None:
-            self._loader.quit()
-            self._loader.wait(200)
+        self._retire_thumb_loader()
         self._loader = _ThumbLoader(frames)
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
@@ -617,14 +617,44 @@ class _EventNavPanel(QWidget):
 
     # ── Internos ──────────────────────────────────────────────────────
 
+    def _retire_worker(self, worker: Optional[QThread]) -> None:
+        """Retira un QThread sin bloquear la UI ni perder su referencia.
+
+        Pide interrupción cooperativa y retiene el worker en
+        `_retired_workers` hasta que emite finished; recién ahí se libera.
+        """
+        if worker is None:
+            return
+        worker.requestInterruption()
+        self._retired_workers.append(worker)
+        worker.finished.connect(lambda w=worker: self._purge_retired(w))
+        if not worker.isRunning():
+            self._purge_retired(worker)
+
+    def _purge_retired(self, worker: QThread) -> None:
+        if worker in self._retired_workers:
+            self._retired_workers.remove(worker)
+            worker.deleteLater()
+
+    def _retire_thumb_loader(self) -> None:
+        if self._loader is None:
+            return
+        try:
+            self._loader.thumb_ready.disconnect(self._on_thumb_ready)
+        except TypeError:
+            pass
+        self._retire_worker(self._loader)
+        self._loader = None
+
     def _clear_thumbs(self) -> None:
         for w in self._thumb_widgets:
             self._thumb_lay.removeWidget(w)
             w.deleteLater()
         self._thumb_widgets.clear()
 
-    def _on_thumb_ready(self, idx: int, pix: QPixmap) -> None:
-        if idx < len(self._thumb_widgets) and not pix.isNull():
+    def _on_thumb_ready(self, idx: int, qimg: QImage) -> None:
+        if idx < len(self._thumb_widgets) and not qimg.isNull():
+            pix = QPixmap.fromImage(qimg)
             self._thumb_widgets[idx].setPixmap(
                 pix.scaled(_THUMB_W - 4, _THUMB_H - 4,
                            Qt.AspectRatioMode.KeepAspectRatio,
@@ -688,9 +718,13 @@ class _EventNavPanel(QWidget):
 
     def _launch_inspect(self, path: Path) -> None:
         """Lanza análisis on-demand en background para frames de evento."""
-        if self._inspect_worker is not None and self._inspect_worker.isRunning():
-            self._inspect_worker.done.disconnect()
-            self._inspect_worker.quit()
+        if self._inspect_worker is not None:
+            try:
+                self._inspect_worker.done.disconnect(self._on_inspect_done)
+            except TypeError:
+                pass
+            self._retire_worker(self._inspect_worker)
+            self._inspect_worker = None
         self._inspect_worker = _InspectWorker(path, self._model, self._scanner_id)
         self._inspect_worker.done.connect(self._on_inspect_done)
         self._inspect_worker.start()

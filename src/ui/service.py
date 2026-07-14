@@ -4113,8 +4113,11 @@ class RecordingTab(QWidget):
 # ======================================================================
 
 class _EvOverlayWorker(QThread):
-    """Corre inspect_image en background y emite (idx, QPixmap) con el overlay."""
-    done = pyqtSignal(int, QPixmap)
+    """Corre inspect_image en background y emite (idx, QImage) con el overlay.
+
+    Emite QImage y no QPixmap: QPixmap solo puede crearse en el hilo de GUI.
+    """
+    done = pyqtSignal(int, QImage)
 
     def __init__(self, idx: int, path: Path, model: str, scanner_id: str, parent=None):
         super().__init__(parent)
@@ -4133,7 +4136,7 @@ class _EvOverlayWorker(QThread):
                 rgb = np.ascontiguousarray(cv2.cvtColor(ov, cv2.COLOR_BGR2RGB))
                 h, w = rgb.shape[:2]
                 qi = QImage(rgb.data, w, h, w * 3, QImage.Format.Format_RGB888).copy()
-                self.done.emit(self._idx, QPixmap.fromImage(qi))
+                self.done.emit(self._idx, qi)
         except Exception:
             pass
 
@@ -4169,6 +4172,10 @@ class EventBrowserTab(QWidget):
         self._show_overlay: bool = False
         self._ov_cache: dict[int, QPixmap] = {}
         self._overlay_worker: Optional[_EvOverlayWorker] = None
+        # Workers retirados pero posiblemente aún corriendo: se retienen hasta
+        # que emiten finished (perder la referencia de un QThread vivo aborta
+        # el proceso entero).
+        self._retired_overlay_workers: list[QThread] = []
         self._build_ui()
         self._refresh_events()
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -4689,9 +4696,22 @@ class EventBrowserTab(QWidget):
         return pxm
 
     def _launch_overlay_worker(self, idx: int) -> None:
-        if self._overlay_worker is not None and self._overlay_worker.isRunning():
-            self._overlay_worker.done.disconnect()
-            self._overlay_worker.quit()
+        prev = self._overlay_worker
+        if prev is not None:
+            # Retirar sin bloquear: desconectar, pedir interrupción y retener
+            # la referencia hasta finished. quit() no detiene un run() plano,
+            # y pisar la referencia de un QThread vivo abortaba el proceso al
+            # navegar rápido los frames de una grabación.
+            try:
+                prev.done.disconnect(self._on_overlay_done)
+            except TypeError:
+                pass
+            prev.requestInterruption()
+            self._retired_overlay_workers.append(prev)
+            prev.finished.connect(lambda w=prev: self._purge_overlay_worker(w))
+            if not prev.isRunning():
+                self._purge_overlay_worker(prev)
+            self._overlay_worker = None
         scanner_id = self._overlay_scanner_combo.currentText()
         model = self._scanner_model(scanner_id)
         worker = _EvOverlayWorker(idx, self._frame_paths[idx], model, scanner_id)
@@ -4699,7 +4719,13 @@ class EventBrowserTab(QWidget):
         self._overlay_worker = worker
         worker.start()
 
-    def _on_overlay_done(self, idx: int, pxm: QPixmap) -> None:
+    def _purge_overlay_worker(self, worker: QThread) -> None:
+        if worker in self._retired_overlay_workers:
+            self._retired_overlay_workers.remove(worker)
+            worker.deleteLater()
+
+    def _on_overlay_done(self, idx: int, qimg: QImage) -> None:
+        pxm = QPixmap.fromImage(qimg)
         self._ov_cache[idx] = pxm
         if idx == self._current_idx and self._show_overlay:
             prev = self._event_img_view.current_pixmap()
