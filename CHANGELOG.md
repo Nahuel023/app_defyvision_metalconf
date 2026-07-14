@@ -48,6 +48,64 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-14 - Tadeo + Claude
 
+#### Cambio 261 - Borde de CHAPA robusto cuando se superpone con el backlight (falsos PATRON DESALINEADO)
+
+**Pedido:** Tadeo reporto muchos falsos NOK/paradas por "patron desalineado" en scanner_2:
+cuando el borde de la chapa se superpone un poco con la luz, el borde detectado "se va
+demasiado hacia adentro". Evidencia: 12 pares raw+overlay en
+`C:\Users\DefyC\Downloads\Imagenes error NOK 14-7`.
+
+**Diagnostico (reproducido con perfiles reales):**
+1. `_detect_sheet_edges_in_windows` tomaba el gradiente MAS FUERTE de toda la ventana
+   de busqueda. Con blur o luz derramada sobre el borde, el gradiente del borde real se
+   ablanda y el maximo cae en agujeros del patron (la ventana interna llega hasta el
+   patron) o en el lavado de luz sobre el metal: puntos de chapa hasta 100px hacia
+   adentro. Medido en banda mala: candidato falso con lados 106-170 de intensidad vs
+   75/200+ del borde real.
+2. Esos puntos corruptos inclinaban la recta ajustada del borde ->
+   `pattern_sheet_slope_delta_max_deg` explotaba (4.0 deg en vivo) -> "PATRON
+   DESALINEADO - INCLINACION" + machine_stop falso. (El mismo mecanismo que en su
+   momento se mitigo achicando `chapa_edge_inner_px` a 40, sin resolver la causa.)
+3. Los puntos de chapa no pasaban por ningun filtro de outliers (el patron si tenia IQR).
+4. Ademas el borde del fleje es un ARCO (curvatura real del material + lente): ajustar
+   una recta hace la pendiente sensible a que bandas entraron en cada frame.
+
+**Cambios (`src/pipeline/edge_centering.py`):**
+- Nuevo `_find_edge_in_profile()`: un candidato a borde debe tener lado metal OSCURO
+  sostenido (20px <= dark+0.25*rng) y lado backlight BRILLANTE sostenido
+  (20px >= bright-0.35*rng); entre los validos se toma el MAS INTERNO (primera
+  transicion fisica saliendo del metal). Agujeros del patron y lavado interior fallan
+  las compuertas; estructuras del resplandor mas alla del borde quedan descartadas por
+  ser externas. Sin candidato valido la banda se omite (mejor un punto menos que uno falso).
+- Posicion final por CRUCE DEL NIVEL MEDIO dentro de la rampa del borde, interpolado
+  (invariante al blur: bandas nitidas y lavadas del mismo frame miden el mismo borde).
+- `_find_edge_in_profile` devuelve tambien el ancho de rampa; la pendiente de chapa
+  descarta bandas con rampa > 2x mediana (firma del borde lavado).
+- Filtro IQR (factor 3.0) sobre los puntos de chapa, como ya tenia el patron.
+- Pendiente de chapa sobre bandas centrales (60% del alto) para reducir el efecto arco.
+
+**Cambio (`config/io_map.yaml` scanner_2):** `pattern_slope_delta_max_deg: 1.2 -> 2.2`.
+Con la medicion ya robusta, el ruido remanente del delta es ondulacion REAL del borde
+del fleje (el vertice del arco viaja con el material entre frames): medido <=1.4 deg en
+el lote. 2.2 deg deja margen y sigue disparando ante inclinaciones reales sostenidas.
+
+**Validacion (lote "Imagenes error NOK 14-7", 12 frames que antes disparaban):**
+- ANTES del fix (offline): dMax hasta 2.38 deg, puntos de chapa saltando ~100px hacia
+  adentro (visible en overlays originales), 4.0 deg en vivo.
+- DESPUES: 0/12 frames con `pattern_alignment_warn`, 0/12 machine_stop, dMax max 1.36,
+  polilineas de chapa suaves siguiendo el arco real en todos los frames.
+- Los 3 frames que siguen NOK es por missing del blur (9-10), cubiertos por la regla
+  temporal (consecutive_nok_frames) — sin relacion con alineacion.
+- `pytest` 31/31.
+
+**Riesgos / pendientes:**
+- scanner_1 mantiene `pattern_slope_delta_max_deg: 1.0`; si aparecen falsos INCLINADO
+  alli, aplicar la misma recalibracion (la deteccion robusta ya le aplica igual).
+- Si en planta un desalineado real de patron dispara con menos de 2.2 deg de delta,
+  bajar el umbral con datos de ese caso (el piso ahora es ~1.4 deg de ruido natural).
+
+---
+
 #### Cambio 260 - MachineStopDialog: banner de SCANNER legible
 
 **Pedido:** en la ventana de MACHINE FAULT, el banner que indica "SCANNER 1/2" se

@@ -49,6 +49,16 @@ _DS = 4
 # Smoothing kernel for column profile (small to preserve gradient magnitude).
 _SMOOTH_K = 7
 
+# Validación de candidato a borde por lados sostenidos (px de la ventana).
+# El lado metal debe ser oscuro sostenido y el lado backlight brillante
+# sostenido; agujeros del patrón y lavados de luz sobre el metal fallan
+# ambas condiciones, el borde real las cumple siempre.
+_RUN_PX  = 20   # largo de la corrida a promediar a cada lado
+_RUN_GAP = 4    # separación entre el candidato y el inicio de la corrida
+_RUN_MIN = 8    # mínimo de px disponibles para validar una corrida
+_DARK_FRAC   = 0.25  # umbral lado oscuro:   dark + 0.25*rng
+_BRIGHT_FRAC = 0.35  # umbral lado brillante: bright - 0.35*rng
+
 
 @dataclass(frozen=True)
 class CenteringResult:
@@ -121,6 +131,127 @@ class CenteringResult:
 # Internal helpers
 # ----------------------------------------------------------------------
 
+def _sided_run_means(col_s: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Media sostenida a izquierda y derecha de cada posición del perfil.
+
+    Devuelve (left_mean, right_mean, valid) donde left_mean[i] es la media de
+    col_s[i-_RUN_GAP-_RUN_PX : i-_RUN_GAP] (recortada al borde) y right_mean[i]
+    la simétrica. valid[i] es False cuando algún lado tiene menos de _RUN_MIN px.
+    """
+    n = len(col_s)
+    cs = np.concatenate(([0.0], np.cumsum(col_s, dtype=np.float64)))
+    idx = np.arange(n)
+
+    l0 = np.clip(idx - _RUN_GAP - _RUN_PX, 0, n)
+    l1 = np.clip(idx - _RUN_GAP, 0, n)
+    r0 = np.clip(idx + 1 + _RUN_GAP, 0, n)
+    r1 = np.clip(idx + 1 + _RUN_GAP + _RUN_PX, 0, n)
+
+    l_len = (l1 - l0).astype(np.float64)
+    r_len = (r1 - r0).astype(np.float64)
+    valid = (l_len >= _RUN_MIN) & (r_len >= _RUN_MIN)
+
+    left_mean = np.zeros(n, dtype=np.float64)
+    right_mean = np.zeros(n, dtype=np.float64)
+    nz_l = l_len > 0
+    nz_r = r_len > 0
+    left_mean[nz_l] = (cs[l1[nz_l]] - cs[l0[nz_l]]) / l_len[nz_l]
+    right_mean[nz_r] = (cs[r1[nz_r]] - cs[r0[nz_r]]) / r_len[nz_r]
+    return left_mean, right_mean, valid
+
+
+def _find_edge_in_profile(col_s: np.ndarray, side: str) -> Optional[tuple[float, float]]:
+    """Posición del borde metal/backlight en un perfil de columnas suavizado.
+
+    side="left":  borde izquierdo de la chapa — brillante(afuera) -> oscuro(metal).
+    side="right": borde derecho de la chapa — oscuro(metal) -> brillante(afuera).
+
+    En vez del gradiente más fuerte de toda la ventana (que con blur o luz
+    derramada sobre el borde cae en agujeros del patrón o en el lavado
+    interior), se exige que el candidato tenga lado metal oscuro sostenido y
+    lado backlight brillante sostenido. Entre los válidos se toma el MÁS
+    INTERNO (el más cercano al metal): esa es la primera transición física
+    real; los candidatos más externos son estructuras del resplandor o
+    suciedad sobre el backlight. Los falsos internos (agujeros del patrón,
+    lavado sobre el metal) ya fallan las compuertas de lados sostenidos.
+
+    Devuelve (x, ancho_de_rampa) o None si ninguna posición califica (banda
+    omitida). El ancho de rampa es el largo en px de la transición: las bandas
+    con borde lavado por la luz tienen rampas mucho más anchas que las nítidas
+    y el llamador puede descartarlas para las métricas sensibles (pendiente).
+    """
+    rng = float(col_s.max() - col_s.min())
+    if rng < 20.0:
+        return None
+    grad = np.diff(col_s)
+    if grad.size == 0:
+        return None
+
+    dark = float(np.percentile(col_s, 10))
+    bright = float(np.percentile(col_s, 90))
+    dark_thr = dark + _DARK_FRAC * rng
+    bright_thr = bright - _BRIGHT_FRAC * rng
+
+    left_mean, right_mean, valid = _sided_run_means(col_s)
+    left_mean, right_mean, valid = left_mean[:-1], right_mean[:-1], valid[:-1]
+
+    if side == "left":
+        mask = (grad < -rng * 0.03) & valid \
+            & (left_mean >= bright_thr) & (right_mean <= dark_thr)
+    else:
+        mask = (grad > rng * 0.03) & valid \
+            & (left_mean <= dark_thr) & (right_mean >= bright_thr)
+
+    idxs = np.where(mask)[0]
+    if idxs.size == 0:
+        return None
+
+    # Agrupar índices consecutivos y quedarse con el grupo más INTERNO
+    # (pegado al metal). En la ventana izquierda el metal queda a la derecha
+    # (último grupo); en la ventana derecha, a la izquierda (primer grupo).
+    splits = np.where(np.diff(idxs) > 3)[0] + 1
+    groups = np.split(idxs, splits)
+    group = groups[-1] if side == "left" else groups[0]
+
+    # Expandir el grupo a la rampa completa del borde: con blur la validación
+    # recién pasa al final de la rampa y usar ese índice sesga el punto hacia
+    # afuera; la rampa entera es donde el gradiente sigue siendo significativo.
+    sign_grad = -grad if side == "left" else grad
+    seed = int(group[np.argmax(sign_grad[group])])
+    ramp_thr = rng * 0.015
+    lo = seed
+    gap = 0
+    while lo - 1 >= 0 and gap <= 3:
+        lo -= 1
+        gap = gap + 1 if sign_grad[lo] <= ramp_thr else 0
+    hi = seed
+    gap = 0
+    while hi + 1 < len(sign_grad) and gap <= 3:
+        hi += 1
+        gap = gap + 1 if sign_grad[hi] <= ramp_thr else 0
+
+    # Posición final: cruce del nivel medio dentro de la rampa, interpolado.
+    # Es invariante al blur (el 50% de una transición simétrica cae en el
+    # borde físico esté nítida o lavada), así bandas nítidas y borrosas del
+    # mismo frame miden el mismo borde.
+    mid = dark + 0.5 * (bright - dark)
+    ramp_w = float(hi - lo + 1)
+    seg = col_s[lo:hi + 2]
+    if side == "right":
+        above = np.where(seg >= mid)[0]
+        if above.size and above[0] > 0:
+            j = int(above[0])
+            step = max(float(seg[j] - seg[j - 1]), 1e-6)
+            return float(lo + j - 1) + float(mid - seg[j - 1]) / step, ramp_w
+    else:
+        below = np.where(seg < mid)[0]
+        if below.size and below[0] > 0:
+            j = int(below[0])
+            step = max(float(seg[j - 1] - seg[j]), 1e-6)
+            return float(lo + j - 1) + float(seg[j - 1] - mid) / step, ramp_w
+    return float(seed), ramp_w
+
+
 def _detect_sheet_edges_in_windows(
     img_full: np.ndarray,
     roi_x: int,
@@ -130,11 +261,18 @@ def _detect_sheet_edges_in_windows(
     n_bands: int = _N_BANDS,
     ds: int = _DS,
     inner_px: int = _LEFT_INNER,
-) -> tuple[dict[int, tuple[float, float]], dict[int, tuple[float, float]]]:
+) -> tuple[
+    dict[int, tuple[float, float]],
+    dict[int, tuple[float, float]],
+    dict[int, float],
+    dict[int, float],
+]:
     """Per-band left/right metal edge detection in search windows.
 
     Works on the full-frame R channel (backlight is red/bright).
-    Returns two dicts keyed by band index with values (x_roi_relative, y_roi_relative).
+    Returns (left_dict, right_dict, left_ramp, right_ramp): the first two keyed
+    by band index with values (x_roi_relative, y_roi_relative); the ramp dicts
+    hold the edge transition width in px per band (wide = washed-out edge).
     Bands where no clear bright/dark transition is found are omitted.
 
     Left window covers [roi_x - _LEFT_OUTER, roi_x + inner_px] in full-frame x.
@@ -153,6 +291,8 @@ def _detect_sheet_edges_in_windows(
     band_h = roi_h / n_bands
     left_dict:  dict[int, tuple[float, float]] = {}
     right_dict: dict[int, tuple[float, float]] = {}
+    left_ramp:  dict[int, float] = {}
+    right_ramp: dict[int, float] = {}
 
     for i in range(n_bands):
         y0_full = roi_y + int(i * band_h)
@@ -162,7 +302,7 @@ def _detect_sheet_edges_in_windows(
 
         cy_roi = float((y0_full - roi_y) + (y1_full - roi_y)) / 2.0
 
-        # Left edge: find sharpest bright->dark drop
+        # Left edge: outermost validated bright->dark transition
         if lw_x1 > lw_x0 + 4:
             strip = r_ch[y0_full:y1_full:ds, lw_x0:lw_x1]
             if strip.size == 0:
@@ -176,19 +316,12 @@ def _detect_sheet_edges_in_windows(
                 ).ravel()
             else:
                 col_s = col_prof
-            rng = float(col_s.max() - col_s.min())
-            if rng < 20.0:
-                continue  # no meaningful bright/dark contrast in this band
-            grad = np.diff(col_s)
-            if grad.size == 0:
-                continue
-            idx = int(np.argmin(grad))   # index of steepest drop
-            # Accept: gradient must be negative AND at least 3% of full range.
-            # (3% is very permissive; rng >= 20 is the real quality gate.)
-            if grad[idx] < -rng * 0.03:
-                left_dict[i] = (float(lw_x0 + idx) - roi_x, cy_roi)
+            found = _find_edge_in_profile(col_s, side="left")
+            if found is not None:
+                left_dict[i] = (float(lw_x0) + found[0] - roi_x, cy_roi)
+                left_ramp[i] = found[1]
 
-        # Right edge: find sharpest dark->bright rise
+        # Right edge: outermost validated dark->bright transition
         if rw_x1 > rw_x0 + 4:
             strip = r_ch[y0_full:y1_full:ds, rw_x0:rw_x1]
             if strip.size == 0:
@@ -200,17 +333,12 @@ def _detect_sheet_edges_in_windows(
                 ).ravel()
             else:
                 col_s = col_prof
-            rng = float(col_s.max() - col_s.min())
-            if rng < 20.0:
-                continue
-            grad = np.diff(col_s)
-            if grad.size == 0:
-                continue
-            idx = int(np.argmax(grad))   # index of steepest rise
-            if grad[idx] > rng * 0.03:
-                right_dict[i] = (float(rw_x0 + idx) - roi_x, cy_roi)
+            found = _find_edge_in_profile(col_s, side="right")
+            if found is not None:
+                right_dict[i] = (float(rw_x0) + found[0] - roi_x, cy_roi)
+                right_ramp[i] = found[1]
 
-    return left_dict, right_dict
+    return left_dict, right_dict, left_ramp, right_ramp
 
 
 def _background_threshold(gray: np.ndarray, w: int) -> float:
@@ -623,21 +751,26 @@ def compute_centering(
         roi_w, roi_h = int(roi.w), int(roi.h)
         mid_y = roi_h / 2.0
 
-        edge_left, edge_right = _detect_sheet_edges_in_windows(
+        edge_left, edge_right, left_ramp, right_ramp = _detect_sheet_edges_in_windows(
             img_bgr, roi_x, roi_w, roi_y, roi_h, n_bands=n_bands,
             inner_px=chapa_inner_px,
         )
         # Values are already in ROI-relative coords
-        left_pts_list  = list(edge_left.values())
-        right_pts_list = list(edge_right.values())
         img_h_for_bands = roi_h
 
     else:
         mid_y = h / 2.0
         edge_left, edge_right = _detect_edges_by_band(img_bgr, n_bands=n_bands)
-        left_pts_list  = list(edge_left.values())
-        right_pts_list = list(edge_right.values())
+        left_ramp, right_ramp = {}, {}
         img_h_for_bands = h
+
+    # Red extra contra bandas donde el borde saltó hacia adentro (luz derramada
+    # sobre el borde, reflejos): descarta outliers aislados en X. Factor 3.0
+    # generoso para no enmascarar vibración real repartida en muchas bandas.
+    edge_left  = _iqr_filter_band_dict(edge_left,  iqr_factor=3.0)
+    edge_right = _iqr_filter_band_dict(edge_right, iqr_factor=3.0)
+    left_pts_list  = list(edge_left.values())
+    right_pts_list = list(edge_right.values())
 
     n_left  = len(left_pts_list)
     n_right = len(right_pts_list)
@@ -707,8 +840,35 @@ def compute_centering(
         c = _fit_line_robust(pts)
         return float(np.degrees(np.arctan(c[0]))) if c is not None else 0.0
 
-    left_edge_slope_deg    = _slope_deg(left_pts_list)
-    right_edge_slope_deg   = _slope_deg(right_pts_list)
+    # Pendiente de chapa: solo bandas CENTRALES (60% del alto) y con rampa de
+    # transición angosta. El borde real es un arco (distorsión de lente) y las
+    # puntas curvas inclinan la recta según qué bandas entraron; las bandas de
+    # rampa ancha (borde lavado por la luz) tienen el cruce corrido unos px y
+    # tuercen la pendiente, inflando pattern_sheet_slope_delta sin
+    # desalineación real del patrón.
+    def _chapa_slope_pts(
+        d: dict[int, tuple[float, float]],
+        ramps: dict[int, float],
+    ) -> list[tuple[float, float]]:
+        central = _trim_y_extremes(d, trim_frac=0.20)
+        if len(ramps) >= 4:
+            med_w = float(np.median(list(ramps.values())))
+            sharp = {
+                k: v for k, v in central.items()
+                if ramps.get(k, med_w) <= max(med_w * 2.0, med_w + 10.0)
+            }
+            if len(sharp) >= 4:
+                central = sharp
+        return list(central.values())
+
+    _chapa_left_central = _chapa_slope_pts(edge_left, left_ramp)
+    _chapa_right_central = _chapa_slope_pts(edge_right, right_ramp)
+    left_edge_slope_deg = _slope_deg(
+        _chapa_left_central if len(_chapa_left_central) >= 4 else left_pts_list
+    )
+    right_edge_slope_deg = _slope_deg(
+        _chapa_right_central if len(_chapa_right_central) >= 4 else right_pts_list
+    )
     pattern_left_slope_deg  = _slope_deg(list(pat_left_metric.values()))
     pattern_right_slope_deg = _slope_deg(list(pat_right_metric.values()))
     pattern_sheet_slope_delta_left_deg = pattern_left_slope_deg - left_edge_slope_deg

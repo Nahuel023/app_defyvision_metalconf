@@ -151,9 +151,15 @@ scanner_2:
     # Calibracion 03-07-2026: el baseline bueno de scanner_2 en microperforado
     # ya vive cerca de 0.7-1.1deg de delta patron/chapa. Con 0.6deg se marcaban
     # falsos "PATRON DESALINEADO" y, por racha de 2 frames, FAULT instantaneo
-    # aunque la pieza estuviera bien. 1.2deg sigue por debajo de una deriva
-    # mecanica severa, pero deja pasar el offset normal de este scanner.
-    pattern_slope_delta_max_deg: 1.2
+    # aunque la pieza estuviera bien.
+    # Recalibracion 14-07-2026 (Cambio 261): tras robustecer la deteccion del
+    # borde de chapa en edge_centering (compuertas de lados sostenidos + cruce
+    # de nivel medio), el ruido remanente del delta ya no es artefacto de
+    # medicion sino ondulacion REAL del borde del fleje (slitting), medida en
+    # <=1.4deg sobre el lote "Imagenes error NOK 14-7". 2.2deg deja margen
+    # sobre ese ruido natural y sigue disparando ante inclinaciones reales
+    # sostenidas del patron (>2.2deg durante stop_frames=2).
+    pattern_slope_delta_max_deg: 2.2
     # Cambio 255 (07-07-2026): a pedido de Tadeo se desactiva la parada
     # instantanea de 1 solo frame por desalineacion severa (severe_abs_max_px=0.0).
     # Ahora toda desalineacion, por severa que sea, tiene que sostenerse
