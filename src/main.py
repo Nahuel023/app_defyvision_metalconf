@@ -707,6 +707,26 @@ def cmd_roi_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cleanup_output(args: argparse.Namespace) -> int:
+    """Poda data/output por antigüedad y presupuesto de disco (dry-run por defecto)."""
+    from src.utils.cleanup import prune_output
+
+    report = prune_output(
+        root=args.dir,
+        keep_days=args.keep_days,
+        max_gb=args.max_gb,
+        apply=args.apply,
+    )
+    modo = "BORRADO" if args.apply else "dry-run (usar --apply para borrar)"
+    print(f"[cleanup-output] {args.dir} — {modo}")
+    print(f"  entradas: {report.scanned}  total: {report.total_bytes / 1e9:.2f} GB")
+    for path, size in report.deleted:
+        print(f"  - {path.name}  ({size / 1e6:.1f} MB)")
+    print(f"  {'liberado' if args.apply else 'a liberar'}: "
+          f"{report.freed_bytes / 1e9:.2f} GB en {len(report.deleted)} entradas")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     """Modo producción: inicia el sistema completo (PLC + cámaras + UI)."""
     import sys
@@ -870,6 +890,23 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-width-delta", type=float, default=20.0, dest="max_width_delta",
                     help="Delta de ancho maximo tolerado antes de advertir (default: 20).")
     sp.set_defaults(func=cmd_roi_check)
+
+    sp = sub.add_parser(
+        "cleanup-output",
+        help=(
+            "Poda data/output por antiguedad y presupuesto de disco. "
+            "Por defecto es dry-run: muestra que borraria sin tocar nada."
+        ),
+    )
+    sp.add_argument("--dir", type=Path, default=Path("data/output"),
+                    help="Carpeta a podar (default: data/output).")
+    sp.add_argument("--keep-days", type=float, default=30.0, dest="keep_days",
+                    help="Eliminar entradas sin actividad hace mas de N dias (0=off, default: 30).")
+    sp.add_argument("--max-gb", type=float, default=2.0, dest="max_gb",
+                    help="Presupuesto total en GB; se poda lo mas viejo primero (0=off, default: 2).")
+    sp.add_argument("--apply", action="store_true",
+                    help="Ejecutar el borrado real (sin esto solo informa).")
+    sp.set_defaults(func=cmd_cleanup_output)
 
     sp = sub.add_parser("run", help="Modo producción: PLC + cámaras + UI en tiempo real.")
     sp.add_argument("--no-plc-outputs", action="store_true", dest="no_plc_outputs",

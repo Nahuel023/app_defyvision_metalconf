@@ -1,0 +1,23 @@
+# Normalizacion de fin de linea: todo el codigo y config en LF.
+# Evita los warnings "LF will be replaced by CRLF" y diffs falsos en Windows.
+*.py    text eol=lf
+*.md    text eol=lf
+*.yaml  text eol=lf
+*.yml   text eol=lf
+*.json  text eol=lf
+*.txt   text eol=lf
+*.spec  text eol=lf
+
+# Scripts nativos de Windows si quedan en CRLF
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binarios: nunca tocar
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.key   binary
+*.bin   binary
+*.db    binary

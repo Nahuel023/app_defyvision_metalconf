@@ -48,6 +48,78 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-14 - Tadeo + Claude
 
+#### Cambio 258 - Fix crash al apretar GUARDAR ROI varias veces seguidas
+
+**Pedido:** Tadeo reporto que a veces, al dar "GUARDAR ROI" varias veces, la aplicacion
+se cierra sola.
+
+**Causa:** cada click en GUARDAR ROI lanzaba un `_RebuildWorker(QThread)` nuevo para
+reconstruir holes.json y lo guardaba en `self._rebuild_worker`, PISANDO la referencia
+al worker anterior. Si el rebuild anterior seguia corriendo (tarda segundos), Python
+garbage-collecteaba ese QThread vivo y Qt aborta el proceso entero
+("QThread: Destroyed while thread is still running"). Agravante: el stream en vivo
+re-habilita el boton GUARDAR ROI en cada frame, asi que deshabilitar el boton no
+alcanzaba como proteccion.
+
+**Cambio (`src/ui/service.py`):**
+- `_rebuild_pattern_async()`: guard al inicio — si ya hay un worker corriendo, el
+  pedido queda en `self._rebuild_pending` (el ultimo pedido gana) y se muestra en el
+  status label; NO se crea un segundo QThread.
+- Nuevo `_on_rebuild_finished()`: conectado a `worker.finished` — libera la referencia
+  (`deleteLater`), y si quedo un pedido pendiente lo lanza recien ahi. Reemplaza el
+  viejo `worker.done.connect(lambda: worker.deleteLater())`.
+
+**Resultado:** clicks repetidos en GUARDAR ROI ya no pueden matar la app; cada ROI
+guardada termina con su patron reconstruido (el pendiente se procesa al terminar el
+anterior).
+
+**Verificado:** `compileall` OK; `pytest` 31/31.
+
+---
+
+#### Cambio 257 - Higiene de repo + tests 27/27 + comando cleanup-output
+
+**Pedido:** seguir con mejoras esteticas y de funcionalidad (continuacion del Cambio 256).
+
+**Cambios:**
+
+1. **Tests: de 25/27 a verde total.**
+   - `tests/test_scanner_controller.py`: `_FakeIO` ahora implementa `write_critical()`
+     (faltaba desde que `_cut_solenoid_critical` existe).
+   - `test_start_does_not_enter_running_when_solenoid_is_blocked` estaba obsoleto:
+     testeaba que start() abortara si el solenoide era rechazado, pero el diseno actual
+     (solenoides bloqueados por software / safe mode en IOMap) arranca igual e ignora
+     el rechazo. Renombrado a `test_start_enters_running_even_if_solenoid_is_blocked`
+     y actualizado al comportamiento vigente (RUNNING + luz verde).
+
+2. **`logs/defyvision.log` fuera de git** (`git rm --cached` + `logs/` en .gitignore).
+   Aparecia como "modified" en cada sesion y ensuciaba los commits.
+
+3. **Basura eliminada:** `prueba.txt`, `scripts/_tmp_analyze.py` (tenia SyntaxError,
+   ni compilaba), 28 `data/dbg_*.png` trackeados (+`data/dbg_*` al .gitignore),
+   `pyarmor.bug.log` local.
+
+4. **`.gitattributes` nuevo:** todo el codigo/config en LF, `.bat/.ps1` en CRLF,
+   binarios marcados. Elimina los warnings "LF will be replaced by CRLF" en cada
+   operacion git. El indice ya estaba 100% LF, asi que no hubo renormalizacion.
+
+5. **Nuevo comando `cleanup-output`** (`src/utils/cleanup.py` + subcomando en main.py):
+   `python -m src.main cleanup-output [--dir data/output] [--keep-days 30] [--max-gb 2] [--apply]`
+   - Poda entradas de primer nivel de data/output por antiguedad y por presupuesto
+     de disco (mas viejo primero), igual filosofia que la poda del EventRecorder.
+   - **Dry-run por defecto**: sin `--apply` solo informa. Hoy data/output tiene 1.22 GB
+     acumulados desde mayo sin ningun limite.
+   - Tests nuevos en `tests/test_cleanup.py` (4 casos: dry-run, antiguedad,
+     presupuesto oldest-first, keep_days=0 desactiva).
+
+**Verificado:** `pytest` 31/31 (27 previos + 4 nuevos), dry-run real sobre data/output OK.
+
+**Pendiente que requiere decision de Tadeo:** credenciales del modo servicio en texto
+plano en `config/app.yaml` commiteado al remoto — moverlas a archivo local no versionado
+o variable de entorno.
+
+---
+
 #### Cambio 256 - Estetica: divisores de comentario normalizados a 72 columnas en todo el repo
 
 **Pedido:** Tadeo pidio dejar el codigo mas estetico: habia lineas de division y

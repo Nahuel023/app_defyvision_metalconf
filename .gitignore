@@ -27,6 +27,10 @@ data/events/
 data/recordings/
 data/metrics/
 data/ok_buffer/
+data/dbg_*
+
+# Logs de runtime — no van a git
+logs/
 
 # PyInstaller output
 dist/

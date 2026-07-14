@@ -31,6 +31,11 @@ class _FakeIO:
         self.batches.append(list(batch))
         return True
 
+    def write_critical(self, signal: str, value: bool, *,
+                       retries: int = 5, retry_delay_s: float = 0.15,
+                       verify: bool = True) -> bool:
+        return self.write(signal, value)
+
 
 class _FakeCamera:
     def __init__(self) -> None:
@@ -79,7 +84,9 @@ def test_handle_license_failure_stops_running_scanner() -> None:
         controller.shutdown()
 
 
-def test_start_does_not_enter_running_when_solenoid_is_blocked(monkeypatch) -> None:
+def test_start_enters_running_even_if_solenoid_is_blocked(monkeypatch) -> None:
+    """El IOMap bloquea el solenoide en modo seguro, pero start() arranca igual:
+    la escritura se intenta y su rechazo no impide la sesión de inspección."""
     io = _FakeIO()
     io.block_solenoid_on = True
     camera = _FakeCamera()
@@ -87,12 +94,12 @@ def test_start_does_not_enter_running_when_solenoid_is_blocked(monkeypatch) -> N
     monkeypatch.setattr(controller, "_license_allows_operation", lambda: True)
 
     try:
-        assert controller.start() is False
-        assert controller.state == ScannerState.IDLE
+        assert controller.start() is True
+        assert controller.state == ScannerState.RUNNING
         assert ("scanner_1.solenoid", True) in io.writes
         assert io.batches[-1] == [
-            ("scanner_1.light_blue", True),
-            ("scanner_1.light_green", False),
+            ("scanner_1.light_blue", False),
+            ("scanner_1.light_green", True),
             ("scanner_1.light_yellow", False),
             ("scanner_1.light_red", False),
         ]

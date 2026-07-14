@@ -2145,8 +2145,22 @@ class RecordingTab(QWidget):
         self._rebuild_pattern_async(frame_copy, internal, scanner_id)
 
     def _rebuild_pattern_async(self, frame, model: str, scanner_id) -> None:
-        """Reconstruye holes.json en background usando el frame de calibración."""
+        """Reconstruye holes.json en background usando el frame de calibración.
+
+        Corre UN worker a la vez. Si ya hay una reconstrucción en curso, el
+        pedido queda pendiente y se ejecuta al terminar la actual (el último
+        pedido gana). Antes, cada click pisaba `self._rebuild_worker` y Python
+        podía destruir el QThread anterior todavía vivo — Qt aborta el proceso
+        entero en ese caso (crash al apretar GUARDAR ROI varias veces seguidas).
+        """
         import tempfile, os, cv2
+
+        if getattr(self, "_rebuild_worker", None) is not None:
+            self._rebuild_pending = (frame, model, scanner_id)
+            self._roi_status_lbl.setText(
+                "ROI guardado — reconstrucción anterior en curso; se aplicará al terminar…"
+            )
+            return
 
         class _RebuildWorker(QThread):
             done = pyqtSignal(str, bool)   # (mensaje, ok)
@@ -2188,9 +2202,20 @@ class RecordingTab(QWidget):
                 except Exception:
                     pass
         worker.done.connect(_on_done)
-        worker.done.connect(lambda *_: worker.deleteLater())
-        self._rebuild_worker = worker   # retener referencia
+        worker.finished.connect(self._on_rebuild_finished)
+        self._rebuild_worker = worker   # retener referencia mientras corre
         worker.start()
+
+    def _on_rebuild_finished(self) -> None:
+        """Libera el worker terminado y lanza el rebuild pendiente si lo hay."""
+        worker = getattr(self, "_rebuild_worker", None)
+        self._rebuild_worker = None
+        if worker is not None:
+            worker.deleteLater()
+        pending = getattr(self, "_rebuild_pending", None)
+        self._rebuild_pending = None
+        if pending is not None:
+            self._rebuild_pattern_async(*pending)
 
     def _on_rebuild_done(self, msg: str, ok: bool) -> None:
         color = "#22c55e" if ok else "#f87171"
