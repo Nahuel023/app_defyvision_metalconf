@@ -963,12 +963,14 @@ class MachineStopDialog(QDialog):
         )
         top_lay.addWidget(alarm_lbl)
 
+        # Placa oscura sólida: el fondo translúcido anterior se lavaba contra
+        # el degradé rojo y el texto quedaba poco legible.
         scanner_lbl = QLabel(self._scanner_label)
         scanner_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         scanner_lbl.setStyleSheet(
-            "color:#ffffff;font-size:42px;font-weight:900;"
-            "letter-spacing:2px;background:#ffffff12;"
-            "border:2px solid #fecaca;border-radius:14px;padding:14px 20px;"
+            "color:#ffffff;font-size:46px;font-weight:900;"
+            "letter-spacing:2px;background:#0b0f14;"
+            "border:3px solid #f87171;border-radius:14px;padding:14px 24px;"
         )
         top_lay.addWidget(scanner_lbl)
 

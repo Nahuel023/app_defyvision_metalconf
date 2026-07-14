@@ -48,6 +48,21 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-14 - Tadeo + Claude
 
+#### Cambio 260 - MachineStopDialog: banner de SCANNER legible
+
+**Pedido:** en la ventana de MACHINE FAULT, el banner que indica "SCANNER 1/2" se
+veia amarillento/lavado y con poco contraste entre letras y fondo.
+
+**Causa:** el label usaba fondo blanco translucido (`#ffffff12`) con borde rosa palido
+(`#fecaca`) sobre el degrade rojo del encabezado — el conjunto quedaba cremoso y el
+texto blanco perdia contraste.
+
+**Cambio (`src/ui/operator.py`, `MachineStopDialog._build_ui`):** placa oscura solida
+(`#0b0f14`), texto blanco 46px weight 900, borde rojo claro 3px (`#f87171`).
+Verificado renderizando el dialogo offscreen.
+
+---
+
 #### Cambio 259 - Fix crashes y trabas del visor de grabaciones y frames NOK
 
 **Pedido:** Tadeo reporto que (a) al abrir frames NOK la UI se traba bastante, y
