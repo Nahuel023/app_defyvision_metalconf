@@ -139,23 +139,28 @@ auto-clear normal -> reset -> IDLE; IDLE -> boton oculto. `pytest` 31/31.
 
 ---
 
-#### Cambio 265 - Micro-animaciones sutiles (fade-in de ventanas + pulso al presionar botones)
+#### Cambio 265 - Micro-animaciones sutiles (fade-in de ventanas + hover/press en botones)
 
 **Pedido:** hacer la UI mas estetica en general con micro-animaciones y un fade-in suave,
-sin transiciones raras.
+sin transiciones raras. Que los botones reaccionen tambien al pasar el mouse (hover).
 
 **Cambio (`src/ui/anim.py` nuevo + wiring):**
 - `fade_in(win)`: las ventanas grandes aparecen con un fundido de opacidad (windowOpacity
   0->1, ~170ms). Aplicado a operator, service y las 3 ventanas de datos (errores, metricas,
   tolerancias) justo despues de showMaximized().
-- `add_press_pulse`/`polish_buttons`: feedback tactil al presionar cualquier boton (pulso
-  de opacidad transitorio). El QGraphicsOpacityEffect se crea al presionar y se REMUEVE al
-  terminar -> costo cero en reposo, sin clipping ni cambios de layout. Aplicado a operator
-  y service (todos sus QPushButton). Todo envuelto en try/except: si falla, la UI sigue sin
-  animacion (nunca rompe el control de maquina).
+- `polish_buttons(root)`: instala en cada QPushButton un UNICO QGraphicsOpacityEffect
+  persistente animado en los tres estados: reposo 0.88 (apenas mate) -> hover 1.0 (se
+  ilumina) -> press 0.55 (dip y vuelve). Un solo efecto por boton evita el conflicto de
+  "un widget = un efecto grafico" entre hover y click. Sin recortes ni cambios de layout.
+  Idempotente (no re-instala si ya esta animado o usa otro efecto). Aplicado a operator y
+  service. Todo en try/except: si falla, la UI sigue sin animacion (nunca rompe el control).
 
-**Verificado:** headless (offscreen) fade_in deja windowOpacity=0 y anima; press dispara el
-efecto transitorio; `pytest` 31/31.
+**Nota:** version inicial hacia solo un pulso al presionar; a pedido de Tadeo se paso al
+modelo unificado con reaccion tambien en hover.
+
+**Verificado:** headless (offscreen) fade_in deja windowOpacity=0 y anima; el boton mide
+0.88 en reposo, 1.0 tras Enter, 0.88 tras Leave; doble polish no duplica el efecto;
+`pytest` 34/34.
 
 ---
 

@@ -6,21 +6,27 @@ UI de planta 24/7:
 
   - fade_in(win): la ventana aparece con un fundido suave de opacidad en vez
     de "aparecer de golpe". Se aplica a las ventanas grandes al abrir.
-  - add_press_pulse(btn): feedback tactil al presionar un boton (un breve
-    pulso de opacidad). El efecto grafico es TRANSITORIO: se crea al presionar
-    y se remueve al terminar, asi los botones en reposo no cargan ningun
-    efecto (costo cero cuando no se usan).
-  - polish_buttons(root): aplica add_press_pulse a todos los QPushButton de
-    una ventana de una sola llamada.
+  - polish_buttons(root): instala en cada QPushButton una animacion unificada
+    de opacidad (un UNICO QGraphicsOpacityEffect por boton) que maneja los
+    tres estados con transiciones suaves:
+        reposo  -> levemente mate (_REST)
+        hover   -> se ilumina      (_HOVER)
+        presion -> pulso hacia abajo y vuelve (_PRESS)
+    Sin recortes ni cambios de layout (la opacidad no dibuja fuera del rect).
 
 Todo esta envuelto en try/except: si algo falla, la UI sigue funcionando sin
 animacion (nunca debe romper el control de maquina).
 """
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation
+from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPropertyAnimation)
 from PyQt6.QtWidgets import QGraphicsOpacityEffect, QPushButton, QWidget
 
 _DEL_WHEN_STOPPED = QPropertyAnimation.DeletionPolicy.DeleteWhenStopped
+
+# Niveles de opacidad de los tres estados del boton.
+_REST  = 0.88   # reposo: apenas mate
+_HOVER = 1.0    # mouse encima: iluminado
+_PRESS = 0.55   # presionado: dip momentaneo
 
 
 def fade_in(win: QWidget, ms: int = 170) -> None:
@@ -42,47 +48,58 @@ def fade_in(win: QWidget, ms: int = 170) -> None:
             pass
 
 
-def _pulse(btn: QPushButton) -> None:
-    """Pulso de opacidad transitorio para feedback de presion."""
-    try:
-        if btn.graphicsEffect() is not None:
-            return  # ya hay un pulso corriendo (o el boton usa otro efecto)
-        eff = QGraphicsOpacityEffect(btn)
-        eff.setOpacity(1.0)
-        btn.setGraphicsEffect(eff)
+class _ButtonAnimator(QObject):
+    """Filtro de eventos que anima la opacidad de un boton en hover/press.
 
-        anim = QPropertyAnimation(eff, b"opacity", btn)
-        anim.setDuration(150)
-        anim.setKeyValueAt(0.0, 1.0)
-        anim.setKeyValueAt(0.4, 0.55)
-        anim.setKeyValueAt(1.0, 1.0)
-        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+    Usa un solo QGraphicsOpacityEffect persistente por boton (un widget solo
+    admite UN efecto grafico), de modo que hover y click conviven sin conflicto."""
 
-        def _cleanup() -> None:
-            try:
-                btn.setGraphicsEffect(None)
-            except Exception:
-                pass  # el boton pudo destruirse/ocultarse durante el pulso
+    def __init__(self, btn: QPushButton) -> None:
+        super().__init__(btn)
+        self._btn = btn
+        self._hovered = False
+        self._eff = QGraphicsOpacityEffect(btn)
+        self._eff.setOpacity(_REST)
+        btn.setGraphicsEffect(self._eff)
+        self._anim = QPropertyAnimation(self._eff, b"opacity", self)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        btn.installEventFilter(self)
 
-        anim.finished.connect(_cleanup)
-        anim.start(_DEL_WHEN_STOPPED)
-        btn._press_pulse_anim = anim
-    except Exception:
-        pass
+    def _to(self, value: float, ms: int = 130) -> None:
+        self._anim.stop()
+        self._anim.setDuration(ms)
+        self._anim.setStartValue(self._eff.opacity())
+        self._anim.setEndValue(value)
+        self._anim.start()
 
-
-def add_press_pulse(btn: QPushButton) -> None:
-    """Conecta el pulso de presion a un boton (se dispara en cada press)."""
-    try:
-        btn.pressed.connect(lambda b=btn: _pulse(b))
-    except Exception:
-        pass
+    def eventFilter(self, obj, ev):  # noqa: N802 (firma Qt)
+        try:
+            t = ev.type()
+            if t == QEvent.Type.Enter:
+                self._hovered = True
+                self._to(_HOVER)
+            elif t == QEvent.Type.Leave:
+                self._hovered = False
+                self._to(_REST)
+            elif t == QEvent.Type.MouseButtonPress:
+                self._to(_PRESS, 90)
+            elif t == QEvent.Type.MouseButtonRelease:
+                self._to(_HOVER if self._hovered else _REST, 150)
+        except Exception:
+            pass
+        return False  # nunca consumir el evento: el boton se comporta normal
 
 
 def polish_buttons(root: QWidget) -> None:
-    """Aplica el feedback de presion a todos los QPushButton descendientes."""
+    """Instala la animacion de hover/press en todos los QPushButton descendientes."""
     try:
         for btn in root.findChildren(QPushButton):
-            add_press_pulse(btn)
+            try:
+                if getattr(btn, "_has_anim", False) or btn.graphicsEffect() is not None:
+                    continue  # ya animado o usa otro efecto: no pisar
+                _ButtonAnimator(btn)
+                btn._has_anim = True
+            except Exception:
+                pass
     except Exception:
         pass
