@@ -274,17 +274,17 @@ class ScannerController:
             state = self._state
             mode  = self._mode
 
-            # FAULT siempre → STOPPED; AUTO RUNNING → STOPPED; MANUAL RUNNING → IDLE
-            if state == ScannerState.FAULT or mode == OperationMode.AUTO:
+            # FAULT/ERROR siempre → STOPPED; AUTO RUNNING → STOPPED; MANUAL RUNNING → IDLE
+            if state in (ScannerState.FAULT, ScannerState.ERROR) or mode == OperationMode.AUTO:
                 new_state = ScannerState.STOPPED
             else:
                 new_state = ScannerState.IDLE
 
             if new_state == ScannerState.STOPPED:
-                # Si ya venia de FAULT (racha NOK), es una parada por falla real.
-                # Si venia de RUNNING sin FAULT, fue un DETENER voluntario del
-                # operador sin ningun problema detectado.
-                self._stopped_by_fault = (state == ScannerState.FAULT)
+                # Si ya venia de FAULT (racha NOK) o ERROR (crash real), es una
+                # parada por falla real. Si venia de RUNNING sin FAULT/ERROR, fue
+                # un DETENER voluntario del operador sin ningun problema detectado.
+                self._stopped_by_fault = (state in (ScannerState.FAULT, ScannerState.ERROR))
 
             self._state = new_state
 

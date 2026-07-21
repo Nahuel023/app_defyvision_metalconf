@@ -890,7 +890,7 @@ class ScannerPanel(QWidget):
         else:
             self._reset_autohide_timer.stop()
         self.start_btn.setEnabled(state == ScannerState.IDLE)
-        self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
+        self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT, ScannerState.ERROR))
 
     def _auto_clear_stop(self) -> None:
         """A los 30s de una parada MANUAL/normal, devuelve el scanner a IDLE para
