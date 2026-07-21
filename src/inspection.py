@@ -10,7 +10,7 @@ import numpy as np
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern, infer_scanner_id
-from src.patterns.roi import apply_roi, load_roi, roi_path, ROI, RuntimeROIInfo, resolve_runtime_roi, load_roi_drift_state, save_roi_drift_state
+from src.patterns.roi import apply_roi, load_roi, save_roi, ROI, RuntimeROIInfo, resolve_runtime_roi, load_roi_drift_state, save_roi_drift_state
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator, draw_roi_health_indicator
 from src.pipeline.machine_stop import MachineStopDetector
@@ -1368,14 +1368,8 @@ def _roi_slow_ema_step(
     new_x = max(0, min(roi_info.frame_w - current_roi.w, current_roi.x + direction))
     new_roi = ROI(x=new_x, y=current_roi.y, w=current_roi.w, h=current_roi.h)
 
-    import json as _json
-    p = roi_path(model, scanner_id)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(
-            _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
-            encoding="utf-8",
-        )
+        save_roi(new_roi, model, scanner_id)
     except Exception as exc:
         logger.error("[%s] ROI slow EMA: error escribiendo roi.json: %s", scanner_id, exc)
         return
@@ -1564,15 +1558,8 @@ def _update_runtime_roi_drift(
 
     # Persistir en roi.json para que el próximo arranque parta de la posición corregida
     if model:
-        import json as _json
-        from src.patterns.roi import roi_path
-        p = roi_path(model, scanner_id)
         try:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(
-                _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
-                encoding="utf-8",
-            )
+            save_roi(new_roi, model, scanner_id)
             logger.info(
                 "[%s] ROI recenter persistido: x=%d w=%d (paso=%+.0fpx  cooldown=%df  modo=%s)",
                 scanner_id, new_roi.x, new_roi.w, state["last_step_px"], next_cooldown, recenter_mode,

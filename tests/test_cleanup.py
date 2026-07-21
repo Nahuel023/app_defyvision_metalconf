@@ -50,3 +50,20 @@ def test_keep_days_cero_desactiva_antiguedad(tmp_path: Path) -> None:
     report = prune_output(tmp_path, keep_days=0, max_gb=0, apply=True)
     assert (tmp_path / "viejo").exists()
     assert report.deleted == []
+
+
+def test_failed_delete_is_not_reported_as_freed(tmp_path: Path, monkeypatch) -> None:
+    import src.utils.cleanup as cleanup_module
+
+    entry = _make_entry(tmp_path, "bloqueado", 1000, age_days=90)
+    monkeypatch.setattr(
+        cleanup_module.shutil,
+        "rmtree",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("locked")),
+    )
+
+    report = prune_output(tmp_path, keep_days=30, max_gb=0, apply=True)
+
+    assert entry.exists()
+    assert report.deleted == []
+    assert report.freed_bytes == 0

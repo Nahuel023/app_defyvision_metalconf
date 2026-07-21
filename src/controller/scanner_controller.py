@@ -201,6 +201,12 @@ class ScannerController:
         if not self._license_allows_operation():
             logger.error(f"[{self._id}] inicio bloqueado por licencia invalida")
             return False
+        if not self._workers_ready_for_start():
+            logger.error(
+                "[%s] inicio bloqueado: todavia hay hilos de la sesion anterior activos",
+                self._id,
+            )
+            return False
         self._update_mode_from_plc()
         with self._lock:
             if self._state != ScannerState.IDLE:
@@ -307,6 +313,10 @@ class ScannerController:
 
     def shutdown(self) -> None:
         self.stop()
+        # stop() es no-op si ya estaba IDLE/STOPPED, pero puede quedar un hilo
+        # terminando despues de un timeout anterior. Shutdown siempre insiste.
+        self._stop_event.set()
+        self._join_threads()
         if self._recorder is not None:
             try:
                 self._recorder.close()
@@ -369,6 +379,9 @@ class ScannerController:
         """IDLE → RUNNING en modo AUTO sin requerir cámara. Solo para pruebas en servicio."""
         if not self._license_allows_operation():
             logger.error(f"[{self._id}] simulacion bloqueada por licencia invalida")
+            return False
+        if not self._workers_ready_for_start():
+            logger.error("[%s] simulacion bloqueada: hilos anteriores activos", self._id)
             return False
         with self._lock:
             if self._state != ScannerState.IDLE:
@@ -754,8 +767,7 @@ class ScannerController:
         Escribe roi.json y actualiza la sesión en memoria para que el análisis
         comience desde una posición ya calibrada.
         """
-        from src.patterns.roi import roi_path, load_roi, ROI
-        import json as _json
+        from src.patterns.roi import load_roi, save_roi, ROI
 
         tols = load_tolerances(model, scanner_id=self._id)
         if not tols.get("roi_precal_enabled", True):
@@ -847,13 +859,8 @@ class ScannerController:
                 break
 
             # Persistir en disco
-            p = roi_path(model, self._id)
             try:
-                p.parent.mkdir(parents=True, exist_ok=True)
-                p.write_text(
-                    _json.dumps({"x": new_roi.x, "y": new_roi.y, "w": new_roi.w, "h": new_roi.h}, indent=2),
-                    encoding="utf-8",
-                )
+                save_roi(new_roi, model, self._id)
             except Exception as exc:
                 logger.error("[%s] ROI pre-cal: error escribiendo roi.json: %s", self._id, exc)
                 break
@@ -1301,6 +1308,8 @@ class ScannerController:
         ])
 
     def _start_poller_thread(self) -> None:
+        if self._poller_thread is not None and self._poller_thread.is_alive():
+            raise RuntimeError(f"[{self._id}] poller ya activo")
         self._poller_thread = threading.Thread(
             target=self._poll_loop, daemon=True, name=f"{self._id}-poller"
         )
@@ -1308,18 +1317,48 @@ class ScannerController:
 
     def _start_all_threads(self) -> None:
         self._start_poller_thread()
+        if self._inspector_thread is not None and self._inspector_thread.is_alive():
+            self._stop_event.set()
+            raise RuntimeError(f"[{self._id}] inspector ya activo")
         self._inspector_thread = threading.Thread(
             target=self._continuous_loop, daemon=True, name=f"{self._id}-inspector"
         )
         self._inspector_thread.start()
 
     def _join_threads(self) -> None:
-        if self._poller_thread:
-            self._poller_thread.join(timeout=1.0)
-            self._poller_thread = None
-        if self._inspector_thread:
-            self._inspector_thread.join(timeout=5.0)
-            self._inspector_thread = None
+        current = threading.current_thread()
+        for attr, timeout in (("_poller_thread", 1.0), ("_inspector_thread", 5.0)):
+            thread = getattr(self, attr)
+            if thread is None:
+                continue
+            if thread is current:
+                logger.error("[%s] no se puede esperar al hilo actual %s", self._id, thread.name)
+                continue
+            thread.join(timeout=timeout)
+            if thread.is_alive():
+                # Conservar la referencia: start() debe bloquear una nueva
+                # sesion para evitar dos loops compartiendo el mismo stop_event.
+                logger.error(
+                    "[%s] hilo %s no termino tras %.1fs; se bloquea nuevo inicio",
+                    self._id,
+                    thread.name,
+                    timeout,
+                )
+            else:
+                setattr(self, attr, None)
+
+    def _workers_ready_for_start(self) -> bool:
+        """Limpia referencias terminadas y rechaza un RUN con hilos viejos vivos."""
+        ready = True
+        for attr in ("_poller_thread", "_inspector_thread"):
+            thread = getattr(self, attr)
+            if thread is None:
+                continue
+            if thread.is_alive():
+                ready = False
+            else:
+                setattr(self, attr, None)
+        return ready
 
     def _update_mode_from_plc(self) -> None:
         # Siempre leer la maneta física (para mostrar su estado real en la UI),

@@ -106,8 +106,17 @@ class Camera:
     def start(self) -> bool:
         with self._lifecycle_lock:
             if self._thread is not None and self._thread.is_alive():
-                self._running = True
-                return True
+                if self._running:
+                    return True
+                # stop() ya pidio terminar pero el backend sigue bloqueado. No
+                # volver a poner _running=True: existe una carrera donde el hilo
+                # viejo sale justo despues y start() retorna exito sin captura.
+                logger.error(
+                    "Camera %s: reinicio bloqueado; el hilo anterior aun no termino",
+                    self._source_label(),
+                )
+                return False
+            self._thread = None
             self._running = True
             self._thread = threading.Thread(
                 target=self._capture_loop,
@@ -155,13 +164,22 @@ class Camera:
             frame = self._frame.copy()
         return self._apply_zoom(frame)
 
+    def get_raw_frame(self) -> Optional[np.ndarray]:
+        """Devuelve el ultimo frame sin zoom, para diagnostico/anti-bleed."""
+        with self._lock:
+            return None if self._frame is None else self._frame.copy()
+
     def _apply_zoom(self, frame: np.ndarray) -> np.ndarray:
         """Aplica el zoom/pan digital configurado para esta camara."""
+        with self._lock:
+            zoom = self._settings.get("zoom", 100)
+            pan_x = self._settings.get("pan_x", 0)
+            pan_y = self._settings.get("pan_y", 0)
         return apply_digital_zoom(
             frame,
-            self._settings.get("zoom", 100),
-            self._settings.get("pan_x", 0),
-            self._settings.get("pan_y", 0),
+            zoom,
+            pan_x,
+            pan_y,
         )
 
     def set_zoom(self, value_pct: float) -> None:
@@ -178,15 +196,17 @@ class Camera:
     @property
     def zoom(self) -> float:
         """Zoom digital actual, en porcentaje (100 = sin zoom)."""
-        return float(self._settings.get("zoom", 100) or 100)
+        with self._lock:
+            return float(self._settings.get("zoom", 100) or 100)
 
     @property
     def pan(self) -> tuple[float, float]:
         """Desplazamiento actual del recorte (pan_x, pan_y), -100..100."""
-        return (
-            float(self._settings.get("pan_x", 0) or 0),
-            float(self._settings.get("pan_y", 0) or 0),
-        )
+        with self._lock:
+            return (
+                float(self._settings.get("pan_x", 0) or 0),
+                float(self._settings.get("pan_y", 0) or 0),
+            )
 
     @property
     def is_running(self) -> bool:
@@ -641,7 +661,20 @@ class Camera:
                 except Exception:
                     pass
             self._snapshot_conn = None
-            _raw_q.put(None)
+            # El queue puede estar lleno si stop() llega con decode atrasado.
+            # Liberar un slot evita bloquear para siempre intentando insertar
+            # el sentinel durante el cierre.
+            try:
+                _raw_q.put_nowait(None)
+            except queue.Full:
+                try:
+                    _raw_q.get_nowait()
+                except queue.Empty:
+                    pass
+                try:
+                    _raw_q.put_nowait(None)
+                except queue.Full:
+                    pass
             dec_thread.join(timeout=1.0)
 
     def _sleep_interruptible(self, seconds: float) -> None:

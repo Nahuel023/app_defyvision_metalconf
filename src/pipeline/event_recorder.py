@@ -19,6 +19,8 @@ from typing import Optional
 import cv2
 import numpy as np
 
+from src.utils.atomic_write import atomic_write_json
+
 logger = logging.getLogger(__name__)
 
 
@@ -205,6 +207,12 @@ class EventRecorder:
             )
 
     def close(self) -> None:
+        with self._lock:
+            finalize_dir = self._post_dir
+            self._post_dir = None
+            self._post_idx = 0
+        if finalize_dir is not None:
+            self._enqueue_task("finalize", finalize_dir)
         self._worker_stop.set()
         try:
             self._task_q.put_nowait(None)
@@ -263,10 +271,7 @@ class EventRecorder:
                 "post_frames_count": 0,
                 "total_bytes": total_bytes,
             }
-            (event_dir / "manifest.json").write_text(
-                json.dumps(manifest, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
+            atomic_write_json(event_dir / "manifest.json", manifest, ensure_ascii=False)
             logger.info(
                 f"[{self._id}] pre-evento guardado: {event_dir.name} "
                 f"({len(frames)} frames, {total_bytes // 1024} KB)"
@@ -289,16 +294,17 @@ class EventRecorder:
             if not manifest_path.exists():
                 return
             m = json.loads(manifest_path.read_text(encoding="utf-8"))
-            post_files = sorted(event_dir.glob("post_*.jpg"))
-            post_bytes = sum(f.stat().st_size for f in post_files)
-            m["post_frames_count"] = len(post_files)
-            m["total_bytes"] = m.get("total_bytes", 0) + post_bytes
-            manifest_path.write_text(
-                json.dumps(m, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            all_post_files = sorted(event_dir.glob("post_*.jpg"))
+            raw_post_files = [f for f in all_post_files if not f.stem.endswith("_overlay")]
+            post_bytes = sum(f.stat().st_size for f in all_post_files)
+            pre_bytes = sum(f.stat().st_size for f in event_dir.glob("frame_*.jpg"))
+            m["post_frames_count"] = len(raw_post_files)
+            # Recalcular, no acumular: finalize puede repetirse durante un cierre.
+            m["total_bytes"] = pre_bytes + post_bytes
+            atomic_write_json(manifest_path, m, ensure_ascii=False)
             logger.info(
                 f"[{self._id}] post-evento finalizado: {event_dir.name} "
-                f"(+{len(post_files)} frames post, {post_bytes // 1024} KB)"
+                f"(+{len(raw_post_files)} frames post, {post_bytes // 1024} KB)"
             )
         except Exception as exc:
             logger.error(f"[{self._id}] error actualizando manifest post: {exc}")

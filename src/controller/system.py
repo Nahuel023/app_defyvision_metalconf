@@ -6,6 +6,7 @@ definido en config/io_map.yaml. La conexión Modbus es compartida.
 """
 
 import logging
+import threading
 from pathlib import Path
 from typing import Callable
 
@@ -38,6 +39,8 @@ class InspectionSystem:
                          disable_outputs=disable_plc_outputs)
         self._cameras: dict[str, Camera] = {}
         self._scanners: dict[str, ScannerController] = {}
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_started = False
 
         for scanner_id in self._io.scanner_ids():
             cfg = self._io.scanner_config(scanner_id)
@@ -79,18 +82,46 @@ class InspectionSystem:
 
     def shutdown(self) -> None:
         """Detiene todos los scanners, cámaras, recorder y cierra el PLC."""
-        self._recorder.stop()
+        with self._shutdown_lock:
+            if self._shutdown_started:
+                return
+            self._shutdown_started = True
+
+        try:
+            self._recorder.stop()
+        except Exception as exc:
+            logger.error("Error deteniendo MetricsRecorder: %s", exc)
         for scanner in self._scanners.values():
-            scanner.shutdown()
+            try:
+                scanner.shutdown()
+            except Exception as exc:
+                logger.error("Error deteniendo scanner: %s", exc)
         # Apagar todas las salidas PLC incondicionalmente (por si el scanner
         # quedó en IDLE/MANUAL y no apagó las luces en stop())
         for sid in self._scanners:
-            for sig in ("solenoid", "backlight",
-                        "light_blue", "light_green", "light_yellow", "light_red"):
-                self._io.write(f"{sid}.{sig}", False)
+            try:
+                # El solenoide es critico: insistir y verificar antes de desconectar.
+                self._io.write_critical(
+                    f"{sid}.solenoid", False, retries=5, retry_delay_s=0.15, verify=True
+                )
+                self._io.write_batch([
+                    (f"{sid}.backlight", False),
+                    (f"{sid}.light_blue", False),
+                    (f"{sid}.light_green", False),
+                    (f"{sid}.light_yellow", False),
+                    (f"{sid}.light_red", False),
+                ])
+            except Exception as exc:
+                logger.error("[%s] error apagando salidas durante shutdown: %s", sid, exc)
         for camera in self._cameras.values():
-            camera.stop()
-        self._client.disconnect()
+            try:
+                camera.stop()
+            except Exception as exc:
+                logger.error("Error deteniendo camara: %s", exc)
+        try:
+            self._client.disconnect()
+        except Exception as exc:
+            logger.error("Error desconectando PLC: %s", exc)
         logger.info("Sistema detenido")
 
     # ------------------------------------------------------------------
@@ -148,7 +179,9 @@ class InspectionSystem:
             for sid, cam in cameras.items():
                 if sid == scanner_id:
                     continue
-                other = cam.get_frame()
+                # Comparar ambos feeds CRUDOS. get_frame() aplica zoom/pan y
+                # podia ocultar que dos indices DSHOW apuntaban a la misma camara.
+                other = cam.get_raw_frame()
                 if other is None or other.shape != frame.shape:
                     continue
                 # Sample the center 200×200 patch for speed (avoid full-frame diff)

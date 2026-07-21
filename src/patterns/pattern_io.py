@@ -7,6 +7,8 @@ from typing import List, Tuple, Optional
 
 import yaml
 
+from src.utils.atomic_write import atomic_write_json
+
 _log = logging.getLogger(__name__)
 
 
@@ -109,7 +111,7 @@ def save_pattern(p: Pattern, path: Path) -> None:
         if p.stagger_x_odd is not None and p.stagger_x_odd != 0.0:
             grid["stagger_x_odd"] = round(float(p.stagger_x_odd), 3)
         payload["grid"] = grid
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    atomic_write_json(path, payload)
 
 
 def load_pattern(path: Path) -> Pattern:
@@ -118,6 +120,14 @@ def load_pattern(path: Path) -> Pattern:
     w, h = payload["image_size"]
     pts = [(float(d["x"]), float(d["y"])) for d in payload["points"]]
     radii = payload.get("radii", None)
+    if int(w) <= 0 or int(h) <= 0:
+        raise ValueError(f"Patron invalido en {path}: image_size debe ser positivo")
+    if not pts:
+        raise ValueError(f"Patron invalido en {path}: no contiene puntos")
+    if radii is not None and len(radii) != len(pts):
+        raise ValueError(
+            f"Patron invalido en {path}: radii={len(radii)} != points={len(pts)}"
+        )
 
     grid_data = payload.get("grid")
     if grid_data:
@@ -127,6 +137,12 @@ def load_pattern(path: Path) -> Pattern:
         phase_y      = float(grid_data["phase_y"])
         cells        = [(int(c[0]), int(c[1])) for c in grid_data["cells"]]
         stagger_x_odd = float(grid_data["stagger_x_odd"]) if "stagger_x_odd" in grid_data else None
+        if dx <= 0.0 or dy <= 0.0:
+            raise ValueError(f"Patron invalido en {path}: dx/dy deben ser positivos")
+        if len(cells) != len(pts):
+            raise ValueError(
+                f"Patron invalido en {path}: cells={len(cells)} != points={len(pts)}"
+            )
     else:
         dx = dy = phase_x = phase_y = None
         cells = None

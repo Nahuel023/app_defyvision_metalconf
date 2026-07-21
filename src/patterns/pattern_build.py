@@ -3,7 +3,7 @@ from pathlib import Path
 from src.io.load_images import load_bgr_image
 from src.patterns.pattern_io import Pattern, save_pattern, pattern_path, find_pattern_path
 from src.pipeline.grid_fitting import estimate_spacing, estimate_phase, assign_cells
-from src.patterns.roi import load_roi, apply_roi
+from src.patterns.roi import ROI, load_roi, apply_roi
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.detect_holes import detect_holes_from_mask
 from src.pipeline.preprocess import preprocess_for_holes
@@ -17,6 +17,7 @@ def build_pattern_from_image(
     threshold: int | None = None,
     min_area: float | None = None,
     circularity_min: float | None = None,
+    roi_override: ROI | None = None,
 ) -> Path:
     tolerances = load_tolerances(model, scanner_id=scanner_id)
     threshold = int(tolerances["threshold"] if threshold is None else threshold)
@@ -36,7 +37,10 @@ def build_pattern_from_image(
         align_res = EdgeAlignResult(angle_deg=0.0, used_lines=0)
     print(f"[align-pattern] angle_deg={align_res.angle_deg:.2f} lines={align_res.used_lines}")
 
-    roi = load_roi(model, scanner_id)
+    # La UI pasa la ROI solicitada explicitamente para que una escritura
+    # concurrente (p.ej. auto-recenter) no haga construir un patron con otra
+    # geometria distinta de la que el operador acaba de guardar.
+    roi = roi_override if roi_override is not None else load_roi(model, scanner_id)
     if roi is not None:
         img = apply_roi(img_aligned, roi)
     else:

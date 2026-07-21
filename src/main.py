@@ -97,10 +97,8 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
         print("[define-roi] cancelado o ROI vacío")
         return 1
 
-    from src.patterns.roi import roi_path
-    out_path = roi_path(args.model, args.scanner)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"x": x, "y": y, "w": w, "h": h}), encoding="utf-8")
+    from src.patterns.roi import ROI, save_roi
+    out_path = save_roi(ROI(x=x, y=y, w=w, h=h), args.model, args.scanner)
     print(f"[define-roi] ROI guardado: x={x} y={y} w={w} h={h} → {out_path}")
     return 0
 
@@ -108,10 +106,8 @@ def cmd_define_roi(args: argparse.Namespace) -> int:
 def cmd_detect_roi(args: argparse.Namespace) -> int:
     """Detecta automáticamente la ROI de la chapa a partir de imágenes con backlight."""
     import cv2
-    import json
-
     from src.inspection import iter_image_files
-    from src.patterns.roi import detect_roi_from_images, roi_path
+    from src.patterns.roi import detect_roi_from_images, save_roi
 
     src: Path = args.img
     if not src.exists():
@@ -197,12 +193,7 @@ def cmd_detect_roi(args: argparse.Namespace) -> int:
         print("[detect-roi] --dry-run: ROI NO guardada")
         return 0
 
-    out_path = roi_path(args.model, args.scanner)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(
-        json.dumps({"x": roi.x, "y": roi.y, "w": roi.w, "h": roi.h}),
-        encoding="utf-8",
-    )
+    out_path = save_roi(roi, args.model, args.scanner)
     print(f"[detect-roi] guardado: {out_path}")
     return 0
 

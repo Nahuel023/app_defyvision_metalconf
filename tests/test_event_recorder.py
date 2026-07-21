@@ -246,3 +246,24 @@ class TestTruncation:
         m = json.loads((event_dirs[0] / "manifest.json").read_text(encoding="utf-8"))
         # Solo caben 2 frames de 50 KB en 150 KB → los más recientes (índices 3,4)
         assert m["pre_frames_count"] <= 3
+
+
+def test_finalize_counts_raw_post_frames_once_and_is_idempotent(tmp_path: Path) -> None:
+    event_dir = tmp_path / "event"
+    event_dir.mkdir()
+    (event_dir / "frame_0000.jpg").write_bytes(b"pre")
+    (event_dir / "post_0000.jpg").write_bytes(b"post")
+    (event_dir / "post_0000_overlay.jpg").write_bytes(b"overlay")
+    (event_dir / "manifest.json").write_text(
+        json.dumps({"post_frames_count": 0, "total_bytes": 999}),
+        encoding="utf-8",
+    )
+    recorder = EventRecorder.__new__(EventRecorder)
+    recorder._id = "scanner_1"
+
+    recorder._finalize_manifest(event_dir)
+    recorder._finalize_manifest(event_dir)
+
+    manifest = json.loads((event_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["post_frames_count"] == 1
+    assert manifest["total_bytes"] == len(b"pre") + len(b"post") + len(b"overlay")

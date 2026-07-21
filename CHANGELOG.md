@@ -71,6 +71,65 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 274 - Auditoria integral de bugs y robustez de produccion
+
+**Pedido:** revisar todo el codigo en busca de bugs y riesgos de robustez, corregir los
+problemas concretos y agregar defensas para dejar el sistema estable en produccion.
+
+**Bugs y riesgos corregidos:**
+- **Hilos duplicados de scanner:** si poller/inspector no terminaban dentro del timeout,
+  se borraba igualmente su referencia. Un RUN posterior podia limpiar el mismo
+  `stop_event` y dejar dos loops usando camara/PLC. Ahora se conserva la referencia,
+  se bloquea el nuevo inicio mientras el hilo viejo siga vivo y `shutdown()` insiste
+  aun cuando el scanner ya figure IDLE/STOPPED.
+- **Carrera al reiniciar camara:** `Camera.start()` podia volver a poner `_running=True`
+  sobre un hilo que estaba terminando y retornar exito justo antes de que ese hilo
+  saliera, dejando camara activa sin captura. El reinicio ahora se rechaza hasta que el
+  hilo anterior termine realmente. El cierre del decoder snapshot tampoco puede quedar
+  bloqueado insertando el sentinel en una cola llena.
+- **Anti-bleed con zoom:** la validacion comparaba el frame crudo de una camara contra el
+  frame ya zoomeado de la otra, ocultando feeds DSHOW duplicados. Se agrego
+  `get_raw_frame()` y la comparacion ahora es crudo contra crudo.
+- **Archivos truncados por corte/fallo de disco:** nuevo helper de escritura atomica
+  (temporal en el mismo directorio + `fsync` + `os.replace`). Se aplica a ROI, patron,
+  estado EMA, tolerancias, overrides por scanner, configuracion/perfiles de camara y
+  manifests de eventos. Ante un fallo, el archivo anterior queda intacto y el temporal
+  se limpia.
+- **ROI nueva con patron viejo:** las dos pantallas de guardado manual construyen el
+  patron usando explicitamente la ROI solicitada (no una ROI que pueda cambiar durante
+  el worker). Si el rebuild falla, restauran la ROI anterior; solo recargan el analisis
+  vivo tras exito. La ROI manual se confirma nuevamente al finalizar para ganar frente
+  a una escritura concurrente del auto-recenter.
+- **Calibraciones corruptas silenciosas:** `ROI` rechaza coordenadas negativas y tamanos
+  nulos; `load_roi` registra corrupcion. `load_pattern` valida dimensiones, puntos,
+  radios, spacing y cantidad de celdas antes de permitir una sesion.
+- **Shutdown doble:** OperatorWindow apagaba el sistema y `cmd_run` repetia el shutdown.
+  El cierre de `InspectionSystem` ahora es idempotente y tolera fallos parciales sin
+  omitir el resto de recursos. El solenoide se corta con reintentos y lectura de
+  verificacion antes de desconectar el PLC; luces/backlight se apagan en batch.
+- **Batch PLC parcialmente bloqueado:** `IOMap.write_batch()` podia devolver True aunque
+  safe-mode hubiera bloqueado una de las senales. Ahora informa False si cualquier
+  salida solicitada fue rechazada.
+- **Manifest de evidencia incorrecto:** los overlays post-evento contaban como frames
+  adicionales y finalizar dos veces duplicaba bytes. Ahora cuenta solo frames crudos,
+  recalcula bytes idempotentemente y finaliza tambien durante `close()`.
+- **Poda de disco:** una eliminacion fallida se contabilizaba como espacio liberado y
+  alteraba incorrectamente el presupuesto restante. Ahora solo descuenta borrados
+  realmente exitosos.
+
+**Validacion:**
+- `compileall` completo: OK.
+- Configuracion productiva (`scripts/verify_config.py`): OK.
+- Suite ampliada de 38 a **52 tests**, todos OK. Nuevas regresiones cubren atomicidad,
+  lifecycle de camara/scanner, safe-mode parcial, validacion de patrones/ROI, shutdown
+  idempotente, manifest de eventos y fallos de poda.
+- Lote real OK scanner 1 microperforado: pipeline de produccion por movimiento
+  **42/42 raw OK, 42/42 temporal OK, 0 NOK, 0 machine-stop, 0 alignment failures**.
+
+**Limite de la auditoria:** PLC, solenoides y camaras fisicas no pueden simularse por
+completo con tests locales; queda recomendada una prueba de humo en planta de
+INICIAR/DETENER/RESET, desconexion/reconexion de cada camara y corte de PLC.
+
 #### Cambio 273 - RUN espera movimiento real antes del warmup de ROI
 
 **Pedido:** contemplar que, despues de pulsar RUN, la cinta o el patron puede tardar

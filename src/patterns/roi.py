@@ -6,6 +6,7 @@ from typing import Optional
 
 import numpy as np
 from src.patterns.pattern_io import infer_scanner_id
+from src.utils.atomic_write import atomic_write_json
 
 _log = logging.getLogger(__name__)
 
@@ -16,6 +17,12 @@ class ROI:
     y: int
     w: int
     h: int
+
+    def __post_init__(self) -> None:
+        if self.x < 0 or self.y < 0 or self.w <= 0 or self.h <= 0:
+            raise ValueError(
+                f"ROI invalida: x={self.x}, y={self.y}, w={self.w}, h={self.h}"
+            )
 
 
 @dataclass(frozen=True)
@@ -55,9 +62,20 @@ def load_roi(model: str, scanner_id: str | None = None) -> Optional[ROI]:
         try:
             payload = json.loads(p.read_text(encoding="utf-8"))
             return ROI(int(payload["x"]), int(payload["y"]), int(payload["w"]), int(payload["h"]))
-        except Exception:
+        except Exception as exc:
+            _log.error("ROI invalida o corrupta en %s: %s", p, exc)
             continue
     return None
+
+
+def save_roi(roi: ROI, model: str, scanner_id: str | None = None) -> Path:
+    """Persiste una ROI de forma atomica y devuelve su ruta canonica."""
+    p = roi_path(model, scanner_id)
+    atomic_write_json(
+        p,
+        {"x": int(roi.x), "y": int(roi.y), "w": int(roi.w), "h": int(roi.h)},
+    )
+    return p
 
 
 def detect_roi_from_images(
@@ -165,8 +183,7 @@ def load_roi_drift_state(model: str, scanner_id: str | None = None) -> dict:
 def save_roi_drift_state(state: dict, model: str, scanner_id: str | None = None) -> None:
     p = roi_drift_state_path(model, scanner_id)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
+        atomic_write_json(p, state, ensure_ascii=False)
     except Exception as exc:
         _log.warning("No se pudo guardar estado EMA ROI (%s/%s): %s", scanner_id, model, exc)
 

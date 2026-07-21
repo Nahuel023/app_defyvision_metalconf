@@ -557,28 +557,35 @@ class _RoiPanel(QWidget):
             QMessageBox.warning(self, "Sin modelo", "No hay modelo configurado para este scanner.")
             return
 
-        from src.patterns.roi import roi_path
-        path = roi_path(model, sid)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2),
-            encoding="utf-8",
-        )
+        from src.patterns.roi import ROI, load_roi, save_roi
+        previous_roi = load_roi(model, sid)
+        requested_roi = ROI(x=lx, y=0, w=rx - lx, h=H)
+        save_roi(requested_roi, model, sid)
         self._save_btn.setEnabled(False)
         self._status_lbl.setText("Área guardada — recalculando…")
         self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
         self._refresh_roi_label()
-        self._rebuild_pattern_async(self._roi_frame.copy(), model, sid)
+        self._rebuild_pattern_async(
+            self._roi_frame.copy(), model, sid, requested_roi, previous_roi
+        )
 
-    def _rebuild_pattern_async(self, frame: np.ndarray, model: str, scanner_id: str) -> None:
+    def _rebuild_pattern_async(
+        self,
+        frame: np.ndarray,
+        model: str,
+        scanner_id: str,
+        requested_roi,
+        previous_roi,
+    ) -> None:
         class _Worker(QThread):
             done = pyqtSignal(str, bool)
 
-            def __init__(self, frame: np.ndarray, model: str, scanner_id: str) -> None:
+            def __init__(self, frame: np.ndarray, model: str, scanner_id: str, roi) -> None:
                 super().__init__()
                 self._frame      = frame
                 self._model      = model
                 self._scanner_id = scanner_id
+                self._roi        = roi
 
             def run(self) -> None:
                 tmp = None
@@ -588,7 +595,10 @@ class _RoiPanel(QWidget):
                     cv2.imwrite(tmp, self._frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
                     from src.patterns.pattern_build import build_pattern_from_image
                     out = build_pattern_from_image(
-                        self._model, Path(tmp), scanner_id=self._scanner_id
+                        self._model,
+                        Path(tmp),
+                        scanner_id=self._scanner_id,
+                        roi_override=self._roi,
                     )
                     self.done.emit(f"ROI y patron guardados → {out.name}", True)
                 except Exception as exc:
@@ -598,9 +608,30 @@ class _RoiPanel(QWidget):
                         os.unlink(tmp)
 
         _sid = scanner_id
-        worker = _Worker(frame, model, scanner_id)
+        worker = _Worker(frame, model, scanner_id, requested_roi)
 
         def _on_done(msg: str, ok: bool) -> None:
+            rebuild_ok = ok
+            if ok:
+                try:
+                    # El auto-recenter pudo escribir durante el worker. La ROI
+                    # manual debe ganar y coincidir con built_with_roi del patron.
+                    from src.patterns.roi import save_roi
+                    save_roi(requested_roi, model, _sid)
+                except Exception as exc:
+                    ok = False
+                    msg = f"Patron generado pero no se pudo confirmar ROI: {exc}"
+            if not ok and not rebuild_ok:
+                try:
+                    from src.patterns.roi import roi_path, save_roi
+                    if previous_roi is None:
+                        roi_path(model, _sid).unlink(missing_ok=True)
+                    else:
+                        save_roi(previous_roi, model, _sid)
+                    msg += " · ROI anterior restaurada"
+                    self._refresh_roi_label()
+                except Exception as exc:
+                    msg += f" · ERROR restaurando ROI: {exc}"
             color = "#22c55e" if ok else "#f87171"
             if ok and _sid:
                 try:

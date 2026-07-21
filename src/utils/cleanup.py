@@ -72,7 +72,7 @@ def prune_output(
         report.scanned += 1
         report.total_bytes += size
 
-    def _delete(entry: Path, size: int) -> None:
+    def _delete(entry: Path, size: int) -> bool:
         if apply:
             try:
                 if entry.is_dir():
@@ -81,15 +81,17 @@ def prune_output(
                     entry.unlink()
             except OSError as exc:
                 logger.error("cleanup: no se pudo borrar %s: %s", entry, exc)
-                return
+                return False
         report.deleted.append((entry, size))
         report.freed_bytes += size
+        return True
 
     # Regla 1: antigüedad
     survivors: list[tuple[Path, int, float]] = []
     for entry, size, newest in entries:
         if keep_days > 0 and (now - newest) > keep_days * 86400:
-            _delete(entry, size)
+            if not _delete(entry, size):
+                survivors.append((entry, size, newest))
         else:
             survivors.append((entry, size, newest))
 
@@ -100,7 +102,7 @@ def prune_output(
         for entry, size, _ in sorted(survivors, key=lambda t: t[2]):
             if remaining <= budget:
                 break
-            _delete(entry, size)
-            remaining -= size
+            if _delete(entry, size):
+                remaining -= size
 
     return report

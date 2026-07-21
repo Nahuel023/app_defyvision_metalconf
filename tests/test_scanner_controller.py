@@ -48,6 +48,19 @@ class _FakeCamera:
         return True
 
 
+class _StuckThread:
+    name = "stuck-worker"
+
+    def __init__(self) -> None:
+        self.join_calls = 0
+
+    def is_alive(self) -> bool:
+        return True
+
+    def join(self, timeout=None) -> None:
+        self.join_calls += 1
+
+
 def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
     io = _FakeIO()
     camera = _FakeCamera()
@@ -128,4 +141,23 @@ def test_start_enters_running_even_if_solenoid_is_blocked(monkeypatch) -> None:
             ("scanner_1.light_red", False),
         ]
     finally:
+        controller.shutdown()
+
+
+def test_start_is_blocked_while_previous_worker_is_still_alive(monkeypatch) -> None:
+    io = _FakeIO()
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    stuck = _StuckThread()
+    controller._poller_thread = stuck
+    monkeypatch.setattr(controller, "_license_allows_operation", lambda: True)
+
+    try:
+        assert controller.start() is False
+        assert controller.state == ScannerState.IDLE
+        assert camera.start_calls == 0
+        controller._join_threads()
+        assert controller._poller_thread is stuck
+    finally:
+        controller._poller_thread = None
         controller.shutdown()

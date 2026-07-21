@@ -78,12 +78,12 @@ class IOMap:
         addrs = [a for a, _ in resolved]
         if addrs == list(range(addrs[0], addrs[0] + len(addrs))):
             values = [v for _, v in resolved]
-            return self._client.write_coils_batch(addrs[0], values)
+            return self._client.write_coils_batch(addrs[0], values) and not any_blocked
         # Fallback: individuales
         ok = True
         for addr, val in resolved:
             ok &= self._client.write_coil(addr, val)
-        return ok
+        return ok and not any_blocked
 
     def write(self, signal: str, value: bool) -> bool:
         """

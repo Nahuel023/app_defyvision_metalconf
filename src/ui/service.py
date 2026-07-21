@@ -2148,20 +2148,24 @@ class RecordingTab(QWidget):
         scanner_id = self._roi_scanner_combo.currentText() or None
         model_disp = self._model_combo.currentText()
         from src.utils.model_names import to_internal as _to_int
-        from src.patterns.roi import roi_path
-        import json
+        from src.patterns.roi import ROI, load_roi, save_roi
         internal = _to_int(model_disp)
-        path = roi_path(internal, scanner_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2), encoding="utf-8")
+        previous_roi = load_roi(internal, scanner_id)
+        requested_roi = ROI(x=lx, y=0, w=rx - lx, h=H)
+        save_roi(requested_roi, internal, scanner_id)
+        self._btn_roi_save.setEnabled(False)
         self._roi_status_lbl.setText("ROI guardado — reconstruyendo patrón…")
         self._refresh_current_roi_label()
 
         # Reconstruir patrón automáticamente con el frame actual de calibración
         frame_copy = self._roi_frame.copy()
-        self._rebuild_pattern_async(frame_copy, internal, scanner_id)
+        self._rebuild_pattern_async(
+            frame_copy, internal, scanner_id, requested_roi, previous_roi
+        )
 
-    def _rebuild_pattern_async(self, frame, model: str, scanner_id) -> None:
+    def _rebuild_pattern_async(
+        self, frame, model: str, scanner_id, requested_roi, previous_roi
+    ) -> None:
         """Reconstruye holes.json en background usando el frame de calibración.
 
         Corre UN worker a la vez. Si ya hay una reconstrucción en curso, el
@@ -2173,7 +2177,9 @@ class RecordingTab(QWidget):
         import tempfile, os, cv2
 
         if getattr(self, "_rebuild_worker", None) is not None:
-            self._rebuild_pending = (frame, model, scanner_id)
+            self._rebuild_pending = (
+                frame, model, scanner_id, requested_roi, previous_roi
+            )
             self._roi_status_lbl.setText(
                 "ROI guardado — reconstrucción anterior en curso; se aplicará al terminar…"
             )
@@ -2182,11 +2188,12 @@ class RecordingTab(QWidget):
         class _RebuildWorker(QThread):
             done = pyqtSignal(str, bool)   # (mensaje, ok)
 
-            def __init__(self, frame, model, scanner_id):
+            def __init__(self, frame, model, scanner_id, roi):
                 super().__init__()
                 self._frame      = frame
                 self._model      = model
                 self._scanner_id = scanner_id
+                self._roi        = roi
 
             def run(self):
                 tmp = None
@@ -2199,6 +2206,7 @@ class RecordingTab(QWidget):
                         self._model,
                         Path(tmp),
                         scanner_id=self._scanner_id,
+                        roi_override=self._roi,
                     )
                     self.done.emit(f"ROI y patrón guardados → {out.name}", True)
                 except Exception as exc:
@@ -2207,10 +2215,29 @@ class RecordingTab(QWidget):
                     if tmp and os.path.exists(tmp):
                         os.unlink(tmp)
 
-        worker = _RebuildWorker(frame, model, scanner_id)
+        worker = _RebuildWorker(frame, model, scanner_id, requested_roi)
         # Capturar scanner_id en closure para invalidar cache al terminar
         _sid = scanner_id
         def _on_done(msg: str, ok: bool) -> None:
+            rebuild_ok = ok
+            if ok:
+                try:
+                    from src.patterns.roi import save_roi
+                    save_roi(requested_roi, model, _sid)
+                except Exception as exc:
+                    ok = False
+                    msg = f"Patron generado pero no se pudo confirmar ROI: {exc}"
+            if not ok and not rebuild_ok:
+                try:
+                    from src.patterns.roi import roi_path, save_roi
+                    if previous_roi is None:
+                        roi_path(model, _sid).unlink(missing_ok=True)
+                    else:
+                        save_roi(previous_roi, model, _sid)
+                    msg += " · ROI anterior restaurada"
+                    self._refresh_current_roi_label()
+                except Exception as exc:
+                    msg += f" · ERROR restaurando ROI: {exc}"
             if hasattr(self, "_roi_status_lbl"):
                 self._on_rebuild_done(msg, ok)
             if ok and _sid and hasattr(self, "_system"):
@@ -2227,6 +2254,8 @@ class RecordingTab(QWidget):
         """Libera el worker terminado y lanza el rebuild pendiente si lo hay."""
         worker = getattr(self, "_rebuild_worker", None)
         self._rebuild_worker = None
+        if hasattr(self, "_btn_roi_save"):
+            self._btn_roi_save.setEnabled(self._roi_frame is not None)
         if worker is not None:
             worker.deleteLater()
         pending = getattr(self, "_rebuild_pending", None)

@@ -4,6 +4,8 @@ from typing import Any
 
 import yaml
 
+from src.utils.atomic_write import atomic_write_text
+
 
 DEFAULT_TOLERANCES: dict[str, Any] = {
     "threshold": 120,
@@ -266,9 +268,10 @@ def save_model_overrides(model: str, updates: dict[str, Any]) -> None:
         **{k: v for k, v in updates.items() if v is not None},
     )
 
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    with cfg_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+    atomic_write_text(
+        cfg_path,
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+    )
     _invalidate_tolerances_cache()
 
 
@@ -309,7 +312,7 @@ def save_scanner_overrides(scanner_id: str, updates: dict[str, Any]) -> None:
             continue
         lines = _set_io_map_inspection_param(lines, scanner_id, key, value)
 
-    path.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(path, "".join(lines))
     _invalidate_tolerances_cache()
 
 
@@ -357,7 +360,5 @@ def save_tolerances(data: dict[str, Any]) -> None:
     cfg.update({k: v for k, v in data.items() if v is not None})
 
     cfg_path = tolerances_path()
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    with cfg_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+    atomic_write_text(cfg_path, yaml.safe_dump(cfg, sort_keys=False))
     _invalidate_tolerances_cache()
