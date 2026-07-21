@@ -45,6 +45,36 @@ _PROP_MAP: dict[str, int] = {
 _FOURCC_MJPEG = cv2.VideoWriter.fourcc("M", "J", "P", "G")
 
 
+def apply_digital_zoom(frame: np.ndarray, zoom_pct, pan_x=0, pan_y=0) -> np.ndarray:
+    """Zoom + pan digital: recorta el frame (centro desplazado por pan_x/pan_y)
+    y reescala al tamano original. zoom<=100 (%) devuelve el frame sin tocar;
+    zoom=200 duplica el acercamiento. pan_x/pan_y en -100..100 mueven el recorte
+    dentro del margen disponible (0 = centrado, +100 = extremo derecho/abajo).
+
+    Funcion pura y reutilizable: la usan tanto Camera.get_frame() (inspeccion)
+    como las vistas en vivo de modo servicio, para que lo que se ve/graba coincida
+    exactamente con lo que analiza produccion."""
+    if frame is None:
+        return frame
+    zoom_pct = float(zoom_pct or 100)
+    if zoom_pct <= 100.0:
+        return frame
+    ratio = zoom_pct / 100.0
+    h, w = frame.shape[:2]
+    crop_w = max(1, int(round(w / ratio)))
+    crop_h = max(1, int(round(h / ratio)))
+    max_x = w - crop_w
+    max_y = h - crop_h
+    pan_x = max(-100.0, min(100.0, float(pan_x or 0)))
+    pan_y = max(-100.0, min(100.0, float(pan_y or 0)))
+    x0 = int(round((max_x / 2) * (1 + pan_x / 100.0)))
+    y0 = int(round((max_y / 2) * (1 + pan_y / 100.0)))
+    x0 = max(0, min(max_x, x0))
+    y0 = max(0, min(max_y, y0))
+    cropped = frame[y0:y0 + crop_h, x0:x0 + crop_w]
+    return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+
+
 class Camera:
     def __init__(
         self,
@@ -126,27 +156,13 @@ class Camera:
         return self._apply_zoom(frame)
 
     def _apply_zoom(self, frame: np.ndarray) -> np.ndarray:
-        """Zoom + pan digital: recorta el frame (centro desplazado por pan_x/pan_y)
-        y reescala al tamano original. zoom=100 (%) no hace nada; zoom=200 duplica
-        el acercamiento. pan_x/pan_y en -100..100 mueven el recorte dentro del
-        margen disponible (0 = centrado, +100 = extremo derecho/abajo)."""
-        zoom_pct = float(self._settings.get("zoom", 100) or 100)
-        if zoom_pct <= 100.0:
-            return frame
-        ratio = zoom_pct / 100.0
-        h, w = frame.shape[:2]
-        crop_w = max(1, int(round(w / ratio)))
-        crop_h = max(1, int(round(h / ratio)))
-        max_x = w - crop_w
-        max_y = h - crop_h
-        pan_x = max(-100.0, min(100.0, float(self._settings.get("pan_x", 0) or 0)))
-        pan_y = max(-100.0, min(100.0, float(self._settings.get("pan_y", 0) or 0)))
-        x0 = int(round((max_x / 2) * (1 + pan_x / 100.0)))
-        y0 = int(round((max_y / 2) * (1 + pan_y / 100.0)))
-        x0 = max(0, min(max_x, x0))
-        y0 = max(0, min(max_y, y0))
-        cropped = frame[y0:y0 + crop_h, x0:x0 + crop_w]
-        return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+        """Aplica el zoom/pan digital configurado para esta camara."""
+        return apply_digital_zoom(
+            frame,
+            self._settings.get("zoom", 100),
+            self._settings.get("pan_x", 0),
+            self._settings.get("pan_y", 0),
+        )
 
     def set_zoom(self, value_pct: float) -> None:
         """Ajusta el zoom digital (%) en caliente (se aplica en el proximo get_frame)."""

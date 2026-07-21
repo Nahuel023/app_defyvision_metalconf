@@ -48,6 +48,38 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 263 - Zoom digital tambien en las vistas en vivo de modo servicio (WYSIWYG)
+
+**Pedido:** que en la pestana de grabacion y en TODOS los lugares donde se ve la camara
+se aplique el mismo zoom, para poder extraer frames reales (zoomeados).
+
+**Diagnostico:** la grabacion a disco (`RecordingTab._grab_frame`) ya usaba
+`cam.get_frame()` → los frames GRABADOS ya salian zoomeados. Pero las VISTAS EN VIVO de
+modo servicio abren su propia captura (`_MJPEGReader`/`cv2.VideoCapture` directo a la URL),
+que NO pasa por `get_frame()` → se veia la preview ANCHA mientras se grababa zoomeado
+(inconsistente). Igual la exportacion de frame del multi-camara (`_capture_ip_frame`)
+guardaba el frame crudo sin zoom.
+
+**Cambios:**
+- `src/vision/camera.py`: se extrajo la matematica del zoom a una funcion pura de modulo
+  `apply_digital_zoom(frame, zoom, pan_x, pan_y)`; `Camera._apply_zoom` ahora la llama
+  (misma logica, reutilizable).
+- `src/ui/service.py`: nuevo helper `_zoom_live_frame(system, scanner_id, frame)` que lee
+  el zoom del objeto `Camera` VIVO (refleja ajustes en caliente de la tab Zoom; cae a
+  camera.yaml si no hay camara). Aplicado en:
+  - `RecordingTab._show_ip_frame` (preview en vivo de grabacion) → usa el scanner del combo.
+  - `CameraCalibTab._show_ip_frame` (preview multi-camara) y `_capture_ip_frame` (exportar
+    frame) → usan `_scanner_for_slot(slot)` (slot 0/1 = ip_camera_1/2 = scanner_1/2 por IP).
+
+**Verificado:** `apply_digital_zoom` via helper de servicio produce un frame IDENTICO al de
+`Camera.get_frame()` (mismo scanner); passthrough con zoom<=100; safe con frame None;
+sintaxis OK; `pytest` **31/31**.
+
+**Nota:** el snapshot diagnostico de "senal congelada" (`_save_ip_diag`) se deja crudo a
+proposito (es diagnostico del feed real de la camara, no del encuadre de produccion).
+
+---
+
 #### Cambio 262 - Zoom digital propio (reemplaza al zoom de la Sony que se rompe al reiniciar)
 
 **Problema:** el zoom lo hacia el visor/config de la propia camara Sony IP. En cada

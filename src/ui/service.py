@@ -63,8 +63,25 @@ from src.controller.system import InspectionSystem
 from src.utils import camera_config
 from src.utils.model_names import DISPLAY_NAMES, to_display, to_internal
 from src.utils.state import OperationMode, ScannerState
+from src.vision.camera import apply_digital_zoom
 
 logger = logging.getLogger(__name__)
+
+
+def _zoom_live_frame(system, scanner_id, frame):
+    """Aplica a `frame` el mismo zoom/pan digital que usa la camara del scanner
+    en produccion. Lee el zoom del objeto Camera vivo (refleja ajustes en caliente
+    de la tab Zoom); si no hay camara, cae al valor guardado en camera.yaml. Asi las
+    vistas en vivo de modo servicio coinciden con lo que graba/analiza produccion."""
+    if frame is None or not scanner_id:
+        return frame
+    try:
+        cam = system.camera(scanner_id)
+        zoom, (pan_x, pan_y) = cam.zoom, cam.pan
+    except Exception:
+        s = camera_config.load_camera_settings(scanner_id)
+        zoom, pan_x, pan_y = s.get("zoom", 100), s.get("pan_x", 0), s.get("pan_y", 0)
+    return apply_digital_zoom(frame, zoom, pan_x, pan_y)
 
 from src.utils.paths import app_root
 _ROOT = app_root()
@@ -2519,6 +2536,9 @@ class RecordingTab(QWidget):
         self._show_ip_frame(frame)
 
     def _show_ip_frame(self, frame) -> None:
+        # Aplica el mismo zoom digital que produccion para que la vista previa
+        # coincida con lo que se graba (frame_grab usa cam.get_frame(), ya zoomeado).
+        frame = _zoom_live_frame(self._system, self._scanner_combo.currentText(), frame)
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(400, rect.height() - 4)
@@ -5989,7 +6009,15 @@ class CameraCalibTab(QWidget):
             return
         self._on_ip_frame_ready(frame, slot, {"dropped": 0})
 
+    def _scanner_for_slot(self, slot: int) -> str:
+        """Slot 0/1 (ip_camera_1/2) mapea por orden a scanner_1/2 — misma IP."""
+        sids = self._system.scanner_ids()
+        return sids[slot] if 0 <= slot < len(sids) else ""
+
     def _show_ip_frame(self, frame) -> None:
+        # Mismo zoom digital que produccion, para que la vista y la captura de
+        # este slot coincidan con lo que graba/analiza el scanner correspondiente.
+        frame = _zoom_live_frame(self._system, self._scanner_for_slot(self._ip_slot), frame)
         rect = self._ip_preview.contentsRect()
         w = max(640, rect.width() - 4)
         h = max(420, rect.height() - 4)
@@ -6008,6 +6036,8 @@ class CameraCalibTab(QWidget):
         frame = self._ip_last_frames[self._ip_slot]
         if frame is None:
             return
+        # Zoom digital como produccion: el frame exportado coincide con lo grabado.
+        frame = _zoom_live_frame(self._system, self._scanner_for_slot(self._ip_slot), frame)
         out_dir = Path("data/output/export")
         out_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:19]
