@@ -275,3 +275,39 @@ def add_hover_shadow(widget: QWidget, blur: float = 22.0,
         widget._hover_shadow = _HoverShadow(widget, blur=blur, color=color)
     except Exception:
         pass
+
+
+# ======================================================================
+# Flash de atencion (parpadeo breve para avisar un cambio importante)
+# ======================================================================
+
+def attention_flash(widget: QWidget, blinks: int = 2, ms: int = 520) -> None:
+    """Parpadeo breve de opacidad para llamar la atencion sobre un cambio
+    (p. ej. la maneta pasando de MANUAL a AUTOMATICO). El efecto es transitorio:
+    se crea al empezar y se remueve al terminar (costo cero en reposo)."""
+    try:
+        if widget.graphicsEffect() is not None:
+            return  # ya hay un efecto/flash en curso: no pisar
+        eff = QGraphicsOpacityEffect(widget)
+        eff.setOpacity(1.0)
+        widget.setGraphicsEffect(eff)
+        anim = QPropertyAnimation(eff, b"opacity", widget)
+        anim.setDuration(max(1, int(ms)))
+        n = max(1, int(blinks))
+        anim.setKeyValueAt(0.0, 1.0)
+        for i in range(n):
+            anim.setKeyValueAt(min(1.0, (i + 0.5) / n), 0.25)
+            anim.setKeyValueAt(min(1.0, (i + 1.0) / n), 1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutSine)
+
+        def _cleanup() -> None:
+            try:
+                widget.setGraphicsEffect(None)
+            except Exception:
+                pass
+
+        anim.finished.connect(_cleanup)
+        anim.start(_DEL_WHEN_STOPPED)
+        widget._flash_anim = anim
+    except Exception:
+        pass

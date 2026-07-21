@@ -603,6 +603,11 @@ class ScannerPanel(QWidget):
         # se lo pise en el siguiente refresh.
         if mode_switch_raw is not None and mode_switch_raw != self._last_mode_switch_raw:
             self._system.set_safe_mode(self._id, not mode_switch_raw)
+            # Avisar el cambio de maneta con un parpadeo (solo en transiciones
+            # reales, no en la primera lectura donde _last era None).
+            if self._last_mode_switch_raw is not None:
+                from src.ui.anim import attention_flash
+                attention_flash(self._mode_switch_lbl)
             self._last_mode_switch_raw = mode_switch_raw
         self._apply_safe_mode_ui()
 
@@ -842,12 +847,32 @@ class ScannerPanel(QWidget):
         # 2 — el badge se actualiza solo en max 200 ms por el timer de status
 
     def _on_model_changed(self, display_name: str) -> None:
-        from src.utils.model_names import to_internal
+        from src.utils.model_names import to_display, to_internal
         internal = to_internal(display_name)
-        if internal:
-            self._scanner.set_model(internal)
-            _num = self._id.split("_")[-1]
-            self._title_lbl.setText(f"SCANNER {_num}   ·   {display_name}")
+        if not internal:
+            return
+
+        # No permitir cambiar el tipo de placa con el scanner en marcha: solo
+        # se puede en IDLE o STOPPED. Si el operador lo intenta en RUNNING/FAULT,
+        # se revierte el combo al modelo actual y se le avisa que debe detener.
+        state = self._scanner.get_status().get("state")
+        if state not in (ScannerState.IDLE, ScannerState.STOPPED):
+            current_internal = self._system.io.scanner_config(self._id).get("model", "")
+            current_display  = to_display(current_internal) if current_internal else display_name
+            self.model_combo.blockSignals(True)
+            self.model_combo.setCurrentText(current_display)
+            self.model_combo.blockSignals(False)
+            QMessageBox.warning(
+                self,
+                "Cambio de placa bloqueado",
+                "No se puede cambiar el tipo de placa con el scanner en marcha.\n\n"
+                "Detené el scanner primero y luego cambiá la placa.",
+            )
+            return
+
+        self._scanner.set_model(internal)
+        _num = self._id.split("_")[-1]
+        self._title_lbl.setText(f"SCANNER {_num}   ·   {display_name}")
 
     # ------------------------------------------------------------------
     # Callbacks del controller (threads → señales → hilo principal)

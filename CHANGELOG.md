@@ -48,6 +48,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 269 - Bloqueo de cambio de placa en marcha + aviso de cambio de maneta
+
+**Pedido:** (1) en funcionamiento no se debe poder cambiar el tipo de placa
+(microperforado <-> esterilla); si el operador lo intenta, detener el cambio y avisarle.
+(2) Animar el cambio de maneta MANUAL<->AUTOMATICO para que quede avisado.
+
+**Cambios (`src/ui/operator.py`, `ScannerPanel`):**
+1. `_on_model_changed()`: el cambio de placa solo se permite en IDLE o STOPPED. En
+   RUNNING/FAULT se revierte el combo al modelo actual (blockSignals para no recursar) y
+   se muestra un `QMessageBox.warning` ("No se puede cambiar el tipo de placa con el
+   scanner en marcha. Detené el scanner primero..."). No se llama `set_model`.
+2. `refresh_status()`: al detectar una transicion REAL de la maneta (no la primera
+   lectura), dispara `attention_flash()` sobre el label de MANETA para avisar el cambio
+   MANUAL<->AUTOMATICO.
+
+**Cambio (`src/ui/anim.py`):** nuevo `attention_flash(widget, blinks, ms)` — parpadeo
+breve de opacidad (efecto transitorio, se crea al empezar y se remueve al terminar, costo
+cero en reposo).
+
+**Verificado (headless + stub):** con estado RUNNING, `set_model` NO se llama y el combo
+revierte; con IDLE si se aplica. `attention_flash` crea el efecto. `pytest` 36/36.
+
+---
+
 #### Cambio 268 - Pack de animaciones completo (industrial, sutil)
 
 **Pedido:** completar el toque estetico con animaciones mas completas, siempre estilo
