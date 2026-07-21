@@ -36,6 +36,7 @@ class InspectionSession:
         save: bool = False,
         movement_threshold: float = 0.0,
         min_interval_sec: float = 0.0,
+        require_initial_movement: bool = False,
         resource_owner: "Inspector | None" = None,
     ) -> None:
         self._model = model
@@ -43,6 +44,15 @@ class InspectionSession:
         self._save = save
         self._movement_threshold = max(0.0, float(movement_threshold))
         self._min_interval_sec = max(0.0, float(min_interval_sec))
+        # En produccion RUN, el primer frame llega apenas se pulsa INICIAR y la
+        # cinta puede tardar varios segundos en moverse. Usarlo como inspeccion
+        # consumiria el warmup de ROI con una escena quieta/no valida. Cuando
+        # esta opcion esta activa, ese frame solo ceba la referencia de
+        # movimiento y la primera inspeccion espera un cambio real de imagen.
+        self._require_initial_movement = bool(
+            require_initial_movement and self._movement_threshold > 0.0
+        )
+        self._initial_movement_seen = not self._require_initial_movement
         self._frame_counter = 0
         self._last_gray: np.ndarray | None = None
         self._last_insp_time = 0.0
@@ -94,11 +104,22 @@ class InspectionSession:
                 return None
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if (
+            self._require_initial_movement
+            and not self._initial_movement_seen
+            and self._last_gray is None
+            and not force
+        ):
+            self._last_gray = gray
+            self.last_position_diff = 0.0
+            return None
+
         if self._last_gray is not None and not force:
             diff = float(np.mean(cv2.absdiff(gray, self._last_gray)))
             self.last_position_diff = diff
             if self._movement_threshold > 0.0 and diff < self._movement_threshold:
                 return None
+            self._initial_movement_seen = True
         else:
             self.last_position_diff = 0.0
 

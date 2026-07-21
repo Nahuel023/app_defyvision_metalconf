@@ -907,6 +907,7 @@ class ScannerController:
             scanner_id=self._id,
             movement_threshold=self._cont_pos_thr,
             min_interval_sec=self._min_insp_interval,
+            require_initial_movement=True,
             resource_owner=self._inspector,
         )
         with self._lock:
@@ -922,7 +923,10 @@ class ScannerController:
         _grace_tols = load_tolerances(model_init, scanner_id=self._id)
         self._startup_grace_remaining = int(_grace_tols.get("startup_grace_frames", 30))
         self._startup_grace_seconds   = float(_grace_tols.get("startup_grace_seconds", 0.0))
-        self._run_loop_start_mono     = time.monotonic()
+        # No iniciar el reloj al pulsar RUN: la cinta puede demorar un tiempo
+        # variable en arrancar. Se ancla en _handle_result al primer frame que
+        # supera el gate de movimiento y entra realmente al analisis.
+        self._run_loop_start_mono     = 0.0
         if self._startup_grace_remaining > 0 or self._startup_grace_seconds > 0.0:
             logger.info(
                 "[%s] startup grace: %d frames y/o %.1fs sin machine_stop ni fault",
@@ -942,6 +946,7 @@ class ScannerController:
                     scanner_id=self._id,
                     movement_threshold=self._cont_pos_thr,
                     min_interval_sec=self._min_insp_interval,
+                    require_initial_movement=True,
                     resource_owner=self._inspector,
                 )
                 session_cache_revision = cache_revision
@@ -1116,6 +1121,8 @@ class ScannerController:
             in_grace_frames = self._startup_grace_remaining > 0
             if in_grace_frames:
                 self._startup_grace_remaining -= 1
+            if self._run_loop_start_mono <= 0.0:
+                self._run_loop_start_mono = time.monotonic()
             in_grace_time = (
                 self._startup_grace_seconds > 0.0
                 and (time.monotonic() - self._run_loop_start_mono) < self._startup_grace_seconds

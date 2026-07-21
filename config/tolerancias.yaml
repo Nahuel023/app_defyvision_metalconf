@@ -13,13 +13,18 @@ consecutive_nok_frames: 5
 # resulto insuficiente: una chapa nueva y buena disparaba machine_stop apenas
 # reiniciado el scanner (falso positivo transitorio, no defecto real).
 startup_grace_frames: 100
-# Gracia adicional POR TIEMPO desde que se aprieta INICIAR (independiente de cuantos
-# frames se procesen). Cubre el retraso mecanico de pistones (~5s) antes de que la
+# Gracia adicional POR TIEMPO desde la PRIMERA INSPECCION posterior al movimiento
+# (independiente de cuantos frames se procesen). La cinta/patron puede tardar un tiempo
+# variable en moverse realmente; por eso el reloj no empieza cuando se pulsa RUN.
+# El RUN ceba el primer frame como referencia y no inicia la inspeccion/warmup hasta
+# detectar movimiento por encima de continuous_position_threshold. Desde ese instante,
+# 30s conserva margen para estabilizar la primera chapa valida.
+# Cubre el retraso mecanico antes de que la
 # chapa real entre en camara: si en ese lapso la vibracion/movimiento de la maquina
 # dispara inspecciones "falsas" (sin chapa en posicion todavia), esos frames pueden
 # agotar startup_grace_frames ANTES de que la chapa llegue, dejando la primera
-# lectura real sin proteccion. 10s da margen sobre los ~5s reales medidos en planta.
-startup_grace_seconds: 10.0
+# lectura real sin proteccion.
+startup_grace_seconds: 30.0
 frame_rate_hz: 25.0
 max_response_sec: 1.6
 edge_margin_px: 15.0

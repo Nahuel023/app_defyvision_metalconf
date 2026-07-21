@@ -134,6 +134,10 @@ scanner_2:
     # correspondiente — deriva gradual y persistente, no un salto puntual.
     roi_recenter_enabled: true
     roi_recenter_mode: move
+    # No precalibrar apenas se pulsa RUN: la cinta puede tardar un tiempo variable,
+    # incluso mas de 20s, en moverse y esos frames quietos no son una referencia
+    # valida. El recentrado gradual comienza cuando se detecta movimiento real.
+    roi_precal_enabled: false
     roi_recenter_warmup_frames: 30
     roi_recenter_trigger_delta_px: 4.0
     roi_recenter_edge_missing_min: 2

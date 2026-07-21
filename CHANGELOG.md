@@ -71,6 +71,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 273 - RUN espera movimiento real antes del warmup de ROI
+
+**Pedido:** contemplar que, despues de pulsar RUN, la cinta o el patron puede tardar
+20 segundos o mas, sin un tiempo constante, en comenzar a moverse; esos frames quietos
+no deben contaminar el aprendizaje inicial ni provocar correcciones automaticas prematuras.
+
+**Cambios:**
+- `InspectionSession` incorpora `require_initial_movement`: en las sesiones productivas
+  de RUN, el primer frame solo ceba la referencia visual y no se inspecciona. La primera
+  inspeccion (y por lo tanto el primer sample del warmup de ROI) ocurre recien cuando la
+  diferencia de imagen supera `continuous_position_threshold`.
+- `ScannerController` activa ese gate tanto al crear la sesion inicial como al recargarla
+  en vivo por un cambio de ROI/modelo. El analisis por carpeta y las sesiones de servicio
+  conservan el comportamiento anterior.
+- La gracia temporal pasa de 10 a 30 segundos y su reloj ahora comienza con la primera
+  inspeccion aceptada despues de detectar movimiento, no al pulsar RUN. Por eso una
+  demora mecanica de cualquier duracion no consume la proteccion. Ademas se conservan
+  los 100 frames de gracia existentes.
+- Se desactiva `roi_precal_enabled` en scanner 2: no puede medir ni escribir una ROI con
+  los frames quietos anteriores al movimiento. Su recentrado gradual sigue disponible,
+  pero la activacion/calibracion definitiva con lotes OK propios continua pendiente.
+- Tests nuevos verifican que una escena quieta no genera inspecciones y que el primer
+  movimiento real habilita el pipeline, sin cambiar el flujo batch.
+
+**Motivo de seguridad:** el warmup del recentrado ya solo recibe frames aceptados por el
+gate de movimiento y, dentro del pipeline, solo acumula baseline cuando la deteccion de
+ROI/chapa es valida (`roi_info.detected_roi`).
+
 #### Cambio 272 - Botones del header: colores + separar Tolerancias / Área de análisis
 
 **Pedido:** mejorar los colores de los botones de arriba (Métricas, Grabación,
