@@ -282,6 +282,15 @@ class ScannerPanel(QWidget):
         self._run_start_time: float | None = None
         self._last_mode_switch_raw: Optional[bool] = None  # para detectar cambios de maneta
 
+        # Auto-limpieza del boton RESET: tras una parada MANUAL/normal (no falla)
+        # el scanner vuelve solo a IDLE a los 30s y el boton grande naranja
+        # desaparece, dejando el display limpio. Las paradas por FALLA no se
+        # auto-limpian (el operario debe reconocerlas).
+        self._reset_autohide_timer = QTimer(self)
+        self._reset_autohide_timer.setSingleShot(True)
+        self._reset_autohide_timer.setInterval(30_000)
+        self._reset_autohide_timer.timeout.connect(self._auto_clear_stop)
+
         self._build_ui()
         self._populate_models()
         self._apply_safe_mode_ui()
@@ -871,8 +880,29 @@ class ScannerPanel(QWidget):
         if is_stopped:
             text = "↺  RESET FALLA" if stopped_by_fault else "↺  RESET"
             self.reset_btn.setText(text)
+            # Parada normal (no falla): arrancar el auto-clear de 30s -> IDLE.
+            # Falla: el boton queda hasta reconocimiento manual.
+            if not stopped_by_fault:
+                if not self._reset_autohide_timer.isActive():
+                    self._reset_autohide_timer.start()
+            else:
+                self._reset_autohide_timer.stop()
+        else:
+            self._reset_autohide_timer.stop()
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT))
+
+    def _auto_clear_stop(self) -> None:
+        """A los 30s de una parada MANUAL/normal, devuelve el scanner a IDLE para
+        que el boton RESET desaparezca y el display quede limpio. Re-verifica el
+        estado por si entro una falla mientras corria el timer (esas no se limpian)."""
+        try:
+            s = self._scanner.get_status()
+            if s["state"] != ScannerState.STOPPED or bool(s.get("stopped_by_fault", False)):
+                return
+            self._scanner.reset()  # STOPPED -> IDLE; el refresh siguiente oculta el boton
+        except Exception:
+            logger.exception("[%s] auto-clear de parada fallo", self._id)
 
     def _populate_models(self) -> None:
         from src.utils.model_names import DISPLAY_NAMES, to_display

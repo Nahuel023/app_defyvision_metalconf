@@ -48,6 +48,70 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 266 - Boton RESET se auto-limpia a los 30s tras parada manual (no falla)
+
+**Pedido:** al DETENER un scanner que estaba en RUN, el boton grande naranja RESET
+quedaba visible indefinidamente y "quedaba feo". Que permanezca 30s y luego el display
+quede limpio.
+
+**Contexto (maquina de estados):** en AUTO, DETENER manual lleva a STOPPED, estado que
+muestra el boton RESET y requiere RESET -> IDLE para reanudar. En MANUAL, DETENER va
+directo a IDLE (sin boton). El boton tambien aparece en STOPPED por falla (RESET FALLA).
+
+**Decision (confirmada con Tadeo):** a los 30s de una parada MANUAL/normal el scanner
+vuelve SOLO a IDLE (luz azul, listo para INICIAR) y el boton desaparece -> display limpio
+y operable. Las paradas por FALLA NO se auto-limpian: el boton RESET FALLA queda hasta
+que el operario lo reconozca.
+
+**Cambio (`src/ui/operator.py`, `ScannerPanel`):**
+- Nuevo `_reset_autohide_timer` (QTimer single-shot 30s) creado en `__init__`.
+- `_refresh_buttons()`: si el estado es STOPPED sin falla, arranca el timer (una vez);
+  si es STOPPED por falla o cualquier otro estado, lo detiene.
+- Nuevo `_auto_clear_stop()`: al disparar, re-verifica via `get_status()` que siga en
+  STOPPED sin falla (por si entro una falla durante el timer) y recien ahi llama
+  `scanner.reset()` (STOPPED -> IDLE). `reset()` ya es no-op fuera de STOPPED.
+
+**Verificado (simulacion de los metodos con scanner stub):** parada normal -> boton
+visible + timer activo; llega falla -> timer se cancela; auto-clear con falla -> 0 resets;
+auto-clear normal -> reset -> IDLE; IDLE -> boton oculto. `pytest` 31/31.
+
+---
+
+#### Cambio 265 - Micro-animaciones sutiles (fade-in de ventanas + pulso al presionar botones)
+
+**Pedido:** hacer la UI mas estetica en general con micro-animaciones y un fade-in suave,
+sin transiciones raras.
+
+**Cambio (`src/ui/anim.py` nuevo + wiring):**
+- `fade_in(win)`: las ventanas grandes aparecen con un fundido de opacidad (windowOpacity
+  0->1, ~170ms). Aplicado a operator, service y las 3 ventanas de datos (errores, metricas,
+  tolerancias) justo despues de showMaximized().
+- `add_press_pulse`/`polish_buttons`: feedback tactil al presionar cualquier boton (pulso
+  de opacidad transitorio). El QGraphicsOpacityEffect se crea al presionar y se REMUEVE al
+  terminar -> costo cero en reposo, sin clipping ni cambios de layout. Aplicado a operator
+  y service (todos sus QPushButton). Todo envuelto en try/except: si falla, la UI sigue sin
+  animacion (nunca rompe el control de maquina).
+
+**Verificado:** headless (offscreen) fade_in deja windowOpacity=0 y anima; press dispara el
+efecto transitorio; `pytest` 31/31.
+
+---
+
+#### Cambio 264 - Ventanas de datos abren maximizadas
+
+**Pedido:** que las ventanas grandes con datos (grabacion, servicio, etc.) siempre abran
+maximizadas, nunca recortadas.
+
+**Diagnostico:** operator y ServiceWindow (y sus tabs grabacion/servicio) ya abrian con
+`showMaximized()`. Las que abrian recortadas eran las 3 ventanas QMainWindow secundarias
+abiertas desde el panel del operador con `.show()` a su tamano `resize()`.
+
+**Cambio (`src/ui/operator.py`):** `OperatorFrameViewer` (errores/grabacion), `MetricsWindow`
+y `ToleranceWindow` pasan de `.show()` a `.showMaximized()`. El `resize()` queda como tamano
+de restauracion al des-maximizar.
+
+---
+
 #### Cambio 263 - Zoom digital tambien en las vistas en vivo de modo servicio (WYSIWYG)
 
 **Pedido:** que en la pestana de grabacion y en TODOS los lugares donde se ve la camara
