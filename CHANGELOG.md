@@ -46,6 +46,49 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-07-21 - Tadeo + Claude
+
+#### Cambio 262 - Zoom digital propio (reemplaza al zoom de la Sony que se rompe al reiniciar)
+
+**Problema:** el zoom lo hacia el visor/config de la propia camara Sony IP. En cada
+reinicio ese setting se perdia/reseteaba ("se rompe la Sony") y el encuadre dejaba de
+coincidir con los patrones calibrados.
+
+**Diagnostico (medido sobre lotes reales 21-07-2026 con/sin zoom, scanner_1 y scanner_2):**
+La SNC-EB600B es de lente fijo → su "zoom" YA es digital (crop + reescalado). Medido por
+deteccion de blobs (diametro y separacion de agujeros):
+- scanner_1: WIDE diam=8.9px sep=13.9px  ->  ZOOM diam=13.5px sep=21.3px  = **1.52x**
+- scanner_2: WIDE diam=9.5px sep=13.9px  ->  ZOOM diam=14.3px sep=21.4px  = **1.53x**
+Una replica digital 1.5x del frame ancho reprodujo **199 agujeros / diam 13.8px**,
+identico al zoom real de la Sony (199 / 13.5px) → capacidad de deteccion equivalente,
+perdida de detalle despreciable (el zoom Sony no aportaba resolucion optica extra).
+
+**Solucion:** restaurar el zoom digital propio (revertido el 2026-07-07, cherry-pick de
+`cbf56c7`) y dejarlo aplicado SIEMPRE por defecto via `config/camera.yaml`, de modo que
+sobreviva a cualquier reinicio de la camara.
+
+**Cambios:**
+- `src/vision/camera.py`: `get_frame()` aplica `_apply_zoom()` (crop centrado desplazable
+  por pan_x/pan_y + resize al tamano original); `set_zoom()`/`set_pan()` en caliente;
+  props `zoom`/`pan`. `zoom<=100` no hace nada (paso-a-traves).
+- `src/utils/camera_config.py`: `DEFAULTS` suma `zoom:100/pan_x:0/pan_y:0` (fallback = sin
+  zoom, seguro); `save_camera_settings()` ahora MERGEA en vez de reemplazar (no pisa claves
+  guardadas por otro panel).
+- `src/ui/service.py`: nueva tab **Zoom** en modo servicio (slider 100-300%, D-pad de paneo,
+  vista en vivo, guardar a camera.yaml, restablecer). Para clavar el pan fino en planta.
+- `config/camera.yaml`: `scanner_1` → `zoom:150 pan_x:-4 pan_y:0`;
+  `scanner_2` → `zoom:150 pan_x:13 pan_y:0`.
+
+**Verificado:** sintaxis OK en los 3 modulos; `load_camera_settings` devuelve zoom=150 para
+ambos scanners; `_apply_zoom` conserva shape 640x480; `pytest` **31/31**.
+
+**Pendiente:** el `pan_x` esta medido offline; en planta, con la Sony en zoom 1x (campo
+completo), afinar el encuadre con el D-pad de la tab Zoom mirando la camara real y Guardar.
+Si algun dia la Sony entregara mayor resolucion nativa sin zoom, capturar a esa resolucion
+y recortar daria aun mas detalle (a 640x480 no hay margen extra que ganar).
+
+---
+
 ### Sesion 2026-07-14 - Tadeo + Claude
 
 #### Cambio 261 - Borde de CHAPA robusto cuando se superpone con el backlight (falsos PATRON DESALINEADO)

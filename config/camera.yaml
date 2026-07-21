@@ -16,6 +16,9 @@ scanner_1:
   autofocus: false
   auto_exposure: false
   auto_white_balance: true
+  zoom: 150      # 1.5x digital — replica el zoom de la Sony (sobrevive reinicios)
+  pan_x: -4      # encuadre medido 21-07-2026 (banda perforada centrada)
+  pan_y: 0
 scanner_2:
   username: root
   password: defy2026
@@ -34,6 +37,9 @@ scanner_2:
   autofocus: false
   auto_exposure: false
   auto_white_balance: true
+  zoom: 150      # 1.5x digital — replica el zoom de la Sony (sobrevive reinicios)
+  pan_x: 13      # encuadre medido 21-07-2026 (banda perforada centrada)
+  pan_y: 0
 ip_camera_1:
   ip_address: 192.168.1.3
   url: http://192.168.1.3/oneshotimage.jpg
