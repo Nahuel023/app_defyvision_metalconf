@@ -20,7 +20,7 @@ animacion (nunca debe romper el control de maquina).
 """
 
 from PyQt6.QtCore import (QEasingCurve, QEvent, QObject, QPropertyAnimation,
-                          QVariantAnimation)
+                          QTimer, QVariantAnimation)
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (QGraphicsDropShadowEffect, QGraphicsOpacityEffect,
                              QPushButton, QWidget)
@@ -275,6 +275,107 @@ def add_hover_shadow(widget: QWidget, blur: float = 22.0,
         widget._hover_shadow = _HoverShadow(widget, blur=blur, color=color)
     except Exception:
         pass
+
+
+# ======================================================================
+# Glow de la camara segun estado del scanner
+# ======================================================================
+
+class CameraGlow(QObject):
+    """Realce (glow difuso) alrededor del panel de camara, atado al estado del
+    scanner y ademas sensible al hover:
+
+        run   -> glow VERDE persistente (mientras corre).
+        stop  -> glow ROJO por 30s y luego se apaga (para no simular error
+                 permanente si el scanner queda detenido).
+        idle  -> sin glow de estado; al pasar el mouse, glow neutro celeste.
+
+    El hover intensifica el glow actual (mismo color del estado). Usa un unico
+    QGraphicsDropShadowEffect persistente sobre el widget. `set_mode()` recibe un
+    string semantico ('run'/'stop'/'idle') para no acoplar anim.py al enum de
+    estados del scanner."""
+
+    _GREEN   = QColor(34, 197, 94, 190)
+    _RED     = QColor(239, 68, 68, 190)
+    _NEUTRAL = QColor(56, 189, 248, 150)
+    _BASE_BLUR   = 14.0   # glow de estado: apenas pequeno y difuso
+    _HOVER_BONUS = 14.0   # extra al pasar el mouse
+    _RED_HOLD_MS = 30_000
+
+    def __init__(self, widget: QWidget) -> None:
+        super().__init__(widget)
+        self._w = widget
+        self._mode = "idle"
+        self._hovered = False
+        self._base_blur = 0.0
+        self._eff = QGraphicsDropShadowEffect(widget)
+        self._eff.setColor(self._NEUTRAL)
+        self._eff.setOffset(0, 0)
+        self._eff.setBlurRadius(0.0)
+        widget.setGraphicsEffect(self._eff)
+        self._anim = QPropertyAnimation(self._eff, b"blurRadius", self)
+        self._anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._red_timer = QTimer(self)
+        self._red_timer.setSingleShot(True)
+        self._red_timer.setInterval(self._RED_HOLD_MS)
+        self._red_timer.timeout.connect(self._on_red_expired)
+        widget.installEventFilter(self)
+
+    def _target_blur(self) -> float:
+        bonus = self._HOVER_BONUS if self._hovered else 0.0
+        if self._base_blur <= 0.0:
+            return bonus  # sin estado: solo el bonus de hover (0 si no hoverea)
+        return self._base_blur + bonus
+
+    def _refresh(self, ms: int = 260) -> None:
+        if self._base_blur <= 0.0 and self._hovered:
+            self._eff.setColor(self._NEUTRAL)  # hover sin estado -> celeste
+        self._anim.stop()
+        self._anim.setDuration(ms)
+        self._anim.setStartValue(self._eff.blurRadius())
+        self._anim.setEndValue(self._target_blur())
+        self._anim.start()
+
+    def set_mode(self, mode: str) -> None:
+        try:
+            if mode == self._mode:
+                return  # solo actuar en transiciones (no reinicia el timer rojo)
+            self._mode = mode
+            if mode == "run":
+                self._red_timer.stop()
+                self._eff.setColor(self._GREEN)
+                self._base_blur = self._BASE_BLUR
+                self._refresh()
+            elif mode == "stop":
+                self._eff.setColor(self._RED)
+                self._base_blur = self._BASE_BLUR
+                self._red_timer.start()   # a los 30s se apaga solo
+                self._refresh()
+            else:  # idle
+                self._red_timer.stop()
+                self._base_blur = 0.0
+                self._refresh()
+        except Exception:
+            pass
+
+    def _on_red_expired(self) -> None:
+        # Sigue detenido pero ya paso el instante rojo -> apagar suave el glow.
+        if self._mode == "stop":
+            self._base_blur = 0.0
+            self._refresh(ms=700)
+
+    def eventFilter(self, obj, ev):  # noqa: N802
+        try:
+            t = ev.type()
+            if t == QEvent.Type.Enter:
+                self._hovered = True
+                self._refresh(ms=160)
+            elif t == QEvent.Type.Leave:
+                self._hovered = False
+                self._refresh(ms=220)
+        except Exception:
+            pass
+        return False
 
 
 # ======================================================================

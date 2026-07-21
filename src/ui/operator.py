@@ -356,8 +356,10 @@ class ScannerPanel(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         root.addWidget(self.camera_label, stretch=1)
-        from src.ui.anim import add_hover_shadow
-        add_hover_shadow(self.camera_label, blur=28)
+        # Glow de la camara atado al estado del scanner (verde en run, rojo 30s
+        # al detenerse) + realce al pasar el mouse.
+        from src.ui.anim import CameraGlow
+        self._cam_glow = CameraGlow(self.camera_label)
 
         # ── Info de cámara: IP · FPS · estado de conexión ─────────────
         self._cam_info_lbl = QLabel("● —")
@@ -616,6 +618,15 @@ class ScannerPanel(QWidget):
         _tols  = load_tolerances(_model, scanner_id=self._id) if _model else load_tolerances()
         _threshold = int(_tols.get("consecutive_nok_frames", 5))
         self._nok_threshold = _threshold
+
+        # Glow de la camara segun estado: verde en marcha, rojo 30s al detenerse.
+        if state == ScannerState.RUNNING:
+            _glow_mode = "run"
+        elif state in (ScannerState.STOPPED, ScannerState.FAULT):
+            _glow_mode = "stop"
+        else:
+            _glow_mode = "idle"
+        self._cam_glow.set_mode(_glow_mode)
 
         bg, fg = _COLOR.get(state, ("#64748b", "#ffffff"))
         label = _STATE_LABEL.get(state, state.value.upper())

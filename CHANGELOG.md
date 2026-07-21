@@ -48,6 +48,36 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 271 - Glow de la camara atado al estado del scanner
+
+**Pedido:** que el realce iluminado alrededor de la camara de cada scanner (el que
+aparecia en hover) tambien refleje el estado: verde sutil y difuso SIEMPRE en run; rojo
+apenas por un instante (30s) al detenerse, para que no quede siempre rojo simulando error;
+el hover que intensifique.
+
+**Cambio (`src/ui/anim.py`):** nueva clase `CameraGlow` que maneja un unico
+QGraphicsDropShadowEffect persistente sobre el panel de camara:
+- `set_mode('run')`  -> glow VERDE persistente (blur base 14, difuso).
+- `set_mode('stop')` -> glow ROJO + QTimer de 30s; al expirar se apaga suave (aunque el
+  scanner siga detenido) para no simular error permanente.
+- `set_mode('idle')` -> sin glow de estado.
+- Hover: intensifica el glow actual (+14 de blur, mismo color del estado); sin estado usa
+  el celeste neutro de antes. Solo actua en transiciones (no reinicia el timer rojo en
+  cada refresh). API por string para no acoplar anim.py al enum de estados.
+
+**Cambio (`src/ui/operator.py`, `ScannerPanel`):** el panel de camara usa `CameraGlow`
+en vez de `add_hover_shadow`; `refresh_status()` mapea el estado a modo (RUNNING->run,
+STOPPED/FAULT->stop, resto->idle) y llama `set_mode()`.
+
+**Verificado (headless):** IDLE blur 0; RUN verde blur 14 y hover -> 28; STOP rojo blur 14
+y tras expirar el timer -> 0; IDLE -> 0. `pytest` 36/36.
+
+**Nota de rendimiento:** el glow verde en run es un drop-shadow persistente sobre el feed
+(que se repinta a 5-25 fps). Blur chico (14) para acotar costo; si en planta se nota carga
+con 2 scanners, se puede bajar el blur o pasar a un borde de color (mas barato, menos difuso).
+
+---
+
 #### Cambio 270 - ROI manual se aplica en RUN + recentrado automatico seguro en scanner 1
 
 **Pedido:** al guardar manualmente la ROI desde la pestaña Tolerancias, aplicarla al
