@@ -1305,7 +1305,7 @@ class OperatorWindow(QMainWindow):
         from src.ui.frame_viewer import OperatorFrameViewer
         if self._errors_win is None:
             self._errors_win = OperatorFrameViewer(self._system, parent=None)
-        self._errors_win.show()
+        self._errors_win.showMaximized()
         self._errors_win.raise_()
         self._errors_win.activateWindow()
         try:
@@ -1325,7 +1325,7 @@ class OperatorWindow(QMainWindow):
         from src.ui.metrics_window import MetricsWindow
         if self._metrics_win is None or not self._metrics_win.isVisible():
             self._metrics_win = MetricsWindow(self._system)
-        self._metrics_win.show()
+        self._metrics_win.showMaximized()
         self._metrics_win.raise_()
         self._metrics_win.activateWindow()
 
@@ -1333,7 +1333,7 @@ class OperatorWindow(QMainWindow):
         from src.ui.tolerance_window import ToleranceWindow
         if self._tolerance_win is None or not self._tolerance_win.isVisible():
             self._tolerance_win = ToleranceWindow(self._system)
-        self._tolerance_win.show()
+        self._tolerance_win.showMaximized()
         self._tolerance_win.raise_()
         self._tolerance_win.activateWindow()
 
