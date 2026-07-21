@@ -607,7 +607,7 @@ class ScannerPanel(QWidget):
             # reales, no en la primera lectura donde _last era None).
             if self._last_mode_switch_raw is not None:
                 from src.ui.anim import attention_flash
-                attention_flash(self._mode_switch_lbl)
+                attention_flash(self._mode_switch_lbl, blinks=4, ms=2000)
             self._last_mode_switch_raw = mode_switch_raw
         self._apply_safe_mode_ui()
 
