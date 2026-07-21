@@ -62,6 +62,30 @@ def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
         controller.shutdown()
 
 
+def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
+    io = _FakeIO()
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    invalidations: list[tuple[str | None, str | None]] = []
+    monkeypatch.setattr(
+        controller._inspector,
+        "invalidate",
+        lambda model=None, scanner_id=None: invalidations.append((model, scanner_id)),
+    )
+
+    try:
+        controller._nok_streak = 3
+        controller._lq_streak = 2
+        assert controller._cache_revision == 0
+        controller.reload_cache()
+        assert controller._cache_revision == 1
+        assert controller._nok_streak == 0
+        assert controller._lq_streak == 0
+        assert invalidations == [("modelo_A", "scanner_1")]
+    finally:
+        controller.shutdown()
+
+
 def test_handle_license_failure_stops_running_scanner() -> None:
     io = _FakeIO()
     camera = _FakeCamera()

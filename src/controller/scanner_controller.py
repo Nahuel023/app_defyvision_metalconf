@@ -151,6 +151,10 @@ class ScannerController:
         self._disk_drop_counts: dict[str, int] = {}
 
         self._lock          = threading.Lock()
+        # Cada InspectionSession conserva su propio snapshot de ROI/patrón/
+        # tolerancias. Esta revisión obliga al loop RUN a reemplazar ese snapshot
+        # en el siguiente frame cuando la UI guarda una calibración nueva.
+        self._cache_revision = 0
         self._force_inspect = threading.Event()
         self._stop_event    = threading.Event()
 
@@ -552,10 +556,22 @@ class ScannerController:
             self._io.write(f"{self._id}.solenoid", False)
 
     def reload_cache(self) -> None:
-        """Invalida el cache del inspector (ROI, patrón, tolerancias) para el modelo activo."""
+        """Invalida recursos y pide recargar la sesión viva en el próximo frame."""
         model = self._io.scanner_config(self._id).get("model", "")
         self._inspector.invalidate(model=model or None, scanner_id=self._id)
-        logger.info(f"[{self._id}] cache invalidado — ROI/patrón se recargarán en el próximo frame")
+        with self._lock:
+            self._cache_revision += 1
+            revision = self._cache_revision
+            # La geometría de comparación cambió: no arrastrar una racha NOK
+            # calculada con el ROI/patrón anterior hacia la sesión nueva.
+            self._nok_streak = 0
+            self._lq_streak = 0
+            self._streak_start_mono = None
+        logger.info(
+            "[%s] cache invalidado (revision=%d) — ROI/patrón/tolerancias "
+            "se aplicarán en el próximo frame",
+            self._id, revision,
+        )
 
     def set_model(self, model: str) -> None:
         cfg      = self._io.scanner_config(self._id)
@@ -567,6 +583,8 @@ class ScannerController:
         )
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._inspector.invalidate(model=model, scanner_id=self._id)
+        with self._lock:
+            self._cache_revision += 1
         logger.info(f"[{self._id}] modelo cambiado a '{model}' "
                     f"(consecutive_nok={self._consecutive_nok}, "
                     f"machine_stop_enabled={self._machine_stop_enabled})")
@@ -891,6 +909,8 @@ class ScannerController:
             min_interval_sec=self._min_insp_interval,
             resource_owner=self._inspector,
         )
+        with self._lock:
+            session_cache_revision = self._cache_revision
         if not self._run_startup_selftest(model_init):
             self._cut_solenoid_critical("selftest inicial fallido")
             self._set_lights(red=True)
@@ -915,13 +935,20 @@ class ScannerController:
                     self._stop_event.wait(timeout=0.05)
                     continue
                 model = self._io.scanner_config(self._id)["model"]
-            if model != session._model:
+                cache_revision = self._cache_revision
+            if model != session._model or cache_revision != session_cache_revision:
                 session = InspectionSession(
                     model,
                     scanner_id=self._id,
                     movement_threshold=self._cont_pos_thr,
                     min_interval_sec=self._min_insp_interval,
                     resource_owner=self._inspector,
+                )
+                session_cache_revision = cache_revision
+                logger.info(
+                    "[%s] sesión de análisis recargada en vivo "
+                    "(modelo=%s revision=%d)",
+                    self._id, model, session_cache_revision,
                 )
 
             frame = self._camera.get_frame()

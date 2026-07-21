@@ -125,6 +125,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_recenter_cooldown_max_frames": 120, # techo del cooldown (~24s a 5fps)
     "roi_recenter_cooldown_mult": 2.0,       # multiplicador del cooldown por cada correccion
     "roi_recenter_mode": "resize",           # "move" = desplaza x; "resize" = expande el borde
+    "roi_recenter_require_edge_missing": True,# False = centra sin esperar missing de borde
     "roi_recenter_max_width_growth_px": 60.0,# maximo crecimiento total del ancho en modo resize
     "roi_precal_enabled": True,              # pre-calibrar ROI antes de iniciar el loop de inspeccion
     "roi_precal_frames": 8,                  # frames a capturar por iteracion de pre-cal

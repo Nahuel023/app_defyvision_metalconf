@@ -48,6 +48,65 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 270 - ROI manual se aplica en RUN + recentrado automatico seguro en scanner 1
+
+**Pedido:** al guardar manualmente la ROI desde la pestaña Tolerancias, aplicarla al
+frame de analisis vivo sin detener/reiniciar el scanner; activar ademas un centrado
+automatico que evite nuevas perdidas de encuadre.
+
+**Diagnostico:**
+- `GUARDAR ROI` escribia `roi.json`, reconstruia `holes.json` e invalidaba el cache del
+  `Inspector`, pero la `InspectionSession` ya creada por RUN conservaba su snapshot
+  privado de ROI/patron/tolerancias. El analisis seguia con la geometria vieja hasta
+  DETENER+INICIAR.
+- El recenter gradual estaba habilitado pero exigia 20 frames con deriva + 2 missing de
+  borde: reaccionaba recien despues de que la ROI ya habia perdido agujeros.
+- Al disparar realmente una persistencia, `inspection.py` intentaba usar un `logger` no
+  definido; podia tumbar el hilo justo en la primera correccion automatica.
+- Se evaluo centrar contra el centro geometrico absoluto de la chapa y se descarto: la
+  ROI esta intencionalmente centrada sobre la zona perforada. Barrido real: x=212/213
+  da 99/99 OK; x>=214 empieza a perder agujeros. El comportamiento correcto es seguir
+  cambios respecto de la relacion ROI/chapa calibrada durante el warmup.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`:
+  - nuevo `_cache_revision`; `reload_cache()`/`set_model()` incrementan la revision;
+  - el loop RUN compara esa revision y reemplaza atomicamente la `InspectionSession`
+    completa en el siguiente frame, aun si el nombre de modelo no cambio;
+  - al recargar se limpian rachas NOK/LOW_QUALITY calculadas con la geometria anterior.
+- `src/ui/tolerance_window.py`:
+  - GUARDAR ROI queda deshabilitado mientras se reconstruye el patron (sin workers
+    simultaneos);
+  - al finalizar llama `reload_cache()` y muestra "aplicado al analisis en vivo".
+- `src/inspection.py`:
+  - logger de modulo real para que persistir auto-recenter no crashee;
+  - nuevo `roi_recenter_require_edge_missing`: permite seguir deriva antes de generar
+    missing, manteniendo warmup, umbral y racha;
+  - `saved_roi` queda como ancla de sesion: `max_total_shift_px` pasa a ser un limite
+    acumulado real, no se reinicia despues de cada paso.
+- `config/io_map.yaml`, solo scanner_1:
+  - recentrado relativo automatico sin requisito de missing;
+  - warmup 30->20 frames, trigger 4->3px, confirmacion 20->8 frames;
+  - pasos conservadores de 1px y cooldown fijo de 8 frames;
+  - limite acumulado permanece en +/-20px; correccion urgente y pre-cal siguen
+    desactivadas. Scanner_2 queda sin cambios.
+- Tests nuevos/extendidos para revision de cache, limpieza de racha, seguimiento de
+  deriva sin missing, persistencia y limite acumulado.
+
+**Validacion:**
+- Simulacion secuencial con los 99 frames OK del scanner_1 y escritura redirigida a
+  temporal: 99/99 OK, missing total=0; el auto-recenter hizo un paso x=213->212 sin
+  regresion.
+- Barrido estatico x=211..219 sobre los 99 frames confirma ventana segura x=212/213 y
+  demuestra por que no se debe perseguir el centro absoluto de chapa.
+- `pytest`: 36/36.
+
+**Riesgos / pendientes:**
+- Validar en RUN de planta que el mensaje "aplicado al analisis en vivo" aparezca al
+  guardar y que el overlay cambie en el frame siguiente.
+- Activacion automatica nueva queda limitada a scanner_1, que tiene lote real validado;
+  scanner_2 debe activarse con su propio lote OK para no trasladar geometria entre opticas.
+
 #### Cambio 269 - Bloqueo de cambio de placa en marcha + aviso de cambio de maneta
 
 **Pedido:** (1) en funcionamiento no se debe poder cambiar el tipo de placa

@@ -67,11 +67,14 @@ scanner_1:
     # No reacciona de golpe ante una desalineacion repentina: urgent_delta_px queda
     # tan alto que el atajo de 1-solo-frame nunca dispara (un salto brusco de todos
     # los frames es sintoma de un problema mecanico real, no algo que el ROI deba
-    # "corregir" solo). Solo actua si la deriva se sostiene roi_recenter_streak_frames
-    # frames consecutivos en la misma direccion (mismo signo) con agujeros faltantes
-    # en el borde correspondiente — deriva gradual y persistente, no un salto puntual.
+    # "corregir" solo). El centrado absoluto actua unicamente si el desvio se
+    # sostiene varios frames; ya no espera missing porque el objetivo es corregir
+    # la ROI antes de que el recorte llegue a perder agujeros.
     roi_recenter_enabled: true
     roi_recenter_mode: move
+    # Sigue automaticamente cualquier deriva respecto de la relacion ROI/chapa
+    # aprendida al arrancar; no intenta forzar el ROI al centro geometrico.
+    roi_recenter_require_edge_missing: false
     # Cambio 246 (03-07-2026): en RUN vivo, antes de que actue la startup grace,
     # _run_roi_precalibration() podia mover la ROI usando frames de arranque
     # todavia inestables. Eso explica el sintoma "en carpeta/raw da OK pero al
@@ -79,17 +82,17 @@ scanner_1:
     # agresiva al iniciar; el roi_recenter gradual durante la corrida sigue
     # activo y protegido por warmup/streak.
     roi_precal_enabled: false
-    roi_recenter_warmup_frames: 30
-    roi_recenter_trigger_delta_px: 4.0
+    roi_recenter_warmup_frames: 20
+    roi_recenter_trigger_delta_px: 3.0
     roi_recenter_edge_missing_min: 2
     roi_recenter_edge_band_px: 30.0
-    roi_recenter_streak_frames: 20
+    roi_recenter_streak_frames: 8
     roi_recenter_step_px: 1.0
     roi_recenter_max_total_shift_px: 20.0
     roi_recenter_urgent_delta_px: 1000.0
-    roi_recenter_cooldown_frames: 30
-    roi_recenter_cooldown_max_frames: 150
-    roi_recenter_cooldown_mult: 2.0
+    roi_recenter_cooldown_frames: 8
+    roi_recenter_cooldown_max_frames: 8
+    roi_recenter_cooldown_mult: 1.0
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:

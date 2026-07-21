@@ -564,6 +564,7 @@ class _RoiPanel(QWidget):
             json.dumps({"x": lx, "y": 0, "w": rx - lx, "h": H}, indent=2),
             encoding="utf-8",
         )
+        self._save_btn.setEnabled(False)
         self._status_lbl.setText("ROI guardada — reconstruyendo patrón…")
         self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
         self._refresh_roi_label()
@@ -601,13 +602,16 @@ class _RoiPanel(QWidget):
 
         def _on_done(msg: str, ok: bool) -> None:
             color = "#22c55e" if ok else "#f87171"
-            self._status_lbl.setText(msg)
-            self._status_lbl.setStyleSheet(f"color:{color};font-size:10px;")
             if ok and _sid:
                 try:
                     self._system.scanner(_sid).reload_cache()
+                    msg += " · aplicado al análisis en vivo"
                 except Exception:
                     pass
+            self._status_lbl.setText(msg)
+            self._status_lbl.setStyleSheet(f"color:{color};font-size:10px;")
+            self._save_btn.setEnabled(True)
+            self._rebuild_worker = None
 
         worker.done.connect(_on_done)
         worker.done.connect(lambda *_: worker.deleteLater())

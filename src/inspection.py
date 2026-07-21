@@ -1,3 +1,4 @@
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +20,9 @@ from src.pipeline.edge_centering import CenteringResult, compute_centering
 from src.pipeline.grid_fitting import grid_compare_points, estimate_lattice_tilt_deg, rotate_points
 from src.pipeline.preprocess import preprocess_for_holes
 from src.utils.config import load_tolerances
+
+
+logger = logging.getLogger(__name__)
 
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
@@ -334,6 +338,9 @@ def _inspect_bgr(
     roi_recenter_cooldown_max_frames = int(tolerances.get("roi_recenter_cooldown_max_frames", 120))
     roi_recenter_cooldown_mult = float(tolerances.get("roi_recenter_cooldown_mult", 2.0))
     roi_recenter_mode = str(tolerances.get("roi_recenter_mode", "resize"))
+    roi_recenter_require_edge_missing = bool(
+        tolerances.get("roi_recenter_require_edge_missing", True)
+    )
     roi_recenter_max_width_growth_px = float(tolerances.get("roi_recenter_max_width_growth_px", 60.0))
     roi_slow_ema_enabled        = bool(tolerances.get("roi_slow_ema_enabled", False))
     roi_slow_ema_alpha          = float(tolerances.get("roi_slow_ema_alpha", 0.002))
@@ -1092,6 +1099,7 @@ def _inspect_bgr(
         cooldown_max_frames=roi_recenter_cooldown_max_frames,
         cooldown_mult=roi_recenter_cooldown_mult,
         recenter_mode=roi_recenter_mode,
+        require_edge_missing=roi_recenter_require_edge_missing,
         max_width_growth_px=roi_recenter_max_width_growth_px,
     )
 
@@ -1409,6 +1417,7 @@ def _update_runtime_roi_drift(
     cooldown_max_frames: int = 120,
     cooldown_mult: float = 2.0,
     recenter_mode: str = "resize",
+    require_edge_missing: bool = True,
     max_width_growth_px: float = 60.0,
 ) -> RuntimeROIInfo | None:
     if not enabled or active_roi is None or roi_info is None or roi_info.detected_roi is None:
@@ -1456,6 +1465,9 @@ def _update_runtime_roi_drift(
     state["baseline_shift_x"] = baseline_shift_x
     state["baseline_samples"] = baseline_samples
 
+    # Seguir cambios respecto de la relación calibrada durante el warmup. La ROI
+    # de inspección puede estar intencionalmente desplazada respecto del centro
+    # geométrico de la chapa, por lo que no debe perseguir shift_x == 0.
     drift_delta = shift_x - float(baseline_shift_x)
     is_urgent = abs(drift_delta) >= urgent_delta_px
 
@@ -1463,11 +1475,12 @@ def _update_runtime_roi_drift(
     if is_urgent:
         evidence_dir = 1 if drift_delta > 0 else -1
     else:
-        # Normal: requiere además agujeros faltantes en el borde correspondiente
         evidence_dir = 0
-        if drift_delta <= -trigger_delta_px and left_missing >= edge_missing_min:
+        left_evidence = (not require_edge_missing) or left_missing >= edge_missing_min
+        right_evidence = (not require_edge_missing) or right_missing >= edge_missing_min
+        if drift_delta <= -trigger_delta_px and left_evidence:
             evidence_dir = -1
-        elif drift_delta >= trigger_delta_px and right_missing >= edge_missing_min:
+        elif drift_delta >= trigger_delta_px and right_evidence:
             evidence_dir = 1
 
     if evidence_dir == 0:
@@ -1532,8 +1545,13 @@ def _update_runtime_roi_drift(
         state["last_step_px"] = float(new_roi.x - active_roi.x)
 
     pre["roi"] = new_roi
-    pre["saved_roi"] = new_roi
-    state["applied_total_shift_px"] = 0.0
+    # Mantener saved_roi como ancla de la sesion hace que el limite total sea
+    # realmente acumulado. Un guardado manual crea una sesión nueva y, por lo
+    # tanto, establece intencionalmente una ancla nueva.
+    if recenter_mode == "resize":
+        state["applied_total_shift_px"] = float(new_roi.w - saved_roi.w)
+    else:
+        state["applied_total_shift_px"] = float(new_roi.x - saved_roi.x)
     state["drift_streak"] = 0
 
     # Cooldown adaptativo: crece con cada corrección hasta el máximo
