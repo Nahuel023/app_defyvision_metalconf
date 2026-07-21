@@ -48,6 +48,68 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 267 - Scanner 1 microperforado completo tras zoom 150%: paridad, patron y matching
+
+**Pedido:** despues de estabilizar el zoom digital y los reinicios de las Sony, revisar
+scanner_1 con el lote OK
+`C:\Users\DefyC\Downloads\21-07-2026-MICROPERFORADO_1_SCANNER_1` y dejar la
+inspeccion de microperforado detectando todos los agujeros correctamente.
+
+**Diagnostico:**
+- El patron anterior tenia 128 puntos pero, por recortes acumulados, cada frame solo
+  comparaba 85-91 agujeros aunque el detector veia aproximadamente 187-198. El 150% de
+  `detection_ratio` no era ruido: eran agujeros reales que quedaban fuera de la decision.
+- La grilla escalonada alterna 5/6 agujeros por fila dentro de la ROI. Cuando el fleje
+  avanzaba una fila fisica, la fase Y modulo 14px quedaba igual pero la paridad visible se
+  invertia. El ajuste solo probaba una paridad; `tol_xy_px=38` y el patron parcial ocultaban
+  ese error. Con tolerancia honesta aparecian 30-47 falsos missing en frames como 0074,
+  0091 y 0092.
+- El filtro top/bottom descartaba detecciones apenas fuera del margen antes del matching,
+  aun cuando estaban dentro de tolerancia de un expected valido, creando falsos missing
+  de borde.
+- El check de offset global no respetaba `pattern_align_min_missing`: podia marcar NOK por
+  descentrado con `missing=0` (reproducido en frame_0095).
+- La fecha/hora incrustada por la Sony tapa la ultima fila en y~445..479; esa zona no
+  aporta evidencia confiable y no debe participar de la decision.
+
+**Cambios:**
+- `src/pipeline/grid_fitting.py`: `grid_compare_points()` puede probar, de forma opt-in,
+  ambas paridades de una grilla staggered. Intercambia las plantillas de ocupacion par/impar,
+  puntua cantidad de matches + residuo y elige deterministamente la mejor. La opcion queda
+  desactivada por defecto para no alterar patrones no repetitivos.
+- `src/inspection.py`:
+  - wiring de `grid_allow_row_parity_flip` y tolerancia de seleccion;
+  - nuevo `grid_extend_rows_before` simetrico al extend-after para proyectar filas completas
+    aunque el patron de referencia se haya construido lejos de los bordes;
+  - halo de `tol_xy_px` al filtrar detecciones top/bottom, evitando eliminar el match de una
+    posicion esperada justo dentro del margen;
+  - el offset global ahora respeta `pattern_align_min_missing`, igual que zigzag/slope.
+- `config/io_map.yaml`, override `scanner_1.inspection`:
+  - `tol_xy_px: 38 -> 12`;
+  - paridad dinamica activada y extension de 3 filas arriba/abajo;
+  - margenes laterales de build/compare en 12px; top 20px; bottom 36px por timestamp;
+  - `grid_max_missing: 0`: cualquier agujero faltante vuelve el frame NOK y la regla
+    temporal exige persistencia antes de la decision final.
+- `data/patterns/scanner_1/modelo_B/holes.json`: reconstruido desde `frame_0050.png`,
+  conocido OK y nitido, con zoom digital 150%; 170 puntos unicos, dx=36, dy=14,
+  stagger=-18, sin duplicados.
+- `tests/test_grid_fitting.py`: pruebas de paridad normal, paridad invertida y defecto real
+  de un agujero bajo paridad invertida.
+
+**Validacion:**
+- Pipeline de produccion (dedup por movimiento): 42/42 raw OK, 42/42 temporal OK,
+  0 missing, 0 machine stop.
+- Forzando todos los frames: 99/99 OK, missing total=0, expected=165-171 por frame
+  (antes solo 85-91). Frames 0074/0091/0092: missing=0.
+- Defecto sintetico controlado borrando un agujero central: raw NOK, missing=1; regla de
+  5 frames = `OK, OK, OK, OK, NOK`.
+- Suite completa: `pytest` 34/34.
+
+**Riesgos / pendientes:**
+- Validar tambien con un lote NOK real del scanner_1 apenas este disponible. La prueba
+  sintetica confirma el matching y la temporalidad, pero un defecto real suma variaciones
+  opticas/mecanicas que conviene conservar como regresion permanente.
+
 #### Cambio 266 - Boton RESET se auto-limpia a los 30s tras parada manual (no falla)
 
 **Pedido:** al DETENER un scanner que estaba en RUN, el boton grande naranja RESET

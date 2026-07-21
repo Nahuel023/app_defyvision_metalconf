@@ -224,7 +224,7 @@ def _fit_affine_to_grid(
     return corrected
 
 
-def grid_compare_points(
+def _grid_compare_points_single(
     detected_xy: np.ndarray,
     cells: list[tuple[int, int]],
     dx: float,
@@ -378,3 +378,110 @@ def grid_compare_points(
             result.append((ex, ey))
             result_cells.append((ci, cj))
     return result, result_cells
+
+
+def _swap_row_templates(cells: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Swap the even/odd row occupancy while keeping screen row coordinates.
+
+    A staggered continuous strip can advance by one physical row while keeping the
+    same Y phase modulo ``dy``.  In that case the row visible at a given screen Y
+    has the opposite parity: its X stagger and its edge-column occupancy both
+    change.  Copying the nearest opposite-parity row template models that second
+    valid lattice state without changing the canonical screen-row coordinates.
+    """
+    rows: dict[int, list[int]] = {}
+    for ci, cj in cells:
+        rows.setdefault(int(cj), []).append(int(ci))
+    if len(rows) < 2:
+        return list(cells)
+
+    row_ids = sorted(rows)
+    swapped: list[tuple[int, int]] = []
+    for cj in row_ids:
+        opposite = [other for other in row_ids if other % 2 != cj % 2]
+        if not opposite:
+            swapped.extend((ci, cj) for ci in sorted(set(rows[cj])))
+            continue
+        source = min(opposite, key=lambda other: (abs(other - cj), other))
+        swapped.extend((ci, cj) for ci in sorted(set(rows[source])))
+    return swapped
+
+
+def _parity_candidate_score(
+    detected_xy: np.ndarray,
+    expected: list[tuple[float, float]],
+    tolerance_px: float,
+) -> tuple[int, float]:
+    """Return match count and residual used only to select lattice parity."""
+    if len(detected_xy) == 0 or not expected:
+        return (0, float("inf"))
+    exp = np.asarray(expected, dtype=np.float32)
+    d2 = ((detected_xy[:, None, :] - exp[None, :, :]) ** 2).sum(axis=2)
+    nearest = np.sqrt(d2.min(axis=0))
+    matched = nearest <= tolerance_px
+    return int(matched.sum()), float(nearest[matched].sum())
+
+
+def grid_compare_points(
+    detected_xy: np.ndarray,
+    cells: list[tuple[int, int]],
+    dx: float,
+    dy: float,
+    phase_ref_x: float,
+    phase_ref_y: float,
+    transform: np.ndarray | None,
+    img_w: int,
+    img_h: int,
+    margin: float,
+    tol_affine: float = 0.0,
+    min_affine_matches: int = 12,
+    stagger_x_odd: float = 0.0,
+    margin_x: float | None = None,
+    margin_y: float | None = None,
+    allow_row_parity_flip: bool = False,
+    parity_selection_tol_px: float = 0.0,
+) -> tuple[list[tuple[float, float]], list[tuple[int, int]]]:
+    """Return expected points, optionally selecting either stagger-row parity.
+
+    The parity selection is opt-in because patterns with non-repeating row content
+    must retain their original row identity.  It is intended for continuous,
+    regular staggered material such as ``modelo_B`` microperforado.
+    """
+    common = dict(
+        detected_xy=detected_xy,
+        dx=dx,
+        dy=dy,
+        phase_ref_x=phase_ref_x,
+        phase_ref_y=phase_ref_y,
+        transform=transform,
+        img_w=img_w,
+        img_h=img_h,
+        margin=margin,
+        tol_affine=tol_affine,
+        min_affine_matches=min_affine_matches,
+        stagger_x_odd=stagger_x_odd,
+        margin_x=margin_x,
+        margin_y=margin_y,
+    )
+    normal = _grid_compare_points_single(cells=cells, **common)
+    if not allow_row_parity_flip or stagger_x_odd == 0.0:
+        return normal
+
+    swapped_cells = _swap_row_templates(cells)
+    if swapped_cells == cells:
+        return normal
+    swapped = _grid_compare_points_single(cells=swapped_cells, **common)
+
+    selection_tol = float(parity_selection_tol_px)
+    if selection_tol <= 0.0:
+        selection_tol = max(float(dy) * 0.9, float(dx) * 0.35, 6.0)
+    normal_score = _parity_candidate_score(detected_xy, normal[0], selection_tol)
+    swapped_score = _parity_candidate_score(detected_xy, swapped[0], selection_tol)
+
+    # More matched holes is decisive.  On a tie, prefer the lower residual and
+    # finally the original parity to keep the result deterministic.
+    if swapped_score[0] > normal_score[0]:
+        return swapped
+    if swapped_score[0] == normal_score[0] and swapped_score[1] < normal_score[1] - 1e-6:
+        return swapped
+    return normal

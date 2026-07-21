@@ -231,6 +231,9 @@ def _inspect_bgr(
     max_extra             = int(tolerances.get("max_extra", -1))
     bbox_filter_margin_px = float(tolerances.get("bbox_filter_margin_px", 0.0))
     grid_affine_refinement = bool(tolerances.get("grid_affine_refinement", False))
+    grid_allow_row_parity_flip = bool(
+        tolerances.get("grid_allow_row_parity_flip", False)
+    )
     # Umbral (grados) de inclinacion de la grilla para avisar "CHAPA INCLINADA".
     # 0.0 = solo medir, sin badge. La medicion siempre se calcula e informa.
     tilt_warn_deg          = float(tolerances.get("tilt_warn_deg", 0.0))
@@ -260,6 +263,7 @@ def _inspect_bgr(
     compare_left_ignore_px = float(tolerances.get("compare_left_ignore_px", 0.0))
     compare_right_ignore_px = float(tolerances.get("compare_right_ignore_px", 0.0))
     pattern_hull_margin_px = float(tolerances.get("pattern_hull_margin_px", 0.0))
+    grid_extend_rows_before = int(tolerances.get("grid_extend_rows_before", 0))
     grid_extend_rows_after = int(tolerances.get("grid_extend_rows_after", 0))
     blur_score_min = float(tolerances.get("blur_score_min", 0.0))
     low_quality_max_streak = int(tolerances.get("low_quality_max_streak", 10))  # noqa: F841
@@ -470,6 +474,23 @@ def _inspect_bgr(
             if _derotate else detected_arr
         )
         grid_cells = list(pattern.cells)
+        if grid_extend_rows_before > 0 and grid_cells:
+            min_cj = min(cj for _ci, cj in grid_cells)
+            existing = set(grid_cells)
+            for row_offset in range(1, grid_extend_rows_before + 1):
+                new_cj = min_cj - row_offset
+                same_parity_rows = [
+                    cj for _ci, cj in grid_cells
+                    if cj > new_cj and cj % 2 == new_cj % 2
+                ]
+                if not same_parity_rows:
+                    continue
+                template_cj = min(same_parity_rows)
+                for ci in sorted(ci for ci, cj in grid_cells if cj == template_cj):
+                    cell = (ci, new_cj)
+                    if cell not in existing:
+                        existing.add(cell)
+                        grid_cells.append(cell)
         if grid_extend_rows_after > 0 and grid_cells:
             max_cj = max(cj for _ci, cj in grid_cells)
             existing = set(grid_cells)
@@ -502,6 +523,8 @@ def _inspect_bgr(
             stagger_x_odd=stagger_x_odd,
             margin_x=grid_compare_margin_x_px,
             margin_y=grid_compare_margin_y_px,
+            allow_row_parity_flip=grid_allow_row_parity_flip,
+            parity_selection_tol_px=tol_xy_px,
         )
         # Posiciones esperadas de vuelta al espacio original (imagen sin de-rotar).
         if _derotate and compare_points:
@@ -649,21 +672,27 @@ def _inspect_bgr(
     # points que estan dentro de la zona de comparacion pero cerca del margen.
     _has_tb_ignore = compare_top_ignore_px > 0.0 or compare_bottom_ignore_px > 0.0
     if detected_in_bbox and _has_tb_ignore:
+        # Keep a matching halo around the compare boundary.  An expected point
+        # can legitimately fall just inside the margin while its measured
+        # centroid falls a few pixels outside because of curvature/perspective.
+        # Removing that detection first creates a guaranteed false missing.
+        _det_y_keep_min = max(0.0, _y_keep_min - tol_xy_px)
+        _det_y_keep_max = min(float(img_h), _y_keep_max + tol_xy_px)
         detected_holes_in_bbox = [
             hh for hh in detected_holes_in_bbox
-            if _y_keep_min <= hh.y <= _y_keep_max
+            if _det_y_keep_min <= hh.y <= _det_y_keep_max
         ]
         if detected_types is not None:
             _filtered = [
                 (pt, dt) for pt, dt in zip(detected_in_bbox, detected_types)
-                if _y_keep_min <= pt[1] <= _y_keep_max
+                if _det_y_keep_min <= pt[1] <= _det_y_keep_max
             ]
             detected_in_bbox = [p for p, _ in _filtered]
             detected_types = [t for _, t in _filtered]
         else:
             detected_in_bbox = [
                 (x, y) for x, y in detected_in_bbox
-                if _y_keep_min <= y <= _y_keep_max
+                if _det_y_keep_min <= y <= _det_y_keep_max
             ]
 
     _grid_match_max_dx_px: float | None = None
@@ -796,7 +825,8 @@ def _inspect_bgr(
                         f"(std={pattern_zigzag_std_px:.1f}px, max={pattern_zigzag_max_px:.1f}px)"
                     )
             if (
-                pattern_global_offset_max_px > 0.0
+                _pattern_align_missing_ok
+                and pattern_global_offset_max_px > 0.0
                 and abs(centering.offset_px) > pattern_global_offset_max_px
             ):
                 pattern_offset_warn = True
