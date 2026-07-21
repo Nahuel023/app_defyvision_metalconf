@@ -6877,6 +6877,10 @@ class ServiceWindow(QMainWindow):
 
         self._build_ui()
 
+        # Micro-animacion: feedback tactil al presionar cualquier boton.
+        from src.ui.anim import polish_buttons
+        polish_buttons(self)
+
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         self._timer.start(500)
@@ -7140,4 +7144,6 @@ def launch_service_ui(system: InspectionSystem) -> None:
         app.setWindowIcon(QIcon(icon_pix))
     win = ServiceWindow(system)
     win.showMaximized()
+    from src.ui.anim import fade_in
+    fade_in(win)
     app.exec()

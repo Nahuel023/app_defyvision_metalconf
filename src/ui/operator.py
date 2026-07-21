@@ -1078,6 +1078,10 @@ class OperatorWindow(QMainWindow):
         self.resize(1400, 880)
         self._build_ui()
 
+        # Micro-animacion: feedback tactil al presionar cualquier boton.
+        from src.ui.anim import polish_buttons
+        polish_buttons(self)
+
         self._camera_timer = QTimer(self)
         self._camera_timer.timeout.connect(self._refresh_cameras)
         self._camera_timer.start(_CAMERA_REFRESH_MS)
@@ -1306,6 +1310,8 @@ class OperatorWindow(QMainWindow):
         if self._errors_win is None:
             self._errors_win = OperatorFrameViewer(self._system, parent=None)
         self._errors_win.showMaximized()
+        from src.ui.anim import fade_in
+        fade_in(self._errors_win)
         self._errors_win.raise_()
         self._errors_win.activateWindow()
         try:
@@ -1326,6 +1332,8 @@ class OperatorWindow(QMainWindow):
         if self._metrics_win is None or not self._metrics_win.isVisible():
             self._metrics_win = MetricsWindow(self._system)
         self._metrics_win.showMaximized()
+        from src.ui.anim import fade_in
+        fade_in(self._metrics_win)
         self._metrics_win.raise_()
         self._metrics_win.activateWindow()
 
@@ -1334,6 +1342,8 @@ class OperatorWindow(QMainWindow):
         if self._tolerance_win is None or not self._tolerance_win.isVisible():
             self._tolerance_win = ToleranceWindow(self._system)
         self._tolerance_win.showMaximized()
+        from src.ui.anim import fade_in
+        fade_in(self._tolerance_win)
         self._tolerance_win.raise_()
         self._tolerance_win.activateWindow()
 
@@ -1350,6 +1360,8 @@ class OperatorWindow(QMainWindow):
         if self._service_win is None or not self._service_win.isVisible():
             self._service_win = ServiceWindow(self._system, parent=None)
         self._service_win.showMaximized()
+        from src.ui.anim import fade_in
+        fade_in(self._service_win)
         self._service_win.raise_()
         self._service_win.activateWindow()
 
@@ -1448,6 +1460,8 @@ def launch_operator_ui(system: InspectionSystem) -> None:
 
     win = OperatorWindow(system)
     win.showMaximized()
+    from src.ui.anim import fade_in
+    fade_in(win)
     win.raise_()
     win.activateWindow()
     app.exec()
