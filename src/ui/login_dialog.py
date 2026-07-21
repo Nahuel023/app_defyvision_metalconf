@@ -47,6 +47,16 @@ class LoginDialog(QDialog):
 
     # ------------------------------------------------------------------
 
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if not getattr(self, "_did_fade", False):
+            self._did_fade = True
+            try:
+                from src.ui.anim import fade_in
+                fade_in(self, ms=170)
+            except Exception:
+                pass
+
     def keyPressEvent(self, event: QKeyEvent) -> None:
         # Evitar que Escape cierre el diálogo accidentalmente
         if event.key() == Qt.Key.Key_Escape:

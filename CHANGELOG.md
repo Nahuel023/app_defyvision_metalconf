@@ -48,6 +48,34 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 268 - Pack de animaciones completo (industrial, sutil)
+
+**Pedido:** completar el toque estetico con animaciones mas completas, siempre estilo
+industrial. Tadeo eligio las cuatro del pack.
+
+**Cambios (`src/ui/anim.py` ampliado + wiring en operator.py y login_dialog.py):**
+1. **Boton RESET aparece/desaparece con fundido.** `fade_button(btn, visible)` usa el
+   mismo animador del boton (show_fade/hide_fade sobre su QGraphicsOpacityEffect): al
+   ocultar, se anima a opacidad 0 y recien ahi setVisible(False). Reemplaza el
+   setVisible seco en `ScannerPanel._refresh_buttons`. (Se omitio el "deslizamiento":
+   el boton esta en un layout y animar su pos genera jitter; solo fundido.)
+2. **Badge de estado con transicion de color.** `animate_bg_color(widget, hex, style_fn)`
+   interpola el fondo (QVariantAnimation sobre QColor) de IDLE/RUNNING/FALLA. Guarda el
+   color objetivo AL INICIAR para que los refresh_status (cada ~200-500ms) con el mismo
+   estado no reinicien la animacion en cada tick.
+3. **Fade-in en dialogos.** `showEvent` -> `fade_in()` en `MachineStopDialog` (ms=110,
+   rapido por ser alerta) y `LoginDialog` (ms=170). Flag `_did_fade` para no repetir.
+4. **Realce en hover de tarjetas y camara.** `add_hover_shadow(widget)` instala un
+   QGraphicsDropShadowEffect (glow celeste sutil) que se CREA al entrar el mouse y se
+   REMUEVE al salir -> costo cero en reposo (clave para el feed de camara, que se repinta
+   muchas veces por segundo). Aplicado a las 3 tarjetas OK/Tiempo/NOK y al panel de camara.
+
+**Verificado (headless offscreen):** fade_button muestra/oculta con la opacidad correcta;
+animate_bg_color aplica directo el primer color, anima al cambiar y NO reinicia con el
+mismo; hover_shadow sin efecto en reposo y lo crea al entrar; sintaxis OK; `pytest` 34/34.
+
+---
+
 #### Cambio 267 - Scanner 1 microperforado completo tras zoom 150%: paridad, patron y matching
 
 **Pedido:** despues de estabilizar el zoom digital y los reinicios de las Sony, revisar

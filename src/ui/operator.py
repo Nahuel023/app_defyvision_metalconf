@@ -356,6 +356,8 @@ class ScannerPanel(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         root.addWidget(self.camera_label, stretch=1)
+        from src.ui.anim import add_hover_shadow
+        add_hover_shadow(self.camera_label, blur=28)
 
         # ── Info de cámara: IP · FPS · estado de conexión ─────────────
         self._cam_info_lbl = QLabel("● —")
@@ -389,8 +391,10 @@ class ScannerPanel(QWidget):
         self._result_val = self._metric_card("ÚLTIMO",    "—",    _MUTED)
         self._streak_val = self._metric_card("RACHA NOK", "0",    _MUTED)
         self._center_val = self._metric_card("CENTRADO",  "—",    _MUTED)
+        from src.ui.anim import add_hover_shadow
         for mv in (self._ok_val, self._nok_val, self._total_val):
             metrics_row.addWidget(mv[0])
+            add_hover_shadow(mv[0], blur=16)
         root.addLayout(metrics_row)
 
         # ── Selector de placa ─────────────────────────────────────────
@@ -611,9 +615,13 @@ class ScannerPanel(QWidget):
         bg, fg = _COLOR.get(state, ("#64748b", "#ffffff"))
         label = _STATE_LABEL.get(state, state.value.upper())
         self.state_badge.setText(f"● {label}")
-        self.state_badge.setStyleSheet(
-            f"background:{bg};color:{fg};border-radius:6px;"
-            "padding:10px 14px;font-size:16px;font-weight:700;letter-spacing:1px;"
+        from src.ui.anim import animate_bg_color
+        animate_bg_color(
+            self.state_badge, bg,
+            lambda c, _fg=fg: (
+                f"background:{c};color:{_fg};border-radius:6px;"
+                "padding:10px 14px;font-size:16px;font-weight:700;letter-spacing:1px;"
+            ),
         )
 
         mc = _MODE_COLOR[mode]
@@ -875,8 +883,9 @@ class ScannerPanel(QWidget):
     # ------------------------------------------------------------------
 
     def _refresh_buttons(self, state: ScannerState, stopped_by_fault: bool = False) -> None:
+        from src.ui.anim import fade_button
         is_stopped = (state == ScannerState.STOPPED)
-        self.reset_btn.setVisible(is_stopped)
+        fade_button(self.reset_btn, is_stopped)
         if is_stopped:
             text = "↺  RESET FALLA" if stopped_by_fault else "↺  RESET"
             self.reset_btn.setText(text)
@@ -967,6 +976,13 @@ class MachineStopDialog(QDialog):
         self._build_ui()
         # Maximizar para ocupar toda la pantalla
         self.showMaximized()
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if not getattr(self, "_did_fade", False):
+            self._did_fade = True
+            from src.ui.anim import fade_in
+            fade_in(self, ms=110)  # rapido: es una alerta, no debe demorar
 
     def _build_ui(self) -> None:
         self.setStyleSheet("background:#120607;")
