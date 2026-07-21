@@ -46,6 +46,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+## Cambios pendientes
+
+### Activar centrado automatico de ROI en scanner 2
+
+- Activar y ajustar el sistema de recentrado automatico de ROI para `scanner_2`,
+  equivalente al seguimiento gradual que ya funciona en `scanner_1` durante RUN.
+- Antes de habilitarlo en produccion, reunir y validar un lote de imagenes completamente
+  OK tomado con la optica y el zoom reales del scanner 2, para ambos tipos de placa que
+  utilice (microperforado y esterilla).
+- Calibrar con ese lote el warmup, umbral de deriva, racha de confirmacion, cooldown,
+  paso y limite acumulado. Verificar que no pierda agujeros ni genere correcciones por
+  ruido, cambios de iluminacion o entrada/salida de la chapa.
+- Confirmar el comportamiento antes de RUN, durante RUN, tras DETENER/INICIAR y luego de
+  modificar manualmente la ROI desde Tolerancias.
+
+---
+
 ### Sesion 2026-07-21 - Tadeo + Claude
 
 #### Cambio 272 - Botones del header: colores + separar Tolerancias / Área de análisis
