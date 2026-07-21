@@ -48,6 +48,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-21 - Tadeo + Claude
 
+#### Cambio 272 - Botones del header: colores + separar Tolerancias / Área de análisis
+
+**Pedido:** mejorar los colores de los botones de arriba (Métricas, Grabación,
+Tolerancias, Servicio) y dividir "tolerancias" de la "visualizacion de ROI" en dos
+entradas separadas, faciles para el operario, SIN usar la palabra "ROI" (no la entiende),
+y sin complicarlo.
+
+**Cambios (`src/ui/operator.py`, header):**
+- `_hbtn` rediseñado: texto blanco, radio 6, font 11 weight 600, cursor pointer; el realce
+  en hover lo aporta la animacion de opacidad global (se saco el `{bg}dd` que en Qt se
+  interpreta como #AARRGGBB y daba un color equivocado).
+- Paleta cohesiva (tono -600, texto blanco): Métricas #2563eb, Grabación #e11d48,
+  Servicio #475569, Tolerancias #0d9488, Área de análisis #7c3aed.
+- Se separa el antiguo boton unico "Tolerancias" en DOS: **Tolerancias** y
+  **Área de análisis**. Se disponen en dos filas (nav arriba / ajustes abajo); header
+  84->90px para que entren comodas.
+- `_open_tolerances`/`_open_area` delegan en `_open_ajustes(page)` que abre la ventana en
+  la pagina correcta via `ToleranceWindow.show_page(0|1)`.
+
+**Cambios (`src/ui/tolerance_window.py`):**
+- Nuevo `show_page(idx)` publico (0=Tolerancias, 1=Área de análisis).
+- Renombradas TODAS las cadenas visibles "ROI" -> "Área": titulo "ÁREA DE ANÁLISIS",
+  tab "Área de análisis", boton "GUARDAR ÁREA", labels "Área guardada…", estados
+  "Área guardada — recalculando…". Titulo de ventana "Ajustes — DEFYVISION" y header
+  "AJUSTES". Tabs internos recoloreados a teal/violeta para matchear los botones del header.
+
+**Verificado:** metodos presentes (`_open_area`, `_open_ajustes`, `show_page`); 0 cadenas
+visibles con "ROI"; sintaxis OK; `pytest` 36/36.
+
+---
+
 #### Cambio 271 - Glow de la camara atado al estado del scanner
 
 **Pedido:** que el realce iluminado alrededor de la camara de cada scanner (el que

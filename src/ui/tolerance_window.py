@@ -237,7 +237,7 @@ class _RoiPanel(QWidget):
         top_row = QHBoxLayout()
         top_row.setSpacing(10)
 
-        title_lbl = QLabel("AJUSTE DE ROI")
+        title_lbl = QLabel("ÁREA DE ANÁLISIS")
         title_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:13px;font-weight:700;letter-spacing:2px;"
             "background:transparent;"
@@ -266,7 +266,7 @@ class _RoiPanel(QWidget):
         root.addLayout(top_row)
 
         # ── ROI guardada ──────────────────────────────────────────────
-        self._roi_saved_lbl = QLabel("ROI guardada: —")
+        self._roi_saved_lbl = QLabel("Área guardada: —")
         self._roi_saved_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:11px;font-family:Consolas,monospace;background:transparent;"
         )
@@ -379,7 +379,7 @@ class _RoiPanel(QWidget):
 
         save_row.addStretch()
 
-        self._save_btn = QPushButton("GUARDAR ROI")
+        self._save_btn = QPushButton("GUARDAR ÁREA")
         self._save_btn.setFixedHeight(36)
         self._save_btn.setEnabled(False)
         self._save_btn.setMinimumWidth(180)
@@ -420,10 +420,10 @@ class _RoiPanel(QWidget):
         roi   = load_roi(model, sid) if model else None
         if roi:
             self._roi_saved_lbl.setText(
-                f"ROI guardada:  x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}"
+                f"Área guardada:  x={roi.x}  y={roi.y}  w={roi.w}  h={roi.h}"
             )
         else:
-            self._roi_saved_lbl.setText("ROI guardada: — (sin ROI definida aún)")
+            self._roi_saved_lbl.setText("Área guardada: — (sin área definida aún)")
 
     def _init_borders(self, sid: str, W: int) -> None:
         from src.patterns.roi import load_roi
@@ -565,7 +565,7 @@ class _RoiPanel(QWidget):
             encoding="utf-8",
         )
         self._save_btn.setEnabled(False)
-        self._status_lbl.setText("ROI guardada — reconstruyendo patrón…")
+        self._status_lbl.setText("Área guardada — recalculando…")
         self._status_lbl.setStyleSheet(f"color:{_MUTED};font-size:10px;")
         self._refresh_roi_label()
         self._rebuild_pattern_async(self._roi_frame.copy(), model, sid)
@@ -592,7 +592,7 @@ class _RoiPanel(QWidget):
                     )
                     self.done.emit(f"ROI y patron guardados → {out.name}", True)
                 except Exception as exc:
-                    self.done.emit(f"ROI guardada  ·  Error reconstruyendo patron: {exc}", False)
+                    self.done.emit(f"Área guardada  ·  Error recalculando: {exc}", False)
                 finally:
                     if tmp and os.path.exists(tmp):
                         os.unlink(tmp)
@@ -830,7 +830,7 @@ class ToleranceWindow(QMainWindow):
         self._system = system
         self._roi_panel: _RoiPanel | None = None
         self._stack: QStackedWidget | None = None
-        self.setWindowTitle("Tolerancias — DEFYVISION")
+        self.setWindowTitle("Ajustes — DEFYVISION")
         icon_pix = QPixmap(str(_ROOT / "logos" / "logo_ventana.jpg"))
         if not icon_pix.isNull():
             self.setWindowIcon(QIcon(icon_pix))
@@ -869,7 +869,7 @@ class ToleranceWindow(QMainWindow):
         lay.setContentsMargins(16, 0, 16, 0)
         lay.setSpacing(12)
 
-        title = QLabel("TOLERANCIAS")
+        title = QLabel("AJUSTES")
         title.setStyleSheet(
             f"color:{_TEXT};font-size:18px;font-weight:700;"
             "letter-spacing:4px;background:transparent;border:none;"
@@ -894,8 +894,8 @@ class ToleranceWindow(QMainWindow):
             btn.clicked.connect(lambda: self._switch_tab(idx))
             return btn
 
-        self._tab_tol = _tab("Tolerancias",   0, "#065f46")
-        self._tab_roi = _tab("Ajuste de ROI", 1, "#0369a1")
+        self._tab_tol = _tab("Tolerancias",       0, "#0d9488")
+        self._tab_roi = _tab("Área de análisis",  1, "#7c3aed")
         self._tab_tol.setChecked(True)
 
         lay.addWidget(self._tab_tol)
@@ -951,6 +951,11 @@ class ToleranceWindow(QMainWindow):
         return page
 
     # ── Navegación de pestañas ────────────────────────────────────────
+
+    def show_page(self, idx: int) -> None:
+        """Selecciona la pagina al abrir la ventana desde el operador
+        (0 = Tolerancias, 1 = Area de analisis)."""
+        self._switch_tab(idx)
 
     def _switch_tab(self, idx: int) -> None:
         prev = self._stack.currentIndex() if self._stack else 0

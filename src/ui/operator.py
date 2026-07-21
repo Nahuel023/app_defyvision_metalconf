@@ -1232,7 +1232,7 @@ class OperatorWindow(QMainWindow):
         Ambas alas tienen el mismo ancho → el título queda perfectamente centrado.
         """
         header = QWidget()
-        header.setFixedHeight(84)
+        header.setFixedHeight(90)
         header.setStyleSheet(
             "QWidget { background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
             "stop:0 #05101f, stop:0.5 #0c2340, stop:1 #05101f);"
@@ -1302,30 +1302,36 @@ class OperatorWindow(QMainWindow):
         self._plc_badge.hide()
         ctrl_lay.addWidget(self._plc_badge)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(5)
-
-        def _hbtn(label, bg, fg, slot):
+        def _hbtn(label, bg, slot):
             b = QPushButton(label)
-            b.setFixedHeight(22)
+            b.setFixedHeight(24)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.setStyleSheet(
-                f"QPushButton {{ background:{bg}; color:{fg}; border-radius:5px;"
-                f"font-size:10px; padding:0 8px; border:none; }}"
-                f"QPushButton:hover {{ background:{bg}dd; }}"
+                f"QPushButton {{ background:{bg}; color:#ffffff; border:none;"
+                f"border-radius:6px; font-size:11px; font-weight:600;"
+                f"letter-spacing:0.3px; padding:0 12px; }}"
             )
             b.clicked.connect(slot)
             return b
 
-        metrics_btn   = _hbtn("Métricas",    "#1e40af", "#ffffff", self._open_metrics)
-        errors_btn    = _hbtn("Grabación",   "#7f1d1d", "#fca5a5", self._open_errors)
-        tolerance_btn = _hbtn("Tolerancias", "#065f46", "#6ee7b7", self._open_tolerances)
-        service_btn   = _hbtn("Servicio",    "#334155", "#94a3b8", self._open_service)
+        # Paleta cohesiva (tono -600, texto blanco). El realce en hover lo aporta
+        # la animacion de opacidad global (polish_buttons).
+        metrics_btn   = _hbtn("Métricas",         "#2563eb", self._open_metrics)     # azul
+        errors_btn    = _hbtn("Grabación",        "#e11d48", self._open_errors)      # rojo (rec)
+        service_btn   = _hbtn("Servicio",         "#475569", self._open_service)     # gris
+        tolerance_btn = _hbtn("Tolerancias",      "#0d9488", self._open_tolerances)  # teal
+        area_btn      = _hbtn("Área de análisis", "#7c3aed", self._open_area)        # violeta
 
-        btn_row.addWidget(metrics_btn)
-        btn_row.addWidget(errors_btn)
-        btn_row.addWidget(tolerance_btn)
-        btn_row.addWidget(service_btn)
-        ctrl_lay.addLayout(btn_row)
+        # Dos filas: navegacion arriba, ajustes abajo (entra comodo y legible).
+        row1 = QHBoxLayout(); row1.setSpacing(5)
+        for b in (metrics_btn, errors_btn, service_btn):
+            row1.addWidget(b)
+        row2 = QHBoxLayout(); row2.setSpacing(5)
+        for b in (tolerance_btn, area_btn):
+            row2.addWidget(b)
+        ctrl_lay.addLayout(row1)
+        ctrl_lay.addLayout(row2)
 
         right_lay.addStretch()
         right_lay.addWidget(ctrl)
@@ -1420,9 +1426,17 @@ class OperatorWindow(QMainWindow):
         self._metrics_win.activateWindow()
 
     def _open_tolerances(self) -> None:
+        self._open_ajustes(page=0)
+
+    def _open_area(self) -> None:
+        """Abre la ventana de ajustes directamente en 'Área de análisis'."""
+        self._open_ajustes(page=1)
+
+    def _open_ajustes(self, page: int) -> None:
         from src.ui.tolerance_window import ToleranceWindow
         if self._tolerance_win is None or not self._tolerance_win.isVisible():
             self._tolerance_win = ToleranceWindow(self._system)
+        self._tolerance_win.show_page(page)
         self._tolerance_win.showMaximized()
         from src.ui.anim import fade_in
         fade_in(self._tolerance_win)
