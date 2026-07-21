@@ -60,6 +60,12 @@ PLC (Modbus TCP) ←→ InspectionSystem
   ruido, cambios de iluminacion o entrada/salida de la chapa.
 - Confirmar el comportamiento antes de RUN, durante RUN, tras DETENER/INICIAR y luego de
   modificar manualmente la ROI desde Tolerancias.
+- Tener en cuenta que, despues de pulsar RUN, la cinta o el patron puede tardar cerca de
+  20 segundos en comenzar a moverse realmente. El warmup del centrado no debe aprender
+  como referencia los frames previos sin movimiento o sin una chapa valida, ni agotarse
+  antes de que empiece la inspeccion efectiva. La activacion debe condicionarse a
+  evidencia valida de chapa/movimiento y la gracia inicial debe cubrir esta demora real,
+  en lugar de depender solamente de una cantidad de frames o de un tiempo fijo menor.
 
 ---
 
