@@ -463,7 +463,6 @@ class ScannerPanel(QWidget):
         btn.setStyleSheet(
             f"QPushButton {{ background:{color}; color:#ffffff; font-weight:700; "
             "border-radius:8px; font-size:16px; border:none; padding:0 12px; }"
-            "QPushButton:hover { filter:brightness(1.15); }"
             "QPushButton:disabled { background:#374151; color:#6b7280; }"
         )
         return btn
@@ -737,7 +736,6 @@ class ScannerPanel(QWidget):
             f"background:{bg};color:{fg};border:1px solid {border};"
             "border-radius:6px;padding:4px 8px;font-size:9px;font-weight:800;"
             "letter-spacing:1px;text-align:center;}"
-            "QPushButton:hover { filter:brightness(1.08); }"
         )
         self._safe_mode_btn.blockSignals(False)
 
