@@ -28,21 +28,42 @@ _DEFAULT_RETRY_INTERVAL = 3.0
 # Mapping from settings-dict key -> OpenCV CAP_PROP constant.
 # Boolean auto properties are handled explicitly because their numeric encoding
 # differs per backend (DirectShow uses 1/3 for manual/auto exposure).
+#
+# IMPORTANTE: usar siempre getattr(cv2, NOMBRE, valor_numerico_estandar) aqui.
+# Algunos builds de OpenCV empaquetados (PyInstaller, headless, etc.) no
+# exponen todas las constantes CAP_PROP_* como atributo del modulo. Como este
+# diccionario se evalua al importar el archivo, un solo atributo faltante
+# lanzaba AttributeError en el import y tumbaba toda la aplicacion antes de
+# llegar a abrir la UI (ver incidente 2026-07-22: no arrancaba en produccion
+# por CAP_PROP_FOCUS ausente). Los valores numericos de respaldo son los
+# codigos estables de la enum cv2.VideoCaptureProperties.
 _PROP_MAP: dict[str, int] = {
-    "focus": cv2.CAP_PROP_FOCUS,
-    "exposure": cv2.CAP_PROP_EXPOSURE,
-    "white_balance": cv2.CAP_PROP_WHITE_BALANCE_BLUE_U,
-    "gain": cv2.CAP_PROP_GAIN,
-    "brightness": cv2.CAP_PROP_BRIGHTNESS,
-    "contrast": cv2.CAP_PROP_CONTRAST,
-    "saturation": cv2.CAP_PROP_SATURATION,
-    "sharpness": cv2.CAP_PROP_SHARPNESS,
-    "gamma": cv2.CAP_PROP_GAMMA,
+    "focus": getattr(cv2, "CAP_PROP_FOCUS", 28),
+    "exposure": getattr(cv2, "CAP_PROP_EXPOSURE", 15),
+    "white_balance": getattr(cv2, "CAP_PROP_WHITE_BALANCE_BLUE_U", 17),
+    "gain": getattr(cv2, "CAP_PROP_GAIN", 14),
+    "brightness": getattr(cv2, "CAP_PROP_BRIGHTNESS", 10),
+    "contrast": getattr(cv2, "CAP_PROP_CONTRAST", 11),
+    "saturation": getattr(cv2, "CAP_PROP_SATURATION", 12),
+    "sharpness": getattr(cv2, "CAP_PROP_SHARPNESS", 20),
+    "gamma": getattr(cv2, "CAP_PROP_GAMMA", 22),
     "backlight_compensation": getattr(cv2, "CAP_PROP_BACKLIGHT", 32),
-    "fps": cv2.CAP_PROP_FPS,
+    "fps": getattr(cv2, "CAP_PROP_FPS", 5),
 }
 
 _FOURCC_MJPEG = cv2.VideoWriter.fourcc("M", "J", "P", "G")
+
+# Constantes CAP_PROP_* usadas fuera de _PROP_MAP: mismo criterio de robustez
+# (getattr con valor numerico estandar de respaldo), para que nunca dependan
+# de que el build de cv2 empaquetado las exponga por nombre.
+_CAP_PROP_AUTOFOCUS = getattr(cv2, "CAP_PROP_AUTOFOCUS", 39)
+_CAP_PROP_AUTO_EXPOSURE = getattr(cv2, "CAP_PROP_AUTO_EXPOSURE", 21)
+_CAP_PROP_AUTO_WB = getattr(cv2, "CAP_PROP_AUTO_WB", 44)
+_CAP_PROP_FRAME_WIDTH = getattr(cv2, "CAP_PROP_FRAME_WIDTH", 3)
+_CAP_PROP_FRAME_HEIGHT = getattr(cv2, "CAP_PROP_FRAME_HEIGHT", 4)
+_CAP_PROP_FOURCC = getattr(cv2, "CAP_PROP_FOURCC", 6)
+_CAP_PROP_FPS = getattr(cv2, "CAP_PROP_FPS", 5)
+_CAP_PROP_BUFFERSIZE = getattr(cv2, "CAP_PROP_BUFFERSIZE", 38)
 
 
 def apply_digital_zoom(frame: np.ndarray, zoom_pct, pan_x=0, pan_y=0) -> np.ndarray:
@@ -263,13 +284,12 @@ class Camera:
             return -1.0
         try:
             if name == "auto_exposure":
-                raw = cap.get(cv2.CAP_PROP_AUTO_EXPOSURE)
+                raw = cap.get(_CAP_PROP_AUTO_EXPOSURE)
                 return 1.0 if raw >= 2.0 else 0.0
             if name == "autofocus":
-                return float(cap.get(cv2.CAP_PROP_AUTOFOCUS))
+                return float(cap.get(_CAP_PROP_AUTOFOCUS))
             if name == "auto_white_balance":
-                prop = getattr(cv2, "CAP_PROP_AUTO_WB", 44)
-                return float(cap.get(prop))
+                return float(cap.get(_CAP_PROP_AUTO_WB))
             prop = _PROP_MAP.get(name)
             if prop is None:
                 return -1.0
@@ -310,16 +330,16 @@ class Camera:
 
             # DSHOW format negotiation: dimensions first so the driver resolves
             # the available format list, then MJPEG, then FPS.
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-            cap.set(cv2.CAP_PROP_FOURCC, _FOURCC_MJPEG)
-            cap.set(cv2.CAP_PROP_FPS, fps)
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            cap.set(_CAP_PROP_FRAME_WIDTH, width)
+            cap.set(_CAP_PROP_FRAME_HEIGHT, height)
+            cap.set(_CAP_PROP_FOURCC, _FOURCC_MJPEG)
+            cap.set(_CAP_PROP_FPS, fps)
+        cap.set(_CAP_PROP_BUFFERSIZE, 1)
 
-        actual_fps = cap.get(cv2.CAP_PROP_FPS)
-        actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        raw_fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+        actual_fps = cap.get(_CAP_PROP_FPS)
+        actual_w = int(cap.get(_CAP_PROP_FRAME_WIDTH))
+        actual_h = int(cap.get(_CAP_PROP_FRAME_HEIGHT))
+        raw_fourcc = int(cap.get(_CAP_PROP_FOURCC))
         fourcc_str = "".join(chr((raw_fourcc >> 8 * i) & 0xFF) for i in range(4))
         logger.info(
             "Camera %s: %sx%s @ %.0ffps codec=%s (backend=%s, open=%.1fs)",
@@ -455,13 +475,12 @@ class Camera:
     def _set_prop(cap: cv2.VideoCapture, name: str, value: float) -> bool:
         """Map a settings key to a CAP_PROP and call cap.set()."""
         if name == "autofocus":
-            return bool(cap.set(cv2.CAP_PROP_AUTOFOCUS, value))
+            return bool(cap.set(_CAP_PROP_AUTOFOCUS, value))
         if name == "auto_exposure":
             dshow_val = 3.0 if value >= 0.5 else 1.0
-            return bool(cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, dshow_val))
+            return bool(cap.set(_CAP_PROP_AUTO_EXPOSURE, dshow_val))
         if name == "auto_white_balance":
-            prop = getattr(cv2, "CAP_PROP_AUTO_WB", 44)
-            return bool(cap.set(prop, value))
+            return bool(cap.set(_CAP_PROP_AUTO_WB, value))
         prop = _PROP_MAP.get(name)
         if prop is None:
             return False

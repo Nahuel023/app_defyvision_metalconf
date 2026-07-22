@@ -13,6 +13,39 @@
 
 ---
 
+## REGLA CRÍTICA — LA APP NUNCA PUEDE FALLAR AL ARRANCAR
+
+> **Lo peor que puede pasar en este proyecto es que el operario no pueda abrir la app.**
+> Esto pasó el 2026-07-22 (ver incidente abajo) y **no puede volver a pasar nunca más.**
+>
+> Reglas obligatorias para Claude y para quien toque este código:
+>
+> 1. **Ningún import de módulo puede depender de que una librería externa (cv2, pymodbus,
+>    PyQt6, etc.) tenga exactamente tal o cual atributo/constante disponible.** El build de
+>    OpenCV empaquetado con PyInstaller para producción puede no exponer todas las
+>    constantes `cv2.CAP_PROP_*` que sí existen en el entorno de desarrollo (`.venv`). Usar
+>    siempre `getattr(cv2, "NOMBRE", valor_numerico_de_respaldo)` para CUALQUIER constante
+>    de cv2 referenciada a nivel de módulo (fuera de una función), y preferentemente
+>    también dentro de funciones si se llama en el camino crítico de arranque.
+> 2. **Nunca acceder a una constante de una librería de forma directa (`cv2.ALGO`) en el
+>    cuerpo de un módulo** (variables globales, diccionarios de mapeo, decoradores, etc.).
+>    Esas líneas se ejecutan en el `import`, y si fallan, tumban toda la aplicación antes
+>    de llegar siquiera a mostrar una ventana o un mensaje de error legible — el operario
+>    solo ve una consola con un traceback.
+> 3. **Antes de dar por cerrado cualquier cambio que toque `src/vision/camera.py`,
+>    `src/controller/`, `src/plc/`, o cualquier módulo importado por `src/main.py` en el
+>    camino de `run`/`service`**, revisar que no se hayan agregado nuevos accesos directos
+>    a constantes de librerías externas a nivel de módulo.
+> 4. **Probar el arranque real (`run` o el .exe empaquetado), no solo `pytest`,** después de
+>    tocar módulos en el camino crítico de arranque. Un `AttributeError` en import no lo
+>    detecta ningún test unitario existente porque no hay ningún test que importe
+>    `src.controller.system` con el build de cv2 real de producción.
+> 5. Si se agrega una nueva constante de cv2 (o de cualquier librería) en cualquier parte
+>    del código, aplicar el mismo patrón `getattr(lib, "NOMBRE", fallback_numerico)` desde
+>    el principio, no como corrección posterior.
+
+---
+
 ## Descripción del sistema
 
 Sistema de inspección visual automática para chapas metálicas punzonadas (Metalconf).
@@ -43,6 +76,59 @@ PLC (Modbus TCP) ←→ InspectionSystem
 ---
 
 ## Historial de sesiones
+
+---
+
+### Sesión 2026-07-22 - Tadeo + Claude
+
+#### Cambio 275 - Fix critico: la app no abria en produccion (AttributeError cv2.CAP_PROP_FOCUS)
+
+**Incidente:** la mañana del 2026-07-22 el operario no pudo abrir la app. El .exe
+empaquetado (`run_production.py` → `src.main run`) tiraba:
+
+```
+AttributeError: module 'cv2' has no attribute 'CAP_PROP_FOCUS'
+```
+
+en `src\vision\camera.py:32`, al importar `src.controller.system` →
+`src.controller.scanner_controller` → `src.vision.camera`. Como el fallo ocurria en el
+`import` del módulo (a nivel de módulo, no dentro de una función), toda la aplicación se
+caía antes de mostrar cualquier ventana — el operario solo veía una consola con
+traceback y ningún camino para arrancar la produccion.
+
+**Causa raíz:** `_PROP_MAP`, el diccionario que mapea nombres de ajustes de cámara a
+constantes `cv2.CAP_PROP_*`, se construye a nivel de módulo accediendo directamente a
+`cv2.CAP_PROP_FOCUS`, `cv2.CAP_PROP_EXPOSURE`, etc. El build de OpenCV incluido en el
+.exe de producción (PyInstaller) no expone `CAP_PROP_FOCUS` como atributo, aunque sí
+existe en el entorno de desarrollo (`.venv`). Ya existía el patrón correcto al lado
+(`"backlight_compensation": getattr(cv2, "CAP_PROP_BACKLIGHT", 32)`), pero no se había
+aplicado al resto de las entradas del diccionario.
+
+**Corrección aplicada (`src/vision/camera.py`):**
+- Todas las entradas de `_PROP_MAP` ahora usan `getattr(cv2, "NOMBRE", valor_respaldo)`
+  con los códigos numéricos estándar de la enum `cv2.VideoCaptureProperties` como
+  respaldo (focus=28, exposure=15, white_balance=17, gain=14, brightness=10, contrast=11,
+  saturation=12, sharpness=20, gamma=22, fps=5).
+- Se agregaron constantes de módulo protegidas del mismo modo para el resto de props
+  usadas fuera del diccionario: `_CAP_PROP_AUTOFOCUS`, `_CAP_PROP_AUTO_EXPOSURE`,
+  `_CAP_PROP_AUTO_WB`, `_CAP_PROP_FRAME_WIDTH`, `_CAP_PROP_FRAME_HEIGHT`,
+  `_CAP_PROP_FOURCC`, `_CAP_PROP_FPS`, `_CAP_PROP_BUFFERSIZE`. Se reemplazaron todos los
+  usos directos de `cv2.CAP_PROP_*` en el archivo por estas constantes.
+- Resultado: aunque el build de cv2 empaquetado carezca de cualquiera de estas
+  constantes, el import nunca vuelve a fallar; en el peor caso un ajuste puntual de
+  cámara (foco, exposición, etc.) queda con un código de respaldo en vez de tumbar toda
+  la aplicación.
+
+**Se agregó regla permanente** en la sección "REGLA CRÍTICA — LA APP NUNCA PUEDE FALLAR
+AL ARRANCAR" (arriba de este archivo) para que este tipo de fallo — cualquier acceso
+directo a una constante de librería externa a nivel de módulo — no se repita en ningún
+módulo del camino de arranque.
+
+**Pendiente de verificar:** `src/main.py` (comando `define-roi`) también usa
+`cv2.CAP_PROP_FRAME_WIDTH/HEIGHT/FOURCC/FPS/BUFFERSIZE` sin `getattr`, pero son
+constantes estándar y ese comando no está en el camino de arranque de producción
+(`run`/`service`), así que no se tocó en este cambio. Si en el futuro se ve el mismo
+tipo de error en `define-roi`, aplicar el mismo patrón ahí.
 
 ---
 
