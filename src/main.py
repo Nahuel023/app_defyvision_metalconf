@@ -1,5 +1,40 @@
 import argparse
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def _show_fatal_dialog(title: str, exc: BaseException) -> None:
+    """Muestra un dialogo de error legible en vez de un traceback crudo.
+
+    Best-effort: si no hay entorno grafico disponible (o Qt falla), solo loguea.
+    Nunca lanza. El objetivo es que el operario NUNCA se quede mirando una
+    consola con un traceback sin saber que hacer.
+    """
+    msg = (
+        f"{title}\n\n"
+        f"{type(exc).__name__}: {exc}\n\n"
+        "El detalle completo quedo registrado en el archivo de log "
+        "(logs/app.log junto al ejecutable).\n\n"
+        "Revisar conexiones (PLC, camaras), la configuracion en la carpeta "
+        "config y reintentar. Si el problema persiste, contactar soporte."
+    )
+    try:
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+
+        app = QApplication.instance() or QApplication([])
+        box = QMessageBox()
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle("DefyVision Metalconf — Error")
+        box.setText(msg)
+        box.exec()
+    except Exception:
+        # Sin Qt disponible: al menos dejar el mensaje visible/registrado.
+        try:
+            print(f"[ERROR FATAL] {msg}")
+        except Exception:
+            pass
 
 
 def _show_scaled_window(name: str, image, max_width: int = 1280, max_height: int = 900) -> None:
@@ -734,12 +769,33 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 0
 
     disable_outputs = getattr(args, "no_plc_outputs", False)
-    system = InspectionSystem(disable_plc_outputs=disable_outputs)
-    system.connect_plc()        # intenta conectar; si falla, la UI lo mostrará
-    system.start_cameras()      # intenta abrir cámaras; errores van al log de la UI
 
-    launch_production_ui(system)
-    system.shutdown()
+    # Construccion del sistema protegida: una config invalida/faltante NO puede
+    # tumbar la app con un traceback crudo en la cara del operario.
+    try:
+        system = InspectionSystem(disable_plc_outputs=disable_outputs)
+    except Exception as exc:
+        logger.critical("No se pudo inicializar el sistema de produccion", exc_info=True)
+        _show_fatal_dialog("No se pudo iniciar la produccion", exc)
+        return 1
+
+    # try/finally CRITICO DE SEGURIDAD: pase lo que pase con la UI (crash,
+    # excepcion, cierre inesperado), system.shutdown() SIEMPRE corre y deja el
+    # solenoide/electrovalvula del punzon apagado y las salidas del PLC en OFF.
+    # Sin esto, un fallo de la UI podia dejar la maquina energizada.
+    try:
+        system.connect_plc()        # intenta conectar; si falla, la UI lo mostrara
+        system.start_cameras()      # intenta abrir camaras; errores van al log de la UI
+        launch_production_ui(system)
+    except Exception as exc:
+        logger.critical("Fallo en el bucle de produccion", exc_info=True)
+        _show_fatal_dialog("Error durante la produccion", exc)
+        return 1
+    finally:
+        try:
+            system.shutdown()
+        except Exception:
+            logger.critical("Error durante el apagado del sistema", exc_info=True)
     return 0
 
 
@@ -761,15 +817,29 @@ def cmd_service(_: argparse.Namespace) -> int:
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return 0
 
-    system = InspectionSystem()
-    system.connect_plc()
-    system.start_cameras()
+    try:
+        system = InspectionSystem()
+    except Exception as exc:
+        logger.critical("No se pudo inicializar el modo servicio", exc_info=True)
+        _show_fatal_dialog("No se pudo iniciar el modo servicio", exc)
+        return 1
 
-    win = ServiceWindow(system)
-    win.showMaximized()
-    app.exec()
-
-    system.shutdown()
+    # Mismo try/finally de seguridad que en produccion: shutdown() garantizado.
+    try:
+        system.connect_plc()
+        system.start_cameras()
+        win = ServiceWindow(system)
+        win.showMaximized()
+        app.exec()
+    except Exception as exc:
+        logger.critical("Fallo en el modo servicio", exc_info=True)
+        _show_fatal_dialog("Error en el modo servicio", exc)
+        return 1
+    finally:
+        try:
+            system.shutdown()
+        except Exception:
+            logger.critical("Error durante el apagado del sistema", exc_info=True)
     return 0
 
 
@@ -913,7 +983,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    # Ultima red de seguridad: cualquier excepcion no controlada de un
+    # subcomando se registra en disco y (en modos graficos) se muestra en un
+    # dialogo, en vez de escupir un traceback crudo. Los comandos run/service
+    # ya tienen su propio manejo + shutdown garantizado; esto cubre el resto y
+    # el caso de que setup_logging aun no se haya llamado.
+    try:
+        return args.func(args)
+    except KeyboardInterrupt:
+        return 130
+    except SystemExit:
+        raise
+    except Exception as exc:
+        try:
+            logger.critical("Error no controlado en '%s'",
+                            getattr(args, "command", "?"), exc_info=True)
+        except Exception:
+            pass
+        _show_fatal_dialog("Error inesperado", exc)
+        return 1
 
 
 if __name__ == "__main__":

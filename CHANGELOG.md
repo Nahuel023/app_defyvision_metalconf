@@ -132,6 +132,55 @@ tipo de error en `define-roi`, aplicar el mismo patrón ahí.
 
 ---
 
+#### Cambio 276 - Robustez industrial 24/7: apagado seguro garantizado, arranque a prueba de fallos y log en disco siempre
+
+**Pedido:** revisar mejoras de robustez y seguridad para operacion industrial 24/7 sin
+que el codigo se cierre, y solucionar cualquier falla de seguridad encontrada.
+
+**Auditoria:** el nucleo (PLCClient, Camera, ScannerController) ya estaba muy blindado
+tras el Cambio 274. Los huecos reales estaban en el camino de arranque/apagado y en el
+logging. Corregidos:
+
+1. **[SEGURIDAD — critico] El solenoide/electrovalvula del punzon podia quedar
+   energizado si la UI crasheaba.** En `cmd_run` y `cmd_service` (`src/main.py`) la
+   llamada a la UI (`launch_production_ui` / `app.exec()`) NO estaba dentro de un
+   `try/finally`. Si la UI lanzaba una excepcion o se cerraba de forma inesperada,
+   `system.shutdown()` nunca se ejecutaba y las salidas del PLC (solenoide, backlight,
+   luces) quedaban en su ultimo estado — potencialmente con la maquina energizada.
+   Ahora la UI corre dentro de un `try/finally` que **garantiza** `system.shutdown()`
+   pase lo que pase; `shutdown()` ya corta el solenoide con reintentos+verificacion y
+   apaga todas las salidas.
+
+2. **[ARRANQUE] Config invalida/faltante volvia a tumbar la app con un traceback crudo.**
+   La construccion de `InspectionSystem()` (que lee `config/io_map.yaml`, `app.yaml`,
+   perfiles de camara) no estaba protegida: cualquier error dejaba al operario mirando
+   una consola con un traceback — el mismo "peor caso" del Cambio 275. Ahora la
+   construccion y el bucle estan envueltos en `try/except`, con un helper
+   `_show_fatal_dialog()` que muestra un dialogo Qt legible ("revisar PLC/camaras/config,
+   reintentar, contactar soporte") en vez del traceback, y registra el detalle completo
+   en el log. Se agrego ademas una **red de seguridad global en `main()`** que captura
+   cualquier excepcion no controlada de cualquier subcomando (salvo `KeyboardInterrupt`
+   y `SystemExit`), la registra y la muestra en dialogo, devolviendo un codigo de salida
+   limpio.
+
+3. **[DIAGNOSTICO 24/7] Sin log en disco si `app.yaml` no definia `log_file`.**
+   `setup_logging()` (`src/utils/logger.py`) solo agregaba el archivo de log si estaba
+   configurado; si no, todo iba a `sys.stdout`, que es `None` en un build empaquetado sin
+   consola (`--windowed`) → una planta corriendo dia y noche podia quedar SIN ningun
+   registro para diagnosticar un incidente. Ahora:
+   - Siempre se agrega un `RotatingFileHandler` con ruta por defecto
+     (`logs/app.log` junto al ejecutable) si nadie configuro una.
+   - El `StreamHandler` de consola solo se agrega si existe un `sys.stdout` real.
+   - `setup_logging()` nunca lanza: ante cualquier fallo (disco lleno, permisos, ruta
+     invalida) cae a una config minima y deja arrancar la app igual.
+
+**Archivos:** `src/main.py`, `src/utils/logger.py`.
+
+**Verificacion:** `pytest tests/` (52 passed); import de `src.main`, `src.controller.system`
+y `src.vision.camera` OK; `setup_logging()` corre sin errores.
+
+---
+
 ## Cambios pendientes
 
 ### Activar centrado automatico de ROI en scanner 2
