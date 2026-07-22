@@ -232,6 +232,35 @@ el seguimiento automatico de ROI durante RUN.
 
 ---
 
+#### Cambio 278 - Build industrial protegido: Cython obligatorio y smoke test del EXE
+
+**Pedido:** ejecutar todas las verificaciones y generar una entrega trasladable a la
+PC de Metalconf, con Cython obligatorio por seguridad.
+
+**Cambios:**
+- `scripts/build_exe.ps1` ahora instala/verifica las dependencias de produccion antes
+  de compilar y cancela inmediatamente si Cython/MSVC falla o no genera
+  `license*.pyd`. Ya no existe el fallback que permitia entregar el modulo de licencia
+  como Python sin proteccion nativa.
+- El build inspecciona el artefacto final: exige `license*.pyd`, rechaza cualquier
+  `license.py` distribuido y exige `scipy.optimize._lsap` para garantizar que la
+  asignacion Hungara usada por vision este presente.
+- `metalconf.spec` incluye explicitamente el wrapper FFT que SciPy 1.18 importa de
+  forma dinamica. El primer smoke test detecto que PyInstaller no lo descubria; se
+  corrigio antes de aceptar el entregable.
+- `run_production.py` incorpora un modo de smoke test exclusivo del proceso de build.
+  Importa OpenCV, NumPy, YAML, PyQt6, SciPy/Hungarian y el camino critico del sistema,
+  confirma que licencia se cargo desde un `.pyd` y sale antes de crear el sistema,
+  abrir camaras o conectarse al PLC.
+- Cada entrega lleva `BUILD_INFO.txt` con fecha, commit y confirmacion de Cython y
+  Hungarian para trazabilidad.
+
+**Validacion:** 54/54 tests OK; `compileall` OK; Cython 3.2.5 + MSVC genero
+`license.cp314-win_amd64.pyd`; PyInstaller 6.20 sobre Python 3.14.5 genero el EXE;
+smoke test congelado OK sin PLC/camaras y con SciPy/Hungarian operativo.
+
+---
+
 ## Cambios pendientes
 
 ### Validar centrado automatico de ROI para esterilla en scanner 2

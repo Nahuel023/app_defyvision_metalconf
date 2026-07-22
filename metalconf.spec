@@ -53,7 +53,9 @@ a = Analysis(
         'scipy',
         'scipy.optimize',
         'scipy.optimize._lsap',
-        'scipy.optimize._lsap_doc',
+        # SciPy 1.18 carga este wrapper dinamicamente al importar optimize;
+        # PyInstaller no lo descubre desde el hook generico.
+        'scipy._external.array_api_compat.numpy.fft',
         'pymodbus',
         'pymodbus.client',
         'pymodbus.client.tcp',
