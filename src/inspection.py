@@ -238,6 +238,9 @@ def _inspect_bgr(
     grid_allow_row_parity_flip = bool(
         tolerances.get("grid_allow_row_parity_flip", False)
     )
+    grid_parity_selection_tol_px = float(
+        tolerances.get("grid_parity_selection_tol_px", 0.0)
+    )
     # Umbral (grados) de inclinacion de la grilla para avisar "CHAPA INCLINADA".
     # 0.0 = solo medir, sin badge. La medicion siempre se calcula e informa.
     tilt_warn_deg          = float(tolerances.get("tilt_warn_deg", 0.0))
@@ -531,7 +534,7 @@ def _inspect_bgr(
             margin_x=grid_compare_margin_x_px,
             margin_y=grid_compare_margin_y_px,
             allow_row_parity_flip=grid_allow_row_parity_flip,
-            parity_selection_tol_px=tol_xy_px,
+            parity_selection_tol_px=grid_parity_selection_tol_px,
         )
         # Posiciones esperadas de vuelta al espacio original (imagen sin de-rotar).
         if _derotate and compare_points:

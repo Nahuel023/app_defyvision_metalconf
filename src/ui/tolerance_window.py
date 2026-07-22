@@ -836,7 +836,7 @@ class _ScannerTolerancePanel(QWidget):
                 return
 
         try:
-            save_scanner_overrides(self._id, updates)
+            save_scanner_overrides(self._id, updates, model=model)
             # Fuerza recarga de tolerancias en el scanner activo
             scanner = self._system.scanner(self._id)
             scanner.set_model(model)

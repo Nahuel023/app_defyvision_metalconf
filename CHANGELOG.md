@@ -181,15 +181,65 @@ y `src.vision.camera` OK; `setup_logging()` corre sin errores.
 
 ---
 
+#### Cambio 277 - Scanner 2 microperforado: paridad robusta, defectos persistentes y ROI automatico
+
+**Pedido:** revisar el lote de produccion presuntamente OK de scanner 2 en
+`C:\Users\DefyC\Downloads\nok\nok`, usando solo los frames `*_raw.jpg`; corregir
+falsos NOK, mejorar sensibilidad a agujeros realmente faltantes y dejar funcionando
+el seguimiento automatico de ROI durante RUN.
+
+**Hallazgos:**
+- El lote contiene 306 raw unicos de 640x480; `__raw_only__` es una copia exacta.
+- El baseline anterior daba 302/306 raw OK. Los cuatro NOK tenian todos los agujeros,
+  pero la grilla elegia la paridad de fila equivocada y generaba grupos falsos de 6-9
+  faltantes.
+- La seleccion de paridad reutilizaba `tol_xy_px=42`, aunque las filas estan separadas
+  solo 13.6 px. Con ese gate, una fila vecina podia puntuar como coincidencia valida.
+- Las calibraciones dentro de `scanner_N.inspection` se aplicaban a todos los modelos:
+  seleccionar esterilla podia heredar silenciosamente la geometria de microperforado.
+
+**Cambios:**
+- `src/inspection.py`: tolerancia independiente `grid_parity_selection_tol_px` para
+  elegir paridad; el matching final conserva su tolerancia habitual.
+- `config/io_map.yaml`, `scanner_2/modelo_B`:
+  - paridad alternada automatica habilitada con gate estricto de 6 px;
+  - frame NOK desde 4 faltantes (`frame_missing_nok_threshold=3`);
+  - seguimiento persistente habilitado desde un solo faltante, sin exigir que el
+    frame ya sea NOK; tres frames de la misma columna detienen la maquina;
+  - ROI automatico preventivo en modo `move`: no espera missing, aprende 30 frames
+    validos tras movimiento real, exige 5 px de deriva durante 15 frames, corrige
+    1 px por paso, cooldown fijo de 15 frames y limite acumulado de +/-20 px;
+  - precalibracion anterior al movimiento y correccion urgente siguen desactivadas.
+- `src/utils/config.py`, `src/ui/tolerance_window.py`, `config/io_map.yaml`:
+  nueva separacion `inspection_models.<modelo>` por scanner. Cambiar o guardar
+  Tolerancias para microperforado ya no pisa esterilla ni viceversa. Se migraron las
+  calibraciones existentes de ambos scanners a `modelo_B`.
+- `tests/test_config.py`: regresiones para aislamiento entre materiales y perfil
+  productivo seguro de scanner 2.
+
+**Validacion:**
+- Lote real completo: 306/306 raw OK, 306/306 temporal OK, cero fallas de alineacion,
+  cero paradas falsas y ratio medio de deteccion 110%.
+- Quedan solo dos indicios aislados no decisorios: un frame con 1 missing y otro con
+  3; no forman racha ni columna persistente.
+- ROI sobre lote estable: cero correcciones, x final 218. Deriva sintetica sostenida
+  de +7 px: tres pasos graduales (x 218->221) y detencion al volver dentro del umbral.
+- Defectos sinteticos: cuatro agujeros borrados producen NOK inmediato; un solo
+  agujero borrado en la misma columna durante tres frames detiene exactamente en el
+  tercero.
+- `pytest tests/`: 54 passed; `compileall`, `scripts/verify_config.py` e imports del
+  camino critico de produccion OK.
+
+---
+
 ## Cambios pendientes
 
-### Activar centrado automatico de ROI en scanner 2
+### Validar centrado automatico de ROI para esterilla en scanner 2
 
-- Activar y ajustar el sistema de recentrado automatico de ROI para `scanner_2`,
-  equivalente al seguimiento gradual que ya funciona en `scanner_1` durante RUN.
-- Antes de habilitarlo en produccion, reunir y validar un lote de imagenes completamente
-  OK tomado con la optica y el zoom reales del scanner 2, para ambos tipos de placa que
-  utilice (microperforado y esterilla).
+- Microperforado queda habilitado y validado en el Cambio 277.
+- Para esterilla, reunir y validar un lote OK tomado con la optica y el zoom reales de
+  scanner 2 antes de habilitar seguimiento propio; no reutilizar su geometria para
+  microperforado.
 - Calibrar con ese lote el warmup, umbral de deriva, racha de confirmacion, cooldown,
   paso y limite acumulado. Verificar que no pierda agujeros ni genere correcciones por
   ruido, cambios de iluminacion o entrada/salida de la chapa.

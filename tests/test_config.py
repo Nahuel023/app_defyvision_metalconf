@@ -2,7 +2,12 @@ from pathlib import Path
 
 import yaml
 
-from src.utils.config import load_tolerances, save_model_overrides, save_tolerances
+from src.utils.config import (
+    load_tolerances,
+    save_model_overrides,
+    save_scanner_overrides,
+    save_tolerances,
+)
 
 
 def test_load_tolerances_cache_invalidation_after_save(tmp_path: Path, monkeypatch) -> None:
@@ -63,3 +68,53 @@ def test_save_model_overrides_invalidates_cache(tmp_path: Path, monkeypatch) -> 
 
     save_model_overrides("modelo_A", {"threshold": 210})
     assert load_tolerances(model="modelo_A")["threshold"] == 210
+
+
+def test_scanner_model_overrides_do_not_leak_between_materials(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    save_tolerances({
+        "threshold": 100,
+        "models": {
+            "modelo_A": {"threshold": 180},
+            "modelo_B": {"threshold": 120},
+        },
+    })
+    (config_dir / "io_map.yaml").write_text(
+        "scanner_2:\n"
+        "  inspection_models:\n"
+        "    modelo_B:\n"
+        "      threshold: 145\n"
+        "  inputs: {}\n",
+        encoding="utf-8",
+    )
+
+    assert load_tolerances("modelo_A", "scanner_2")["threshold"] == 180
+    assert load_tolerances("modelo_B", "scanner_2")["threshold"] == 145
+
+    save_scanner_overrides("scanner_2", {"threshold": 150}, model="modelo_B")
+    assert load_tolerances("modelo_A", "scanner_2")["threshold"] == 180
+    assert load_tolerances("modelo_B", "scanner_2")["threshold"] == 150
+
+
+def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
+    cfg = load_tolerances(model="modelo_B", scanner_id="scanner_2")
+    esterilla = load_tolerances(model="modelo_A", scanner_id="scanner_2")
+
+    assert cfg["grid_allow_row_parity_flip"] is True
+    assert cfg["grid_parity_selection_tol_px"] < cfg["grid_dy"] / 2.0
+    assert cfg["frame_missing_nok_threshold"] == 3
+    assert cfg["machine_stop_min_missing"] == 1
+    assert cfg["machine_stop_require_frame_nok"] is False
+    assert cfg["roi_recenter_enabled"] is True
+    assert cfg["roi_recenter_mode"] == "move"
+    assert cfg["roi_recenter_require_edge_missing"] is False
+    assert cfg["roi_precal_enabled"] is False
+    assert cfg["roi_recenter_cooldown_frames"] == cfg["roi_recenter_cooldown_max_frames"]
+    assert esterilla["grid_dx"] == 39.0
+    assert esterilla["grid_dy"] == 21.0
+    assert esterilla["tol_xy_px"] == 18.0
+    assert esterilla["roi_recenter_enabled"] is False

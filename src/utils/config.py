@@ -233,7 +233,10 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
         model_overrides = (data.get("models") or {}).get(model) or {}
         cfg.update({k: v for k, v in model_overrides.items() if v is not None})
 
-    # Apply per-scanner inspection overrides from io_map.yaml.
+    # Apply per-scanner overrides. ``inspection`` is common to every model;
+    # ``inspection_models.<model>`` is the preferred place for optical/model
+    # calibrations so switching material in the operator UI cannot leak the
+    # microperforado geometry into esterilla (or vice versa).
     if scanner_id:
         if io_map_path.exists():
             try:
@@ -242,6 +245,13 @@ def load_tolerances(model: str | None = None, scanner_id: str | None = None) -> 
                 scanner_cfg = (io_data.get(scanner_id) or {})
                 insp_cfg = scanner_cfg.get("inspection") or {}
                 cfg.update({k: v for k, v in insp_cfg.items() if v is not None})
+                if model:
+                    model_insp_cfg = (
+                        (scanner_cfg.get("inspection_models") or {}).get(model) or {}
+                    )
+                    cfg.update({
+                        k: v for k, v in model_insp_cfg.items() if v is not None
+                    })
             except Exception:
                 pass
 
@@ -291,16 +301,16 @@ def _format_yaml_scalar(value: Any) -> str:
     return dumped
 
 
-def save_scanner_overrides(scanner_id: str, updates: dict[str, Any]) -> None:
-    """Actualiza solo los parámetros pedidos dentro de `<scanner_id>.inspection`
-    en io_map.yaml, preservando intacto el resto del archivo (comentarios,
-    otros scanners, mapeo de señales PLC).
+def save_scanner_overrides(
+    scanner_id: str,
+    updates: dict[str, Any],
+    model: str | None = None,
+) -> None:
+    """Actualiza overrides del scanner preservando comentarios y mapeo PLC.
 
-    A diferencia de `save_model_overrides`, esto escribe en el override
-    específico del scanner — necesario porque `scanner_1` y `scanner_2`
-    suelen tener calibraciones distintas aunque compartan el mismo modelo,
-    y un override de scanner siempre pisa al de modelo (ver `load_tolerances`).
-    Si el parámetro no existe todavía en ese bloque, se agrega al final.
+    Si se informa ``model``, escribe en
+    ``<scanner_id>.inspection_models.<model>``. Sin modelo conserva soporte
+    legacy para ``<scanner_id>.inspection``.
     """
     path = Path("config/io_map.yaml")
     if not path.exists():
@@ -310,18 +320,25 @@ def save_scanner_overrides(scanner_id: str, updates: dict[str, Any]) -> None:
     for key, value in updates.items():
         if value is None:
             continue
-        lines = _set_io_map_inspection_param(lines, scanner_id, key, value)
+        lines = _set_io_map_inspection_param(
+            lines, scanner_id, key, value, model=model
+        )
 
     atomic_write_text(path, "".join(lines))
     _invalidate_tolerances_cache()
 
 
 def _set_io_map_inspection_param(
-    lines: list[str], scanner_id: str, key: str, value: Any
+    lines: list[str],
+    scanner_id: str,
+    key: str,
+    value: Any,
+    model: str | None = None,
 ) -> list[str]:
     scanner_re = re.compile(rf"^{re.escape(scanner_id)}:\s*$")
     top_key_re = re.compile(r"^\S")        # columna 0 = nuevo bloque top-level
     inspection_re = re.compile(r"^  inspection:\s*$")
+    inspection_models_re = re.compile(r"^  inspection_models:\s*$")
     sibling_re = re.compile(r"^  \S")      # otra clave a 2 espacios (inputs:, outputs:, etc.)
     param_re = re.compile(rf"^(\s+){re.escape(key)}\s*:\s*.*$")
 
@@ -334,15 +351,47 @@ def _set_io_map_inspection_param(
         len(lines),
     )
 
-    insp_start = next(
-        (i for i in range(start + 1, end) if inspection_re.match(lines[i])), None
-    )
-    if insp_start is None:
-        raise KeyError(f"'{scanner_id}' no tiene bloque 'inspection:' en io_map.yaml")
-
-    insp_end = next(
-        (i for i in range(insp_start + 1, end) if sibling_re.match(lines[i])), end
-    )
+    if model:
+        models_start = next(
+            (i for i in range(start + 1, end) if inspection_models_re.match(lines[i])),
+            None,
+        )
+        if models_start is None:
+            raise KeyError(
+                f"'{scanner_id}' no tiene bloque 'inspection_models:' en io_map.yaml"
+            )
+        models_end = next(
+            (i for i in range(models_start + 1, end) if sibling_re.match(lines[i])),
+            end,
+        )
+        model_re = re.compile(rf"^    {re.escape(model)}:\s*$")
+        model_sibling_re = re.compile(r"^    \S")
+        insp_start = next(
+            (i for i in range(models_start + 1, models_end) if model_re.match(lines[i])),
+            None,
+        )
+        if insp_start is None:
+            lines.insert(models_end, f"    {model}:\n")
+            insp_start = models_end
+            models_end += 1
+        insp_end = next(
+            (
+                i for i in range(insp_start + 1, models_end)
+                if model_sibling_re.match(lines[i])
+            ),
+            models_end,
+        )
+        insert_indent = "      "
+    else:
+        insp_start = next(
+            (i for i in range(start + 1, end) if inspection_re.match(lines[i])), None
+        )
+        if insp_start is None:
+            raise KeyError(f"'{scanner_id}' no tiene bloque 'inspection:' en io_map.yaml")
+        insp_end = next(
+            (i for i in range(insp_start + 1, end) if sibling_re.match(lines[i])), end
+        )
+        insert_indent = "    "
 
     formatted = _format_yaml_scalar(value)
     for i in range(insp_start + 1, insp_end):
@@ -351,7 +400,7 @@ def _set_io_map_inspection_param(
             lines[i] = f"{m.group(1)}{key}: {formatted}\n"
             return lines
 
-    lines.insert(insp_end, f"    {key}: {formatted}\n")
+    lines.insert(insp_end, f"{insert_indent}{key}: {formatted}\n")
     return lines
 
 
