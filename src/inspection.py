@@ -123,6 +123,34 @@ def iter_image_files(input_dir: Path) -> Iterable[Path]:
             yield path
 
 
+_MIN_DESALIGN_STOP_FRAMES = 3
+
+
+def _advance_desalignment_streak(
+    state: dict,
+    *,
+    detected: bool,
+    reason: str,
+    stop_frames: int,
+) -> tuple[bool, str]:
+    """Acumula evidencia de desalineacion y nunca dispara antes de 3 frames."""
+    threshold = max(_MIN_DESALIGN_STOP_FRAMES, int(stop_frames))
+    if detected:
+        state["streak"] = max(0, int(state.get("streak", 0))) + 1
+        state["reason"] = reason
+    else:
+        state["streak"] = 0
+        state["reason"] = ""
+
+    triggered = state["streak"] >= threshold
+    stop_reason = (
+        f"{state['reason']} [{state['streak']}/{threshold} frames]"
+        if triggered
+        else ""
+    )
+    return triggered, stop_reason
+
+
 def inspect_image(
     model: str,
     img_path: Path,
@@ -302,9 +330,12 @@ def _inspect_bgr(
     # Cuando True, pattern_alignment_warn acumula una racha de frames desalineados antes de parar.
     # Cuando False, solo marca NOK + badge sin parar la maquina nunca.
     pattern_align_machine_stop = bool(tolerances.get("pattern_align_machine_stop", True))
-    # Frames consecutivos con desalineacion de patron necesarios para disparar machine_stop.
-    # 1 = parada inmediata en el primer frame; 3 = requiere 3 frames seguidos (mas robusto al ruido).
-    pattern_align_stop_frames  = int(tolerances.get("pattern_align_stop_frames", 3))
+    # Frames consecutivos con desalineacion necesarios para disparar machine_stop.
+    # La defensa en codigo impide valores menores a 3 aunque una configuracion quede mal.
+    pattern_align_stop_frames = max(
+        _MIN_DESALIGN_STOP_FRAMES,
+        int(tolerances.get("pattern_align_stop_frames", _MIN_DESALIGN_STOP_FRAMES)),
+    )
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
     # Desalineacion SEVERA de un solo frame (zigzag de borde muy por encima del umbral
@@ -938,40 +969,10 @@ def _inspect_bgr(
         if machine_stop:
             _ms_reason = "AGUJERO FALTANTE PERSISTENTE"
 
-    # DESALINEAMIENTO DE PATRON (zigzag de borde/centro): parada por RACHA de N frames.
-    # _desalign_stop = True en este frame → incrementar racha.
-    # _desalign_stop = False → resetear racha (ya no hay desalineacion).
-    # Solo se para cuando racha >= pattern_align_stop_frames.
-    # Se aplica DESPUES del ms_detector para no ser reseteado por machine_stop=False.
-    # IMPORTANTE: guardar desalign_state de vuelta en pre[] para que persista al proximo frame
-    # (mismo patron que ema_state: el dict mutado queda en _preloaded entre llamadas).
-    if pattern_align_machine_stop:
-        if _desalign_stop:
-            desalign_state["streak"] += 1
-            desalign_state["reason"]  = _desalign_reason
-        else:
-            desalign_state["streak"] = 0
-            desalign_state["reason"] = ""
-        if desalign_state["streak"] >= pattern_align_stop_frames:
-            machine_stop = True
-            _ms_reason   = (
-                f"{desalign_state['reason']} "
-                f"[{desalign_state['streak']}/{pattern_align_stop_frames} frames]"
-            )
-    else:
-        desalign_state["streak"] = 0
-        desalign_state["reason"] = ""
-    # Persistir estado al siguiente frame (si _preloaded es un dict mutable compartido)
-    pre["desalign_state"] = desalign_state
-
-    # DESALINEACION SEVERA (1 solo frame, sin esperar racha): cuando el zigzag de borde
-    # del patron supera por mucho el umbral de advertencia, ya no es ruido de borde de
-    # chapa sino un corrimiento mecanico real — parar de inmediato evita que un
-    # desalineamiento fuerte pero intermitente (no sostenido 2-3 frames seguidos)
-    # se pierda porque la racha nunca llega a pattern_align_stop_frames.
+    # DESALINEACION SEVERA: tambien aporta evidencia a la racha comun. Ni siquiera
+    # una medicion severa aislada puede detener scanner_1 o scanner_2.
     if (
-        not machine_stop
-        and pattern_align_enabled
+        pattern_align_enabled
         and frame_geometry_quality != "UNSTABLE"
         and frame_quality != "LOW_QUALITY"
         and centering is not None
@@ -981,33 +982,38 @@ def _inspect_bgr(
             pattern_align_severe_abs_max_px > 0.0
             and pattern_zigzag_max_px > pattern_align_severe_abs_max_px
         ):
-            machine_stop = True
-            _ms_reason   = (
+            pattern_alignment_warn = True
+            final_status = "NOK"
+            _desalign_stop = True
+            _desalign_reason = (
                 f"PATRON DESALINEADO - ZIGZAG SEVERO "
-                f"(max={pattern_zigzag_max_px:.1f}px) [1 frame]"
+                f"(max={pattern_zigzag_max_px:.1f}px)"
             )
         elif (
             pattern_align_severe_slope_deg > 0.0
             and getattr(centering, "pattern_sheet_slope_delta_max_deg", 0.0) > pattern_align_severe_slope_deg
         ):
-            machine_stop = True
-            _ms_reason   = (
+            pattern_alignment_warn = True
+            final_status = "NOK"
+            _desalign_stop = True
+            _desalign_reason = (
                 f"PATRON DESALINEADO - INCLINACION SEVERA "
-                f"({getattr(centering, 'pattern_sheet_slope_delta_max_deg', 0.0):.1f} deg) [1 frame]"
+                f"({getattr(centering, 'pattern_sheet_slope_delta_max_deg', 0.0):.1f} deg)"
             )
 
-    # VERTICALIDAD: un solo frame con la chapa desviada SI puede parar la maquina
-    # (parada inmediata, a diferencia de los faltantes). Gated por machine_stop_on_tilt.
-    if tilt_warn and machine_stop_on_tilt:
-        machine_stop = True
-        _ms_reason   = f"PATRON DESALINEADO - VERTICALIDAD {sheet_tilt_deg:+.1f} grados"
+    # VERTICALIDAD: marca NOK en el frame, pero la parada tambien exige la racha comun.
+    if tilt_warn and machine_stop_on_tilt and frame_quality != "LOW_QUALITY":
+        _desalign_stop = True
+        _desalign_reason = (
+            f"PATRON DESALINEADO - VERTICALIDAD {sheet_tilt_deg:+.1f} grados"
+        )
     if tilt_warn:
         final_status = "NOK"   # inclinado siempre NOK (pare o no)
 
     # DESALINEACION del patron (corrimiento de verticalidad / cizalla): cuando el patron
     # NO se puede ajustar como grilla, queda una fraccion MASIVA de esperados sin matchear
     # que ni la de-rotacion ni la fase ni el affine corrigen → es una falla geometrica real
-    # (desalineacion mecanica), NO faltantes individuales. Un solo frame alcanza para parar.
+    # (desalineacion mecanica), NO faltantes individuales. Tambien requiere 3 frames.
     #   - chapa inclinada: la de-rotacion la ajusta → missing bajo → NO entra aca.
     #   - metal corrido: la fase lo encuentra → missing bajo → NO entra aca.
     #   - pocos faltantes (punzon/gap): fraccion baja → NO entra aca.
@@ -1020,8 +1026,9 @@ def _inspect_bgr(
         )
         if (_missing_ratio > pattern_desalign_missing_ratio
                 and _delta_ang >= pattern_desalign_min_angle_deg):
-            machine_stop = True
-            _ms_reason   = (
+            pattern_alignment_warn = True
+            _desalign_stop = True
+            _desalign_reason = (
                 f"PATRON DESALINEADO ({report.missing}/{report.expected} sin ajustar, "
                 f"dAng={_delta_ang:.1f} deg)"
             )
@@ -1035,8 +1042,9 @@ def _inspect_bgr(
             and pattern_center_zigzag_std_px >= pattern_desalign_center_std_px
             and pattern_center_zigzag_max_px >= pattern_desalign_center_abs_px
         ):
-            machine_stop = True
-            _ms_reason   = (
+            pattern_alignment_warn = True
+            _desalign_stop = True
+            _desalign_reason = (
                 f"PATRON DESALINEADO (zigzag={pattern_zigzag_std_px:.1f}px, "
                 f"centro={pattern_center_zigzag_std_px:.1f}px)"
             )
@@ -1051,9 +1059,30 @@ def _inspect_bgr(
             if len(_mid) >= 10 and len(_bot) >= 10:
                 _bottom_shift = abs(float(np.median(_bot[:, 0]) - np.median(_mid[:, 0])))
                 if _bottom_shift >= pattern_desalign_bottom_shift_px:
-                    machine_stop = True
-                    _ms_reason = f"PATRON DESALINEADO (corrimiento inferior={_bottom_shift:.1f}px)"
+                    pattern_alignment_warn = True
+                    _desalign_stop = True
+                    _desalign_reason = (
+                        f"PATRON DESALINEADO (corrimiento inferior={_bottom_shift:.1f}px)"
+                    )
                     final_status = "NOK"
+
+    # Toda causa geometrica de desalineacion comparte una unica racha persistente.
+    # El estado vive en _preloaded entre frames, igual que el EMA y el detector de faltantes.
+    _alignment_stop_enabled = (
+        pattern_align_machine_stop
+        or machine_stop_on_tilt
+        or pattern_desalign_enabled
+    )
+    _alignment_triggered, _alignment_reason = _advance_desalignment_streak(
+        desalign_state,
+        detected=_desalign_stop if _alignment_stop_enabled else False,
+        reason=_desalign_reason,
+        stop_frames=pattern_align_stop_frames,
+    )
+    pre["desalign_state"] = desalign_state
+    if _alignment_triggered:
+        machine_stop = True
+        _ms_reason = _alignment_reason
 
     # Desplazamiento lateral del patron: si la nube de agujeros detectados se desplaza
     # mas de grid_lateral_shift_max_px respecto al patron de referencia, es una

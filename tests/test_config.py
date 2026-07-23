@@ -118,3 +118,10 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert esterilla["grid_dy"] == 21.0
     assert esterilla["tol_xy_px"] == 18.0
     assert esterilla["roi_recenter_enabled"] is False
+
+
+def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
+    for scanner_id in ("scanner_1", "scanner_2"):
+        cfg = load_tolerances(model="modelo_B", scanner_id=scanner_id)
+        assert cfg["pattern_align_stop_frames"] >= 3
+        assert cfg["pattern_align_severe_abs_max_px"] == 0.0

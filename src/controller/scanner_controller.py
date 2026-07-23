@@ -1035,10 +1035,15 @@ class ScannerController:
                 self._stop_event.wait(timeout=0.005)
                 continue
 
-            self._handle_result(res, model)
+            self._handle_result(res, model, session=session)
             self._stop_event.wait(timeout=0.005)
 
-    def _handle_result(self, result: InspectionResult, model: str = "") -> None:
+    def _handle_result(
+        self,
+        result: InspectionResult,
+        model: str = "",
+        session: InspectionSession | None = None,
+    ) -> None:
         """Actualiza la FSM y dispara callbacks tras un resultado de inspección."""
         if (result.status == "NOK" and self._save_nok) or \
            (result.status == "OK"  and self._save_ok):
@@ -1144,6 +1149,8 @@ class ScannerController:
                         self._id, self._startup_grace_remaining + 1, in_grace_time,
                     )
                     _ms_suppressed = True
+                    if session is not None:
+                        session.reset_stop_state()
                 elif not self._machine_stop_enabled:
                     logger.debug("[%s] machine_stop suprimido (machine_stop_enabled=false)", self._id)
                     _ms_suppressed = True
@@ -1159,7 +1166,10 @@ class ScannerController:
                     # historial acumulado durante grace persiste y puede disparar
                     # machine_stop al primer frame post-grace que coincida con la
                     # misma zona aunque la pieza sea correcta.
-                    self._inspector.reset_machine_stop(model, self._id)
+                    if session is not None:
+                        session.reset_stop_state()
+                    else:
+                        self._inspector.reset_machine_stop(model, self._id)
                 else:
                     self._state     = ScannerState.FAULT
                     fault_triggered = True

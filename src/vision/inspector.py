@@ -148,6 +148,17 @@ class InspectionSession:
         frame = load_bgr_image(path)
         return self.inspect_frame(frame, frame_id=path.stem, force=force)
 
+    def reset_stop_state(self) -> None:
+        """Descarta toda evidencia temporal de parada acumulada por la sesion."""
+        detector = self._preloaded.get("machine_stop_detector")
+        if detector is not None:
+            detector.reset()
+        state = self._preloaded.setdefault(
+            "desalign_state", {"streak": 0, "reason": ""}
+        )
+        state["streak"] = 0
+        state["reason"] = ""
+
 
 class Inspector:
     def __init__(self) -> None:

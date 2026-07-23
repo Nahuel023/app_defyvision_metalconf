@@ -79,6 +79,55 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-07-23 - Tadeo + Codex
+
+#### Cambio 279 - Desalineación: mínimo absoluto de 3 frames y limpieza durante startup grace
+
+**Pedido:** corregir las paradas falsas por "patrón desalineado" observadas por el
+operario en microperforado. Ni scanner 1 ni scanner 2 deben detener la máquina por una
+sola imagen desalineada; se requieren como mínimo 3 frames consecutivos.
+
+**Hallazgo de Codex:**
+- Los perfiles efectivos de `modelo_B` tenían `pattern_align_stop_frames: 2` en ambos
+  scanners, no 3.
+- Solo el zigzag común pasaba por esa racha. Otros caminos geométricos del pipeline
+  (desalineación severa, verticalidad y desajuste masivo del patrón) todavía podían
+  escribir `machine_stop=True` directamente en un frame si se habilitaban.
+- Durante `startup_grace` el controlador suprimía la parada, pero no limpiaba la racha
+  de desalineación guardada dentro de la `InspectionSession`. Dos evidencias ocultas
+  durante la gracia podían quedar acumuladas y hacer que el primer frame visible
+  posterior pareciera una parada instantánea.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/io_map.yaml`: `pattern_align_stop_frames` pasa de `2` a `3` para
+  `scanner_1/modelo_B` y `scanner_2/modelo_B`.
+- `src/inspection.py`:
+  - nueva defensa de código que fuerza un mínimo absoluto de 3 aunque una
+    configuración futura indique 1 o 2;
+  - todas las causas geométricas de desalineación comparten la misma racha;
+  - desalineación severa, verticalidad y desajuste masivo ya no pueden saltarse la
+    confirmación temporal.
+- `src/vision/inspector.py`, `src/controller/scanner_controller.py`:
+  `InspectionSession.reset_stop_state()` limpia tanto faltantes persistentes como la
+  racha de desalineación cuando una parada queda suprimida durante la gracia inicial.
+- `tests/test_desalignment_streak.py`, `tests/test_config.py`: regresiones para
+  primero/segundo/tercer frame, reset por frame bueno, limpieza de evidencia oculta y
+  configuración segura en ambos scanners.
+
+**Validación:**
+- Prueba unitaria con `stop_frames=1`: frame 1 no para, frame 2 no para, frame 3 sí.
+- Un frame bueno intermedio reinicia la racha; la evidencia acumulada durante grace
+  también vuelve a cero.
+- Lote entregado
+  `C:\Users\DefyC\Downloads\23-07-2026-MICROPERFORADO_1_SCANNER_1`: 199 imágenes
+  crudas; 54 inspecciones efectivas tras el filtro productivo de movimiento,
+  `machine_stop_frames=0`, `align_failures=0`.
+- `pytest tests/`: 58 passed.
+- `compileall`, `scripts/verify_config.py` e imports de `src.main`,
+  `src.controller.system` y `src.vision.camera`: OK.
+
+---
+
 ### Sesión 2026-07-22 - Tadeo + Claude
 
 #### Cambio 275 - Fix critico: la app no abria en produccion (AttributeError cv2.CAP_PROP_FOCUS)

@@ -28,11 +28,9 @@ scanner_1:
       pattern_align_enabled: true
       pattern_global_offset_max_px: 8.0
       pattern_slope_delta_max_deg: 1.0
-      # Cambio 255 (07-07-2026): racha de 2 frames para disparar desalineacion,
-      # y se desactiva la parada instantanea de 1 solo frame (severe_abs_max_px=0.0)
-      # a pedido de Tadeo — ya no se quiere ningun disparo por desalineacion en un
-      # unico frame, todo pasa por la racha.
-      pattern_align_stop_frames: 2
+      # Cambio 279 (23-07-2026): ninguna desalineacion aislada puede detener la
+      # maquina; scanner_1 exige como minimo 3 frames consecutivos.
+      pattern_align_stop_frames: 3
       pattern_align_severe_abs_max_px: 0.0
       # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
       # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
@@ -157,7 +155,7 @@ scanner_2:
       # centering (zigzag de borde + inclinacion), SIN gate de missing.
       # Con min_missing=0 no se requieren agujeros faltantes para activar el
       # check; las metricas del patron solas determinan si hay desalineacion.
-      # stop_frames=2: 2 frames consecutivos desalineados disparan machine_stop.
+      # stop_frames=3: 3 frames consecutivos desalineados disparan machine_stop.
       pattern_align_enabled: true
       # min_missing=1: se exige al menos 1 faltante para entrar al check de zigzag.
       # Esto filtra frames de borde de chapa (std alto pero missing=0) sin impedir
@@ -165,9 +163,9 @@ scanner_2:
       pattern_align_min_missing: 1
       pattern_align_std_max_px: 3.0
       pattern_align_abs_max_px: 10.0
-      # stop_frames=2: 2 frames consecutivos desalineados disparan machine_stop
-      # (en el lote editado frames 074+075 son la racha consecutiva).
-      pattern_align_stop_frames: 2
+      # Cambio 279 (23-07-2026): scanner_2 tambien exige como minimo 3 frames
+      # consecutivos; un frame aislado nunca detiene la maquina.
+      pattern_align_stop_frames: 3
       pattern_global_offset_max_px: 0.0
       # Calibracion 03-07-2026: el baseline bueno de scanner_2 en microperforado
       # ya vive cerca de 0.7-1.1deg de delta patron/chapa. Con 0.6deg se marcaban
@@ -179,12 +177,12 @@ scanner_2:
       # medicion sino ondulacion REAL del borde del fleje (slitting), medida en
       # <=1.4deg sobre el lote "Imagenes error NOK 14-7". 2.2deg deja margen
       # sobre ese ruido natural y sigue disparando ante inclinaciones reales
-      # sostenidas del patron (>2.2deg durante stop_frames=2).
+      # sostenidas del patron (>2.2deg durante stop_frames=3).
       pattern_slope_delta_max_deg: 2.2
       # Cambio 255 (07-07-2026): a pedido de Tadeo se desactiva la parada
       # instantanea de 1 solo frame por desalineacion severa (severe_abs_max_px=0.0).
       # Ahora toda desalineacion, por severa que sea, tiene que sostenerse
-      # pattern_align_stop_frames=2 frames seguidos antes de parar la maquina.
+      # pattern_align_stop_frames=3 frames seguidos antes de parar la maquina.
       pattern_align_severe_abs_max_px: 0.0
       # ROI de scanner_2 es 205px ancho — el margen global de 50px dejaria solo
       # 2-3 columnas al construir el patron. Usar margen pequeño para capturar
