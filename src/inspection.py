@@ -338,10 +338,8 @@ def _inspect_bgr(
     )
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))
     pattern_slope_delta_max_deg = float(tolerances.get("pattern_slope_delta_max_deg", 0.0))
-    # Desalineacion SEVERA de un solo frame (zigzag de borde muy por encima del umbral
-    # de advertencia): para de inmediato sin esperar la racha de pattern_align_stop_frames,
-    # porque un solo frame asi ya es indicio mecanico, no ruido normal de borde de chapa.
-    # 0.0 = desactivado (default; requiere calibrar con frames reales antes de habilitar).
+    # Umbrales de evidencia severa. Desde Cambio 279 tampoco pueden saltarse la racha:
+    # solo alimentan el mismo contador minimo de 3 frames. 0.0 = desactivado.
     pattern_align_severe_abs_max_px = float(tolerances.get("pattern_align_severe_abs_max_px", 0.0))
     pattern_align_severe_slope_deg  = float(tolerances.get("pattern_align_severe_slope_deg", 0.0))
     # PATRON CENTER zigzag → same consequence as edge zigzag (finer internal misalignment)

@@ -89,11 +89,24 @@ _PARAMS: list[dict[str, Any]] = [
         vmin=2, vmax=20, vstep=1,
     ),
     dict(
-        key="consecutive_nok_frames",
-        label="Frames NOK para FAULT",
+        key="pattern_align_stop_frames",
+        label="Frames de patrón desalineado",
         desc=(
-            "Cuántos frames NOK seguidos antes de disparar FAULT y detener la línea. "
-            "Valores grandes (p.ej. 9999) deshabilitan el FAULT automático."
+            "Cuántos frames consecutivos con el patrón desalineado se requieren "
+            "antes de detener la línea. El mínimo seguro es 3; un frame aislado "
+            "o solamente dos nunca detienen la máquina."
+        ),
+        unit="frames",
+        vtype="int",
+        vmin=3, vmax=20, vstep=1,
+    ),
+    dict(
+        key="consecutive_nok_frames",
+        label="FAULT general de respaldo",
+        desc=(
+            "Respaldo que mezcla cualquier causa NOK consecutiva. En producción debe "
+            "permanecer en 9999 para evitar falsas fallas; las paradas reales usan "
+            "los controles específicos de faltantes y patrón desalineado."
         ),
         unit="frames",
         vtype="int",
@@ -103,14 +116,15 @@ _PARAMS: list[dict[str, Any]] = [
         key="pattern_align_severe_abs_max_px",
         label="Sensibilidad ante chapa torcida",
         desc=(
-            "Si la chapa se ve muy desviada o torcida en una sola foto, la máquina "
-            "se detiene de inmediato, sin esperar varias fotos seguidas. "
+            "Umbral para considerar severa una desviación. Aun cuando se supere, "
+            "la máquina respeta los frames consecutivos de patrón desalineado. "
             "Número MÁS BAJO = se detiene más fácil (más sensible). "
-            "Número MÁS ALTO = solo se detiene ante desvíos más grandes."
+            "Número MÁS ALTO = solo se detiene ante desvíos más grandes. "
+            "0 = desactivado."
         ),
         unit="px",
         vtype="float",
-        vmin=5.0, vmax=60.0, vstep=1.0, decimals=1,
+        vmin=0.0, vmax=60.0, vstep=1.0, decimals=1,
     ),
     dict(
         key="tol_xy_px",

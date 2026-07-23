@@ -7,7 +7,9 @@ tol_xy_px: 22.0
 aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
-consecutive_nok_frames: 5
+# Respaldo generico desactivado: no mezclar 5 causas NOK distintas en un FAULT.
+# Las paradas productivas siguen activas por persistencia especifica.
+consecutive_nok_frames: 9999
 # Frames tras INICIAR sin evaluar machine_stop/FAULT: le da tiempo a camara/luz/
 # vibracion a estabilizarse despues de un reinicio. Default de codigo (30, ~1-3s)
 # resulto insuficiente: una chapa nueva y buena disparaba machine_stop apenas
@@ -110,7 +112,7 @@ models:
     compare_bottom_ignore_px: 0.0
     blur_score_min: 800.0
     frame_missing_nok_threshold: 5
-    consecutive_nok_frames: 5
+    consecutive_nok_frames: 9999
     continuous_position_threshold: 3.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 3
@@ -151,7 +153,7 @@ models:
     grid_max_missing: 60
     bbox_filter_margin_px: 45.0
     quality_ratio_min: 0.0
-    consecutive_nok_frames: 5
+    consecutive_nok_frames: 9999
     grid_min_spacing: 12.0
     grid_dx: 36.0
     grid_dy: 14.0

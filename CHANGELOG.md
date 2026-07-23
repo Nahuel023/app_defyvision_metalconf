@@ -81,6 +81,56 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-23 - Tadeo + Codex
 
+#### Cambio 280 - Blindaje global de desalineación, control en Tolerancias y eliminación de FAULT genérico falso
+
+**Pedido:** confirmar que ningún patrón de chapa perforada —microperforado o
+esterilla— pueda detener scanner 1 ni scanner 2 por un frame desalineado; permitir
+configurar la cantidad desde Tolerancias; explicar y eliminar el estado
+"FALLA DETECTADA" que aparecía ocasionalmente en vez de "INSPECCIONANDO".
+
+**Hallazgo de Codex:**
+- El blindaje de 3 frames del Cambio 279 ya era global en código, incluso para
+  mecanismos futuros, pero `pattern_align_stop_frames` no estaba expuesto en la
+  ventana Tolerancias.
+- La ventana sí exponía `pattern_align_severe_abs_max_px` con mínimo visual `5.0`,
+  aunque el valor productivo seguro era `0.0`. Abrir y guardar Tolerancias podía
+  convertir silenciosamente `0 → 5` y reactivar el detector severo. Después del
+  Cambio 279 ya no podía parar en un frame, pero seguía siendo una mutación errónea.
+- "FALLA DETECTADA" era un estado real `FAULT`, no un texto aleatorio: se activaba
+  al mezclar 5 resultados NOK consecutivos de cualquier causa, aunque no fueran el
+  mismo defecto. Esa regla genérica coexistía con los detectores específicos y podía
+  provocar una parada falsa mientras el operario esperaba que siguiera inspeccionando.
+
+**Cambios hechos por Tadeo + Codex:**
+- `src/ui/tolerance_window.py`:
+  - nuevo control `Frames de patrón desalineado`, rango seguro `3..20`;
+  - el control severo ahora admite y conserva `0 = desactivado`;
+  - se corrigió su explicación: aun una medición severa respeta la racha configurada;
+  - el FAULT genérico se identifica claramente como respaldo y recomienda `9999`.
+- `src/utils/config.py`: defaults globales seguros para
+  `pattern_align_stop_frames=3`, `pattern_align_machine_stop=true` y
+  `consecutive_nok_frames=9999`.
+- `config/tolerancias.yaml`: FAULT genérico desactivado (`9999`) a nivel global,
+  esterilla y microperforado. Siguen activas las paradas específicas por el mismo
+  agujero faltante persistente y por desalineación confirmada.
+- `src/inspection.py`: comentarios actualizados para reflejar que no existe bypass
+  de un frame por desalineación severa.
+- `tests/test_config.py`: cobertura de scanner 1/2 × esterilla/microperforado,
+  mínimo 3 en UI y conservación de `0` para el detector severo.
+
+**Validación:**
+- Config efectiva en los cuatro perfiles productivos:
+  `pattern_align_stop_frames=3`, `pattern_align_severe_abs_max_px=0.0`,
+  `machine_stop_on_tilt=false`, `pattern_desalign_enabled=false`,
+  `consecutive_nok_frames=9999`.
+- Esterilla mantiene `pattern_align_enabled=false`; si se habilita en el futuro, la
+  defensa global sigue impidiendo paradas antes del tercer frame.
+- Microperforado mantiene `pattern_align_enabled=true` y exige 3 frames consecutivos.
+- `pytest tests/`: 60 passed.
+- `compileall`, `scripts/verify_config.py` y `git diff --check`: OK.
+
+---
+
 #### Cambio 279 - Desalineación: mínimo absoluto de 3 frames y limpieza durante startup grace
 
 **Pedido:** corregir las paradas falsas por "patrón desalineado" observadas por el

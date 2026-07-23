@@ -125,3 +125,19 @@ def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
         cfg = load_tolerances(model="modelo_B", scanner_id=scanner_id)
         assert cfg["pattern_align_stop_frames"] >= 3
         assert cfg["pattern_align_severe_abs_max_px"] == 0.0
+
+
+def test_every_production_pattern_uses_safe_stop_defaults() -> None:
+    for scanner_id in ("scanner_1", "scanner_2"):
+        for model in ("modelo_A", "modelo_B"):
+            cfg = load_tolerances(model=model, scanner_id=scanner_id)
+            assert cfg["pattern_align_stop_frames"] >= 3
+            assert cfg["consecutive_nok_frames"] >= 500
+
+
+def test_tolerance_window_cannot_reenable_single_frame_alignment_stop() -> None:
+    from src.ui.tolerance_window import _PARAMS
+
+    params = {item["key"]: item for item in _PARAMS}
+    assert params["pattern_align_stop_frames"]["vmin"] == 3
+    assert params["pattern_align_severe_abs_max_px"]["vmin"] == 0.0
