@@ -223,10 +223,11 @@ scanner_2:
       # Filtra blobs fusionados/reflejos: con gray quedan agujeros reales ~160-185px2
       # y los falsos unificados pasan claramente por arriba.
       max_area: 250.0
-      # Endurece la decision de nitidez solo para scanner_2:
-      # con 1200 entran como LOW_QUALITY los frames visiblemente mas blandos
-      # del lote 16-06, sin volver demasiado sensible la corrida normal.
-      blur_score_min: 1200.0
+      # Calibracion 24-07-2026 sobre 499 frames OK reales con zoom digital:
+      # el lote mide 309..917 de nitidez. El valor anterior (1200) marcaba
+      # absolutamente todos los frames como LOW_QUALITY y por eso el
+      # controlador no sumaba ni OK ni NOK. 300 conserva margen bajo el minimo.
+      blur_score_min: 300.0
       # Ajuste fino de borde de patron: bajar el gate lateral evita que una banda
       # tome la columna siguiente como borde y dibuje zigzag falso en el overlay.
       pattern_edge_boundary_tol_px: 5.0

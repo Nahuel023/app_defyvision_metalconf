@@ -114,6 +114,9 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert cfg["roi_recenter_require_edge_missing"] is False
     assert cfg["roi_precal_enabled"] is False
     assert cfg["roi_recenter_cooldown_frames"] == cfg["roi_recenter_cooldown_max_frames"]
+    # Calibrado con 499 capturas OK reales del 24-07-2026. El perfil anterior
+    # (1200) clasificaba el 100 % como LOW_QUALITY y anulaba ambos contadores.
+    assert cfg["blur_score_min"] == 300.0
     assert esterilla["grid_dx"] == 39.0
     assert esterilla["grid_dy"] == 21.0
     assert esterilla["tol_xy_px"] == 18.0

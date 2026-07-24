@@ -81,6 +81,33 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
+#### Cambio 284 - Recalibración real de Microperforado en Scanner 2
+
+**Problema:** luego de replicar por software el zoom óptico de Sony, Scanner 2
+mostraba imagen en inspección pero no aumentaba ni el contador OK ni el NOK.
+El perfil conservaba `blur_score_min: 1200`; las 499 capturas reales entregadas
+midieron entre 309 y 917, por lo que el 100 % quedaba como `LOW_QUALITY`. Ese
+estado es inconcluso por diseño y no se contabiliza como OK ni como NOK.
+
+**Cambios:**
+
+- `blur_score_min` de `scanner_2/modelo_B` baja de **1200 a 300**, con margen
+  bajo el peor frame OK medido.
+- La ROI de Microperforado de Scanner 2 se recentra de **X=218 a X=202** para
+  la posición real posterior al zoom digital; así queda sin desplazamiento
+  sistemático y aumenta la cantidad de puntos útiles comparados.
+- Se agrega una aserción de regresión para impedir que el perfil productivo
+  vuelva al umbral incompatible de 1200.
+
+**Validación:**
+
+- Lote nuevo: **499/499 OK**, 0 `LOW_QUALITY`, 0 desalineaciones y 0 paradas.
+- Falsos NOK históricos: **12/12 + 376/376 OK**, sin paradas.
+- Corrida OK histórica del 17-06: **283/283 OK**, sin paradas.
+- Secuencia editada con agujeros borrados: conserva NOK y parada sostenida.
+
+---
+
 #### Cambio 283 - Reinicio más rápido del contador NOK acumulado
 
 **Pedido:** 200 frames OK consecutivos tardaban demasiado en limpiar el contador
