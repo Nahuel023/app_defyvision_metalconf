@@ -81,6 +81,54 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
+#### Cambio 285 - Validación final integral de ambos scanners
+
+**Pedido:** verificar de extremo a extremo Scanner 1 y Scanner 2 antes de
+entregar la versión a los operarios: frames, alineación automática de ROI,
+conteos, decisiones temporales, estados, evidencia y grabación.
+
+**Hallazgos y decisiones:**
+
+- El lote nuevo de Scanner 1 contiene 300 capturas OK, pero solo 50 posiciones
+  visualmente nuevas; las otras 250 son repeticiones mientras la chapa no
+  avanza. Con el filtro productivo de movimiento: **50/50 OK**, sin NOK,
+  `LOW_QUALITY`, desalineaciones ni paradas.
+- Scanner 2 mantiene **394/394 inspecciones efectivas OK** sobre sus 499
+  capturas, sin falsos eventos.
+- Se evaluó recentrar permanentemente Scanner 1 de X=213 a X=219. Aunque el
+  lote del 24/07 también queda OK, esa posición rompe corridas válidas del
+  21/07. Se conserva X=213: el recentrado productivo aprende el desfase inicial
+  de cada corrida y corrige únicamente una deriva posterior sostenida.
+- Simulando una deriva lateral real, la ROI automática movió Scanner 1
+  **213→217** y Scanner 2 **202→206**, siempre en pasos de 1 px, respetando
+  warmup, racha y cooldown; no produjo ninguna parada.
+- Defectos controlados sobre frames actuales verificaron el circuito de
+  faltantes persistentes: ambos scanners marcan la evidencia y paran recién en
+  el **tercer frame consecutivo**; un frame aislado seguido por uno bueno
+  reinicia la evidencia.
+- Los lotes históricos de Scanner 2 continúan sin falsos NOK y la secuencia
+  editada conserva NOK/parada. Las grabaciones antiguas de Scanner 1 tienen
+  otra posición/zoom de cámara y no se usaron para sobrescribir la calibración
+  física actual.
+
+**Blindaje agregado:**
+
+- Prueba del contrato de contadores: un frame `GOOD/OK` incrementa OK y un
+  `LOW_QUALITY` queda inconcluso sin inventar OK/NOK.
+- Prueba de los umbrales de nitidez calibrados: Scanner 1 = 200 y Scanner 2 =
+  300.
+
+**Validación del proceso completo:**
+
+- Configuración, compilación e imports críticos: OK.
+- CLI y comandos de producción/Servicio cargan correctamente.
+- FSM, licencia, inicio/parada/reset, cámara, PLC simulado, contadores,
+  desalineación temporal, machine stop, evidencia exacta, timeline, métricas,
+  grabación manual y cierre del sistema: cubiertos por la suite automatizada.
+- Suite completa: **70 passed**.
+
+---
+
 #### Cambio 284 - Recalibración real de Microperforado en Scanner 2
 
 **Problema:** luego de replicar por software el zoom óptico de Sony, Scanner 2

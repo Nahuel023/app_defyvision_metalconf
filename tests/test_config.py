@@ -130,6 +130,11 @@ def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
         assert cfg["pattern_align_severe_abs_max_px"] == 0.0
 
 
+def test_microperforado_blur_profiles_match_real_camera_recordings() -> None:
+    assert load_tolerances("modelo_B", "scanner_1")["blur_score_min"] == 200.0
+    assert load_tolerances("modelo_B", "scanner_2")["blur_score_min"] == 300.0
+
+
 def test_every_production_pattern_uses_safe_stop_defaults() -> None:
     for scanner_id in ("scanner_1", "scanner_2"):
         for model in ("modelo_A", "modelo_B"):

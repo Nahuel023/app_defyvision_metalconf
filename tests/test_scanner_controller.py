@@ -247,3 +247,46 @@ def test_reset_clears_stopped_by_fault_flag() -> None:
         assert cleared["stopped_by_fault"] is False
     finally:
         controller.shutdown()
+
+
+def test_good_frames_increment_ok_while_low_quality_is_inconclusive() -> None:
+    """Protege el flujo que ve el operario en los contadores.
+
+    Un resultado nítido debe contabilizarse inmediatamente. LOW_QUALITY sigue
+    siendo inconcluso: cuenta como problema de calidad, pero no inventa OK/NOK.
+    """
+    io = _FakeIO()
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    if controller._recorder is not None:
+        controller._recorder.close()
+        controller._recorder = None
+    controller._ok_buf_enabled = False
+    controller._tl_enabled = False
+    controller._startup_grace_remaining = 0
+    controller._startup_grace_seconds = 0.0
+    controller._transition(ScannerState.RUNNING)
+
+    def result(status: str, quality: str):
+        return SimpleNamespace(
+            status=status,
+            frame_quality=quality,
+            report=SimpleNamespace(missing=0),
+            detection_ratio=1.0,
+            alignment_ok=True,
+            machine_stop=False,
+            overlay=None,
+            image=None,
+        )
+
+    try:
+        controller._handle_result(result("OK", "GOOD"))
+        controller._handle_result(result("NOK", "LOW_QUALITY"))
+
+        status = controller.get_status()
+        assert status["ok_count"] == 1
+        assert status["nok_count"] == 0
+        assert status["low_quality_count"] == 1
+        assert status["total_inspections"] == 2
+    finally:
+        controller.shutdown()
