@@ -369,6 +369,7 @@ class ScannerController:
             self._camera_missing_warned     = False
             self._camera_missing_total_s    = 0.0
             self._camera_missing_events     = 0
+            self._stopped_by_fault          = False
 
         self._transition(ScannerState.IDLE)
         self._set_lights(blue=True)
