@@ -79,32 +79,6 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-### Sesión 2026-07-24 - Rollback real de producción
-
-#### Cambio 281 - Base V20 estable para Scanner 1 + calibración nueva de Scanner 2
-
-**Problema:** los rollbacks anteriores solo retiraban el último experimento,
-pero seguían basados en `V19`, que tampoco funcionaba correctamente en la prueba
-real de Scanner 1.
-
-**Solución solicitada:**
-
-- Se restauró el árbol completo al commit estable de ayer
-  `c8404cc` (`DEFYVISION_METALCONF_V20_CYTHON_2026-07-23.zip`).
-- Scanner 1 quedó idéntico byte a byte a esa entrega: código de inspección,
-  grid fitting, borde, patrón `holes.json`, ROI y bloque de configuración.
-- Sobre esa base se reaplicaron únicamente los dos ajustes comprobados de
-  Scanner 2:
-  - `blur_score_min: 300.0`;
-  - ROI `x=202, y=0, w=265, h=480`.
-- Se descartaron todos los demás cambios de código realizados el 24/07.
-
-**Objetivo de entrega:** un build híbrido y conservador: Scanner 1 exactamente
-como funcionaba ayer y Scanner 2 con la calibración real que resolvió sus
-contadores hoy.
-
----
-
 ### Sesión 2026-07-23 - Tadeo + Codex
 
 #### Cambio 280 - Blindaje global de desalineación, control en Tolerancias y eliminación de FAULT genérico falso
