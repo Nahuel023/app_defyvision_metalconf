@@ -1,9 +1,20 @@
-opencv-python
-numpy
-scipy
-pyyaml
-tqdm
-PyQt6
-pymodbus>=3.0
-pymcprotocol
-matplotlib>=3.5
+# Dependencias de producción — con techo de versión mayor para evitar que un
+# `pip install -r` o `update_windows.ps1` traiga una versión que rompa el arranque.
+# Los rangos permiten parches/menores; bloquean saltos de versión MAYOR.
+# Regla #1 del proyecto: la app nunca puede fallar al arrancar (ver CHANGELOG).
+
+opencv-python>=4.8,<5
+numpy>=2.0,<3
+scipy>=1.11,<2
+pyyaml>=6.0,<7
+tqdm>=4.60,<5
+PyQt6>=6.6,<7
+
+# CRÍTICO: el kwarg `device_id=` de pymodbus existe recién desde 3.7. Con
+# pymodbus 3.0–3.6 el argumento se llamaba `slave=` y TODAS las lecturas/
+# escrituras Modbus lanzarían TypeError → se capturan → el PLC quedaría
+# "desconectado" de forma permanente y silenciosa. No permitir 4.x sin revisar.
+pymodbus>=3.7,<4
+
+pymcprotocol==0.3.0
+matplotlib>=3.5,<4
