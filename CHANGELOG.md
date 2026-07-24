@@ -79,6 +79,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-07-24 - Tadeo + Codex
+
+#### Cambio 281 - Reparación y diagnóstico visible de la grabación manual
+
+**Problema:** en `Servicio → Cámara → Grabación` podía verse correctamente la
+vista previa IP, pero el grabador leía otra conexión (`system.camera`). Si esa
+segunda ruta todavía no tenía frame, el contador quedaba en cero aunque el
+operador estuviera viendo imagen. Además, `cv2.imwrite` se ejecutaba en segundo
+plano sin comprobar su resultado, por lo que un error de permisos, disco o
+escritura podía pasar silenciosamente.
+
+**Cambios (`src/ui/service.py`):**
+
+- La grabación manual usa primero el frame reciente de la misma vista previa que
+  ve el operador; conserva como respaldo la cámara interna de producción.
+- `data/recordings` se resuelve desde `app_root`, quedando siempre junto al
+  ejecutable independientemente del directorio del acceso directo.
+- La ruta absoluta se muestra mientras graba y se agregó el botón
+  **ABRIR CARPETA**.
+- La creación de carpeta y `meta.json` ahora informa errores mediante diálogo.
+- Se valida el resultado real de cada escritura PNG; los fallos se registran y
+  se muestran en el estado de la grabación.
+- Al detener, el contador se recalcula con los archivos que realmente existen.
+
+**Validación:** se agregaron pruebas para la ruta anclada y la escritura PNG en
+`tests/test_service_recording.py`. Suite completa: **62 passed**.
+
+---
+
 ### Sesión 2026-07-23 - Tadeo + Codex
 
 #### Cambio 280 - Blindaje global de desalineación, control en Tolerancias y eliminación de FAULT genérico falso
