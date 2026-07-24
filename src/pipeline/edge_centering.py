@@ -497,13 +497,16 @@ def _robust_outer_column_centers(holes: Sequence) -> tuple[float, float]:
 
     def _pick(stats: list[dict], reverse: bool = False) -> float:
         ordered = list(reversed(stats)) if reverse else list(stats)
-        if len(ordered) == 1:
-            return float(ordered[0]["mean"])
-        outer = ordered[0]
-        inner = ordered[1]
-        if outer["count"] < inner["count"] * 0.6:
-            return float(inner["mean"])
-        return float(outer["mean"])
+        dominant_count = max(int(item["count"]) for item in ordered)
+        # Puede haber varios reflejos consecutivos de 1-2 blobs antes de la
+        # primera columna real. Comparar solo el extremo con su vecino hacía
+        # que dos reflejos igualmente escasos se validaran entre sí. Buscar el
+        # primer cluster con densidad material respecto de la columna dominante.
+        min_count = max(3, int(np.ceil(dominant_count * 0.35)))
+        for item in ordered:
+            if int(item["count"]) >= min_count:
+                return float(item["mean"])
+        return float(ordered[0]["mean"])
 
     return _pick(cluster_stats, reverse=False), _pick(cluster_stats, reverse=True)
 
@@ -641,6 +644,41 @@ def _smooth_points_x(
         hi = min(len(xs), k + half + 1)
         xs_out[k] = float(np.median(xs[lo:hi]))
     return [(float(x), float(y)) for x, y in zip(xs_out, ys)]
+
+
+def _robust_pattern_physical_bounds(
+    holes: Sequence,
+    left_by_band: dict[int, tuple[float, float]],
+    right_by_band: dict[int, tuple[float, float]],
+    mid_y: float,
+) -> tuple[float, float]:
+    """Return stable physical pattern bounds at ``mid_y``.
+
+    Using the absolute min/max hole is extremely sensitive to a single contour
+    produced by glare at the sheet edge.  The per-band series has already gone
+    through outer-column selection and outlier filtering, so fit those points
+    and only fall back to raw extrema when a side has no usable bands.
+    """
+    all_holes = list(holes)
+    median_r = float(np.median([max(float(hh.r), 0.0) for hh in all_holes]))
+
+    def _center_at_mid(
+        points: dict[int, tuple[float, float]],
+        fallback: float,
+    ) -> float:
+        values = list(points.values())
+        coeffs = _fit_line_robust(values)
+        if coeffs is not None:
+            return _line_x_at_y(coeffs, mid_y)
+        if values:
+            return float(np.median([p[0] for p in values]))
+        return fallback
+
+    raw_left = float(min(hh.x for hh in all_holes))
+    raw_right = float(max(hh.x for hh in all_holes))
+    left_center = _center_at_mid(left_by_band, raw_left)
+    right_center = _center_at_mid(right_by_band, raw_right)
+    return left_center - median_r, right_center + median_r
 
 
 def _fit_line_robust(
@@ -809,8 +847,12 @@ def compute_centering(
     pat_left_metric = _trim_y_extremes(pat_left)
     pat_right_metric = _trim_y_extremes(pat_right)
 
-    pattern_left_x  = float(min(hh.x - hh.r for hh in holes))
-    pattern_right_x = float(max(hh.x + hh.r for hh in holes))
+    pattern_left_x, pattern_right_x = _robust_pattern_physical_bounds(
+        holes,
+        pat_left_metric,
+        pat_right_metric,
+        mid_y,
+    )
 
     left_margin_px  = pattern_left_x  - left_x
     right_margin_px = right_x - pattern_right_x

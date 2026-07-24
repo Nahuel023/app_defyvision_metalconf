@@ -44,20 +44,29 @@ scanner_1:
       grid_extend_rows_after: 3
       grid_compare_margin_x_px: 12.0
       grid_compare_margin_y_px: 20.0
-      compare_left_ignore_px: 12.0
+      # El borde izquierdo entra/sale de cuadro con la deriva lateral normal.
+      # No exigir la primera columna parcial: era la fuente de rachas fantasmas
+      # de 15 missing cuando la siguiente columna visible estaba perfecta.
+      compare_left_ignore_px: 40.0
       compare_right_ignore_px: 12.0
       compare_top_ignore_px: 20.0
       # La Sony incrusta fecha/hora sobre y~445..479 y tapa parcialmente la ultima
       # fila; esa zona no contiene evidencia visual confiable para una decision.
-      compare_bottom_ignore_px: 36.0
-      # El lote OK queda en cero faltantes; cualquier agujero ausente se marca NOK
-      # y debe persistir por la regla temporal antes de detener produccion.
-      grid_max_missing: 0
+      compare_bottom_ignore_px: 45.0
+      # El refinamiento absorbe perspectiva/curvatura por frame. Hasta 3 missing
+      # aislados son ruido normal de borde; el detector de parada sigue recibiendo
+      # los faltantes y exige 4 en la misma columna durante 3 frames.
+      grid_affine_refinement: true
+      grid_max_missing: 3
       # En scanner_1 el ruido normal deja faltantes sueltos repartidos, pero el defecto
       # editado arma una misma columna con 4-6 agujeros ausentes durante varios frames.
       # Usamos esa firma para machine_stop sin depender de que el frame entero ya haya
       # cruzado el gate global de NOK.
       machine_stop_min_missing: 4
+      # En esta grilla alternada, el agujero sano de la fila vecina queda a menos
+      # de 2*tol y no debe convertir un faltante real en "near miss" descartable.
+      # La defensa segura es 4 faltantes en la misma columna durante 3 frames.
+      machine_stop_ignore_near_miss: false
       machine_stop_require_frame_nok: false
       # ROI recenter en modo MOVE (Cambio 235): a diferencia del modo resize (que
       # causaba el desync de Cambio 185/189 al ir agrandando w), move desplaza la
