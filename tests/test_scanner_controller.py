@@ -220,3 +220,30 @@ def test_start_is_blocked_while_previous_worker_is_still_alive(monkeypatch) -> N
     finally:
         controller._poller_thread = None
         controller.shutdown()
+
+
+def test_reset_clears_stopped_by_fault_flag() -> None:
+    """Tras una parada por falla, reset() debe volver a IDLE y limpiar el flag
+    de falla (empieza de cero). Respalda el auto-retorno a IDLE de la UI."""
+    io = _FakeIO()
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    if controller._recorder is not None:
+        controller._recorder.close()
+        controller._recorder = None
+    controller._startup_grace_remaining = 0
+    controller._startup_grace_seconds = 0.0
+    controller._transition(ScannerState.RUNNING)
+
+    try:
+        controller.inject_machine_stop("PATRON DESALINEADO")
+        status = controller.get_status()
+        assert status["state"] == ScannerState.STOPPED
+        assert status["stopped_by_fault"] is True
+
+        assert controller.reset() is True
+        cleared = controller.get_status()
+        assert cleared["state"] == ScannerState.IDLE
+        assert cleared["stopped_by_fault"] is False
+    finally:
+        controller.shutdown()
