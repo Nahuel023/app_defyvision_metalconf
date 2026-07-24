@@ -160,6 +160,8 @@ class ScannerController:
 
         self._poller_thread:   Optional[threading.Thread] = None
         self._inspector_thread: Optional[threading.Thread] = None
+        self._post_capture_thread: Optional[threading.Thread] = None
+        self._post_capture_stop = threading.Event()
 
         # Buffer circular de evidencia (opcional — gated por events_enabled)
         self._recorder = None
@@ -317,6 +319,14 @@ class ScannerController:
         # terminando despues de un timeout anterior. Shutdown siempre insiste.
         self._stop_event.set()
         self._join_threads()
+        self._post_capture_stop.set()
+        post_thread = self._post_capture_thread
+        if post_thread is not None and post_thread is not threading.current_thread():
+            post_thread.join(timeout=2.0)
+            if post_thread.is_alive():
+                logger.error("[%s] captura post-evento no termino limpiamente", self._id)
+            else:
+                self._post_capture_thread = None
         if self._recorder is not None:
             try:
                 self._recorder.close()
@@ -434,8 +444,18 @@ class ScannerController:
                 return False
             self._state = ScannerState.FAULT
             self._fault_count += 1
+            last_result = self._last_result
 
         logger.warning(f"[{self._id}] FAULT forzado (simulación)")
+        if self._recorder is not None:
+            event_dir = self._recorder.flush_event(
+                "fault",
+                "fault forzado (simulacion)",
+                trigger_frame=getattr(last_result, "image", None),
+                trigger_overlay=getattr(last_result, "overlay", None),
+            )
+            if event_dir is not None:
+                self._start_post_event_capture()
         self._cut_solenoid_critical("fault forzado")
         # backlight permanece encendido siempre
         self._set_lights(red=True)   # poll_loop toma el blink
@@ -490,6 +510,7 @@ class ScannerController:
             detection_ratio=0.85,
             alignment_ok=True,
             machine_stop=True,
+            image=overlay.copy(),
         )
         self._handle_result(result, model)
         logger.info(f"[{self._id}] machine_stop simulado — {reason}")
@@ -535,6 +556,7 @@ class ScannerController:
                 shift_xy=None,
                 detection_ratio=1.0,
                 alignment_ok=True,
+                image=blank.copy(),
             )
             self._handle_result(result, model)
 
@@ -886,6 +908,17 @@ class ScannerController:
                 "[%s] inspector thread crashed — transicionando a ERROR: %s",
                 self._id, exc, exc_info=True,
             )
+            if self._recorder is not None:
+                with self._lock:
+                    last_result = self._last_result
+                event_dir = self._recorder.flush_event(
+                    "fault",
+                    f"crash del inspector: {exc}",
+                    trigger_frame=getattr(last_result, "image", None),
+                    trigger_overlay=getattr(last_result, "overlay", None),
+                )
+                if event_dir is not None:
+                    self._start_post_event_capture()
             try:
                 self._cut_solenoid_critical("crash del inspector")
                 self._set_lights(red=True)
@@ -985,6 +1018,15 @@ class ScannerController:
                         f"[{self._id}] ERROR por perdida de camara - "
                         f"sin frames durante {missing_sec:.1f}s"
                     )
+                    if self._recorder is not None:
+                        event_dir = self._recorder.flush_event(
+                            "fault",
+                            f"perdida de camara durante {missing_sec:.1f}s",
+                        )
+                        if event_dir is not None:
+                            # No hay frames posteriores posibles mientras la
+                            # cámara permanece desconectada.
+                            self._recorder.finish_post_event()
                     self._cut_solenoid_critical("perdida de camara")
                     self._set_lights(red=True)
                     self._transition(ScannerState.ERROR)
@@ -1053,28 +1095,6 @@ class ScannerController:
                 except Exception as exc:
                     logger.error(f"[{self._id}] error guardando imagen: {exc}")
             self._enqueue_disk_task("save_result", _save_result, allow_drop=False)
-
-        # Si el recorder está grabando el post-evento, guardar overlay del frame analizado
-        if self._recorder is not None and result.overlay is not None:
-            event_dir = self._recorder.get_post_event_dir()
-            if event_dir is not None:
-                _overlay = result.overlay
-                _sid = self._id
-                def _save_ev_overlay(ov=_overlay, d=event_dir) -> None:
-                    try:
-                        # Buscar el último frame post guardado y crear overlay con mismo índice
-                        existing = sorted(d.glob("post_[0-9]*.jpg"))
-                        existing = [f for f in existing if "_overlay" not in f.name]
-                        if existing:
-                            idx = int(existing[-1].stem.split("_")[1])
-                            ov_path = d / f"post_{idx:04d}_overlay.jpg"
-                            if not ov_path.exists():
-                                import cv2 as _cv2
-                                _cv2.imwrite(str(ov_path), ov,
-                                             [_cv2.IMWRITE_JPEG_QUALITY, 85])
-                    except Exception as exc:
-                        logger.debug(f"[{_sid}] overlay post-evento: {exc}")
-                self._enqueue_disk_task("event_overlay", _save_ev_overlay, allow_drop=True)
 
         consecutive_nok = self._consecutive_nok
         warn_at = max(1, consecutive_nok // 3)
@@ -1197,7 +1217,14 @@ class ScannerController:
 
             if self._recorder is not None:
                 try:
-                    self._recorder.flush_event("machine_stop", _ms_reason)
+                    event_dir = self._recorder.flush_event(
+                        "machine_stop",
+                        _ms_reason,
+                        trigger_frame=getattr(result, "image", None),
+                        trigger_overlay=getattr(result, "overlay", None),
+                    )
+                    if event_dir is not None:
+                        self._start_post_event_capture()
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
 
@@ -1218,7 +1245,14 @@ class ScannerController:
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos{elapsed_txt}")
             if self._recorder is not None:
                 try:
-                    self._recorder.flush_event("fault", f"racha NOK {streak}")
+                    event_dir = self._recorder.flush_event(
+                        "fault",
+                        f"racha NOK {streak}",
+                        trigger_frame=getattr(result, "image", None),
+                        trigger_overlay=getattr(result, "overlay", None),
+                    )
+                    if event_dir is not None:
+                        self._start_post_event_capture()
                 except Exception as _exc:
                     logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
             self._cut_solenoid_critical("fault por racha NOK")
@@ -1334,6 +1368,41 @@ class ScannerController:
             target=self._continuous_loop, daemon=True, name=f"{self._id}-inspector"
         )
         self._inspector_thread.start()
+
+    def _start_post_event_capture(self) -> None:
+        """Sigue tomando evidencia aunque la FSM ya haya detenido la inspección."""
+        if self._recorder is None or not self._recorder.is_post_event_active():
+            return
+        current = self._post_capture_thread
+        if current is not None and current.is_alive():
+            return
+
+        self._post_capture_stop.clear()
+
+        def _capture() -> None:
+            try:
+                while (
+                    not self._post_capture_stop.is_set()
+                    and self._recorder is not None
+                    and self._recorder.is_post_event_active()
+                ):
+                    try:
+                        frame = self._camera.get_frame()
+                        if frame is not None:
+                            self._recorder.add_frame(frame)
+                    except Exception as exc:
+                        logger.error("[%s] captura post-evento: %s", self._id, exc)
+                    self._post_capture_stop.wait(0.01)
+            finally:
+                if self._recorder is not None:
+                    self._recorder.finish_post_event()
+
+        self._post_capture_thread = threading.Thread(
+            target=_capture,
+            daemon=True,
+            name=f"{self._id}-post-event",
+        )
+        self._post_capture_thread.start()
 
     def _join_threads(self) -> None:
         current = threading.current_thread()

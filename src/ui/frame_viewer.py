@@ -89,6 +89,17 @@ def _event_summary(event_dir: Path) -> dict:
             pass
     pre  = sorted(event_dir.glob("frame_*.jpg"))
     post = sorted(f for f in event_dir.glob("post_*.jpg") if "_overlay" not in f.name)
+    trigger_raw = event_dir / "trigger.jpg"
+    trigger_overlay = event_dir / "trigger_overlay.jpg"
+    trigger = (
+        [trigger_overlay] if trigger_overlay.exists()
+        else ([trigger_raw] if trigger_raw.exists() else [])
+    )
+    retriggers: list[Path] = []
+    for raw in sorted(event_dir.glob("retrigger_[0-9][0-9][0-9][0-9].jpg")):
+        overlay = raw.with_name(f"{raw.stem}_overlay.jpg")
+        retriggers.append(overlay if overlay.exists() else raw)
+    trigger.extend(retriggers)
     return {
         "dir": event_dir,
         "name": event_dir.name,
@@ -97,9 +108,11 @@ def _event_summary(event_dir: Path) -> dict:
         "event_type": m.get("event_type", ""),
         "reason": m.get("reason", ""),
         "pre_frames": pre,
+        "trigger_frames": trigger,
         "post_frames": post,
-        "all_frames": pre + post,
+        "all_frames": pre + trigger + post,
         "pre_count": len(pre),
+        "trigger_count": len(trigger),
         "post_count": len(post),
         "total_bytes": m.get("total_bytes", 0),
     }
@@ -476,6 +489,7 @@ class _EventNavPanel(QWidget):
 
         # Separar pre/post para colorear la tira
         n_pre = summary["pre_count"]
+        n_trigger = summary.get("trigger_count", 0)
 
         # Info del evento
         ts = _format_ts(summary["timestamp"])
@@ -483,10 +497,13 @@ class _EventNavPanel(QWidget):
         reason  = summary["reason"] or summary["event_type"]
         total   = len(self._frames)
         pre_c   = summary["pre_count"]
+        trigger_c = summary.get("trigger_count", 0)
         post_c  = summary["post_count"]
+        trigger_txt = f"  +  {trigger_c} frame disparador" if trigger_c else ""
         self._info_lbl.setText(
             f"{ts}   ·   {scanner}   ·   {reason}   ·   "
-            f"{pre_c} frames previos  +  {post_c} frames posteriores  =  {total} total"
+            f"{pre_c} frames previos{trigger_txt}  +  "
+            f"{post_c} frames posteriores  =  {total} total"
         )
 
         # Limpiar miniaturas anteriores
@@ -495,8 +512,11 @@ class _EventNavPanel(QWidget):
             lbl = QLabel()
             lbl.setFixedSize(_THUMB_W, _THUMB_H)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            # Colorear borde: azul = pre-evento, naranja = post-evento
-            border_color = _ACCENT if i < n_pre else _WARN
+            # Azul=previo, rojo=disparador exacto, naranja=posterior.
+            if n_trigger and i == n_pre:
+                border_color = _NOK_CLR
+            else:
+                border_color = _ACCENT if i < n_pre else _WARN
             lbl.setStyleSheet(
                 f"background:#000;border:2px solid {border_color};border-radius:3px;"
             )
@@ -1117,7 +1137,8 @@ class OperatorFrameViewer(QMainWindow):
         total = len(s["all_frames"])
         size_kb = s["total_bytes"] // 1024 if s["total_bytes"] else 0
         count_lbl = QLabel(
-            f"{s['pre_count']} pre  +  {s['post_count']} post  ·  {size_kb} KB"
+            f"{s['pre_count']} pre  +  {s.get('trigger_count', 0)} disparador"
+            f"  +  {s['post_count']} post  ·  {size_kb} KB"
         )
         count_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:9px;background:transparent;"

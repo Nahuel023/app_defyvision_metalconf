@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from src.pipeline.event_recorder import EventRecorder, _dir_size
+from src.ui.frame_viewer import _event_summary
 
 
 # ----------------------------------------------------------------------
@@ -207,10 +208,97 @@ class TestPostEventWindow:
             r._buf_bytes = 0
 
         time.sleep(0.02)
-        r.flush_event("fault", "segundo stop")
+        second_trigger = np.full((40, 60, 3), 200, dtype=np.uint8)
+        r.flush_event("fault", "segundo stop", trigger_frame=second_trigger)
+        r._task_q.join()
 
         assert r._post_dir is not None
         assert r._post_until >= first_until
+        event_dir = next(events.iterdir())
+        assert (event_dir / "retrigger_0001.jpg").is_file()
+        manifest = json.loads(
+            (event_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["additional_triggers"][0]["reason"] == "segundo stop"
+
+    def test_trigger_and_post_frames_are_preserved_and_counted(
+        self, tmp_path: Path
+    ) -> None:
+        events = tmp_path / "events"
+        r = _make_recorder(events, post_seconds=5.0)
+        r._min_interval = 0.0
+        trigger = np.full((80, 120, 3), 90, dtype=np.uint8)
+        overlay = np.full((80, 120, 3), 180, dtype=np.uint8)
+
+        # No hay buffer previo: el frame disparador por sí solo debe crear evento.
+        event_dir = r.flush_event(
+            "machine_stop",
+            "patron desalineado",
+            trigger_frame=trigger,
+            trigger_overlay=overlay,
+        )
+        assert event_dir is not None
+        assert r.is_post_event_active()
+
+        r.add_frame(np.full((80, 120, 3), 220, dtype=np.uint8))
+        r.finish_post_event()
+        r._task_q.join()
+
+        assert (event_dir / "trigger.jpg").is_file()
+        assert (event_dir / "trigger_overlay.jpg").is_file()
+        assert (event_dir / "post_0000.jpg").is_file()
+
+        manifest = json.loads(
+            (event_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["reason"] == "patron desalineado"
+        assert manifest["trigger_frames_count"] == 1
+        assert manifest["post_frames_count"] == 1
+        assert manifest["frames_count"] == 2
+
+        summary = _event_summary(event_dir)
+        assert summary["trigger_count"] == 1
+        assert [path.name for path in summary["all_frames"]] == [
+            "trigger_overlay.jpg",
+            "post_0000.jpg",
+        ]
+        r.close()
+
+    def test_trigger_bypasses_prebuffer_rate_limit(self, tmp_path: Path) -> None:
+        r = _make_recorder(tmp_path / "events", post_seconds=0.0)
+        r._last_add = time.monotonic()
+
+        event_dir = r.flush_event(
+            "fault",
+            "falla puntual",
+            trigger_frame=np.full((40, 60, 3), 77, dtype=np.uint8),
+        )
+        assert event_dir is not None
+        r._task_q.join()
+        assert (event_dir / "trigger.jpg").is_file()
+        r.close()
+
+    def test_trigger_is_not_duplicated_as_last_pre_frame(self, tmp_path: Path) -> None:
+        r = _make_recorder(tmp_path / "events", post_seconds=0.0)
+        r._min_interval = 0.0
+        trigger = np.full((40, 60, 3), 123, dtype=np.uint8)
+        r.add_frame(trigger)
+
+        event_dir = r.flush_event(
+            "machine_stop",
+            "patron desalineado",
+            trigger_frame=trigger,
+        )
+        assert event_dir is not None
+        r._task_q.join()
+
+        manifest = json.loads(
+            (event_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["pre_frames_count"] == 0
+        assert manifest["trigger_frames_count"] == 1
+        assert not list(event_dir.glob("frame_*.jpg"))
+        r.close()
 
 
 # ----------------------------------------------------------------------

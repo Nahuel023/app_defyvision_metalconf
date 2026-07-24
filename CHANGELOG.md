@@ -81,6 +81,46 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
+#### Cambio 282 - Evidencia exacta y completa para paradas/fallas
+
+**Problema detectado en auditoría:** el buffer agregaba el frame antes de
+inspeccionarlo y aplicaba limitación de FPS, por lo que el frame puntual que
+disparaba un `machine_stop`, una desalineación o un `fault` no estaba garantizado.
+Además, la FSM detenía el hilo inspector inmediatamente y la supuesta ventana
+post-evento quedaba normalmente sin frames. La asociación posterior de overlays
+buscaba "el último post guardado", una carrera que podía relacionar un overlay
+con el frame incorrecto.
+
+**Cambios:**
+
+- `EventRecorder.flush_event()` recibe y guarda siempre el frame disparador
+  exacto como `trigger.jpg` y su resultado visual como
+  `trigger_overlay.jpg`, independientemente del rate-limit o de que el buffer
+  previo esté vacío.
+- Si el mismo frame ya era el último del buffer se elimina la copia duplicada:
+  queda una única versión inequívoca como disparador.
+- La carpeta de evento y la ventana post se activan sincrónicamente antes de la
+  escritura pesada, evitando perder los primeros frames posteriores.
+- `ScannerController` mantiene una captura liviana desde la cámara durante
+  `post_event_seconds` aunque la inspección/FSM ya se haya detenido.
+- El manifest registra `trigger_frames_count`, nombres de trigger,
+  `frames_count` y conteos/tamaño finales reales.
+- Un segundo fallo dentro de la misma ventana queda como
+  `retrigger_NNNN.jpg`/overlay, con motivo y timestamp en
+  `additional_triggers`, en vez de perderse.
+- Pérdida de cámara y crash del inspector también vuelcan la evidencia previa.
+- Se eliminó la asociación asíncrona ambigua del overlay con "el último post".
+- Los visores de Operador y Servicio muestran en orden: previos, disparador
+  exacto y posteriores; el disparador aparece con borde rojo en Operador.
+- Las simulaciones de `machine_stop`/NOK ahora incluyen imagen cruda para poder
+  probar el circuito real de evidencia.
+
+**Validación:** pruebas de creación sin buffer previo, bypass del rate-limit,
+deduplicación, trigger+overlay exactos, captura post, segundo disparador,
+manifest y motivo de desalineación. Suite completa: **67 passed**.
+
+---
+
 #### Cambio 281 - Reparación y diagnóstico visible de la grabación manual
 
 **Problema:** en `Servicio → Cámara → Grabación` podía verse correctamente la

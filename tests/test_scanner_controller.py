@@ -1,3 +1,8 @@
+from pathlib import Path
+from types import SimpleNamespace
+
+import numpy as np
+
 from src.controller.scanner_controller import ScannerController
 from src.utils.state import ScannerState
 
@@ -61,6 +66,24 @@ class _StuckThread:
         self.join_calls += 1
 
 
+class _EvidenceSpy:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def flush_event(self, event_type: str, reason: str = "", **kwargs):
+        self.calls.append((event_type, reason, kwargs))
+        return Path("event")
+
+    def is_post_event_active(self) -> bool:
+        return False
+
+    def finish_post_event(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
     io = _FakeIO()
     camera = _FakeCamera()
@@ -73,6 +96,42 @@ def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
         assert controller.state == ScannerState.IDLE
     finally:
         controller.shutdown()
+
+
+def test_machine_stop_passes_exact_trigger_and_overlay_to_evidence() -> None:
+    io = _FakeIO()
+    camera = _FakeCamera()
+    controller = ScannerController("scanner_1", io, camera)
+    if controller._recorder is not None:
+        controller._recorder.close()
+    spy = _EvidenceSpy()
+    controller._recorder = spy
+    controller._startup_grace_remaining = 0
+    controller._startup_grace_seconds = 0.0
+    controller._transition(ScannerState.RUNNING)
+
+    try:
+        controller.inject_machine_stop("PATRON DESALINEADO")
+
+        assert len(spy.calls) == 1
+        event_type, reason, kwargs = spy.calls[0]
+        assert event_type == "machine_stop"
+        assert "faltantes persistentes" in reason
+        assert isinstance(kwargs["trigger_frame"], np.ndarray)
+        assert isinstance(kwargs["trigger_overlay"], np.ndarray)
+        assert kwargs["trigger_frame"].shape == kwargs["trigger_overlay"].shape
+    finally:
+        controller.shutdown()
+
+
+def test_desalignment_event_reason_is_explicit() -> None:
+    result = SimpleNamespace(
+        tilt_warn=False,
+        pattern_alignment_warn=True,
+        report=SimpleNamespace(missing=12),
+    )
+
+    assert ScannerController._derive_stop_reason(result) == "patron desalineado"
 
 
 def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:

@@ -4670,11 +4670,28 @@ class EventBrowserTab(QWidget):
         )
 
     def _discover_event_frames(self, folder: Path) -> list[Path]:
+        pre = sorted(folder.glob("frame_*.jpg"))
+        trigger = folder / "trigger.jpg"
+        retriggers = sorted(
+            folder.glob("retrigger_[0-9][0-9][0-9][0-9].jpg")
+        )
+        post = sorted(
+            path for path in folder.glob("post_*.jpg")
+            if "_overlay" not in path.name
+        )
+        ordered = pre + ([trigger] if trigger.is_file() else []) + retriggers + post
+        if ordered:
+            return ordered
+
+        # Compatibilidad con evidencias antiguas o carpetas importadas.
         patterns = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
         frames: list[Path] = []
         for pattern in patterns:
             frames.extend(folder.rglob(pattern))
-        return sorted(path for path in frames if path.is_file())
+        return sorted(
+            path for path in frames
+            if path.is_file() and "_overlay" not in path.name
+        )
 
     def _apply_filters(self) -> None:
         scanner = self._scanner_filter.currentText()
