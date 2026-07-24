@@ -79,6 +79,24 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-07-24 - Tadeo + Codex
+
+#### Cambio 281 - V20 con calibración real de Scanner 2
+
+**Pedido:** conservar Scanner 1 exactamente como en el build V20 (`c8404cc`) y
+reaplicar exclusivamente los dos ajustes comprobados hoy para Scanner 2.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/io_map.yaml`, `scanner_2/modelo_B`: `blur_score_min: 1200.0 -> 300.0`;
+  con 1200 los frames reales quedaban como `LOW_QUALITY` y no incrementaban los
+  contadores OK/NOK.
+- `data/patterns/scanner_2/modelo_B/roi.json`: ROI horizontal `x: 218 -> 202`,
+  manteniendo `y=0`, `w=265`, `h=480`, para coincidir con las capturas reales
+  posteriores al zoom digital.
+- Scanner 1 permanece sin cambios respecto del árbol V20.
+
+---
+
 ### Sesión 2026-07-23 - Tadeo + Codex
 
 #### Cambio 280 - Blindaje global de desalineación, control en Tolerancias y eliminación de FAULT genérico falso
