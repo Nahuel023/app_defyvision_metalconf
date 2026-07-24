@@ -81,6 +81,26 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
+#### Cambio 286 - Rollback seguro de Scanner 1, Scanner 2 preservado
+
+**Motivo:** la corrección experimental posterior a `V19` hizo que Scanner 1
+clasificara todos los frames como NOK durante la prueba real en planta.
+
+**Acción:**
+
+- Se revirtió por completo el commit experimental de borde de Scanner 1.
+- El árbol funcional volvió exactamente al contenido de `V19`.
+- La calibración correcta de Scanner 2 no se revirtió: conserva
+  `blur_score_min=300`, ROI `x=202, y=0, w=265, h=480`,
+  `pattern_align_stop_frames=3` y `frame_missing_nok_threshold=3`.
+- Se verificó que el commit `f46a133` de calibración de Scanner 2 continúa
+  presente en la historia activa.
+
+**Validación:** comparación completa contra `V19` sin diferencias y pruebas
+principales de configuración/controlador: **18 passed**.
+
+---
+
 #### Cambio 285 - Validación final integral de ambos scanners
 
 **Pedido:** verificar de extremo a extremo Scanner 1 y Scanner 2 antes de
