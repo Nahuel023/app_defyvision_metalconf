@@ -53,7 +53,7 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "grid_affine_refinement": False,  # True = corrección affine local post-fase-global
     "blur_score_min": 0.0,            # 0 = deshabilitado; >0 = varianza mín del Laplaciano
     "low_quality_max_streak": 10,     # frames LOW_QUALITY consecutivos antes de resetear racha
-    "nok_count_reset_frames": 30,     # frames OK seguidos antes de resetear a 0 el contador NOK de la sesion
+    "nok_count_reset_frames": 200,    # frames OK seguidos antes de resetear a 0 el contador NOK de la sesion
     "extra_min_dist_factor": 0.0,     # 0 = todos los extras se muestran; >0 = umbral en múltiplos de tol_xy_px
     "machine_stop_enabled": False,
     "machine_stop_missing_frames": 5,

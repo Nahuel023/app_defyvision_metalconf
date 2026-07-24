@@ -1,8 +1,3 @@
-from pathlib import Path
-from types import SimpleNamespace
-
-import numpy as np
-
 from src.controller.scanner_controller import ScannerController
 from src.utils.state import ScannerState
 
@@ -66,24 +61,6 @@ class _StuckThread:
         self.join_calls += 1
 
 
-class _EvidenceSpy:
-    def __init__(self) -> None:
-        self.calls: list[tuple[str, str, dict]] = []
-
-    def flush_event(self, event_type: str, reason: str = "", **kwargs):
-        self.calls.append((event_type, reason, kwargs))
-        return Path("event")
-
-    def is_post_event_active(self) -> bool:
-        return False
-
-    def finish_post_event(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
-
-
 def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
     io = _FakeIO()
     camera = _FakeCamera()
@@ -96,42 +73,6 @@ def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
         assert controller.state == ScannerState.IDLE
     finally:
         controller.shutdown()
-
-
-def test_machine_stop_passes_exact_trigger_and_overlay_to_evidence() -> None:
-    io = _FakeIO()
-    camera = _FakeCamera()
-    controller = ScannerController("scanner_1", io, camera)
-    if controller._recorder is not None:
-        controller._recorder.close()
-    spy = _EvidenceSpy()
-    controller._recorder = spy
-    controller._startup_grace_remaining = 0
-    controller._startup_grace_seconds = 0.0
-    controller._transition(ScannerState.RUNNING)
-
-    try:
-        controller.inject_machine_stop("PATRON DESALINEADO")
-
-        assert len(spy.calls) == 1
-        event_type, reason, kwargs = spy.calls[0]
-        assert event_type == "machine_stop"
-        assert "faltantes persistentes" in reason
-        assert isinstance(kwargs["trigger_frame"], np.ndarray)
-        assert isinstance(kwargs["trigger_overlay"], np.ndarray)
-        assert kwargs["trigger_frame"].shape == kwargs["trigger_overlay"].shape
-    finally:
-        controller.shutdown()
-
-
-def test_desalignment_event_reason_is_explicit() -> None:
-    result = SimpleNamespace(
-        tilt_warn=False,
-        pattern_alignment_warn=True,
-        report=SimpleNamespace(missing=12),
-    )
-
-    assert ScannerController._derive_stop_reason(result) == "patron desalineado"
 
 
 def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
@@ -219,74 +160,4 @@ def test_start_is_blocked_while_previous_worker_is_still_alive(monkeypatch) -> N
         assert controller._poller_thread is stuck
     finally:
         controller._poller_thread = None
-        controller.shutdown()
-
-
-def test_reset_clears_stopped_by_fault_flag() -> None:
-    """Tras una parada por falla, reset() debe volver a IDLE y limpiar el flag
-    de falla (empieza de cero). Respalda el auto-retorno a IDLE de la UI."""
-    io = _FakeIO()
-    camera = _FakeCamera()
-    controller = ScannerController("scanner_1", io, camera)
-    if controller._recorder is not None:
-        controller._recorder.close()
-        controller._recorder = None
-    controller._startup_grace_remaining = 0
-    controller._startup_grace_seconds = 0.0
-    controller._transition(ScannerState.RUNNING)
-
-    try:
-        controller.inject_machine_stop("PATRON DESALINEADO")
-        status = controller.get_status()
-        assert status["state"] == ScannerState.STOPPED
-        assert status["stopped_by_fault"] is True
-
-        assert controller.reset() is True
-        cleared = controller.get_status()
-        assert cleared["state"] == ScannerState.IDLE
-        assert cleared["stopped_by_fault"] is False
-    finally:
-        controller.shutdown()
-
-
-def test_good_frames_increment_ok_while_low_quality_is_inconclusive() -> None:
-    """Protege el flujo que ve el operario en los contadores.
-
-    Un resultado nítido debe contabilizarse inmediatamente. LOW_QUALITY sigue
-    siendo inconcluso: cuenta como problema de calidad, pero no inventa OK/NOK.
-    """
-    io = _FakeIO()
-    camera = _FakeCamera()
-    controller = ScannerController("scanner_1", io, camera)
-    if controller._recorder is not None:
-        controller._recorder.close()
-        controller._recorder = None
-    controller._ok_buf_enabled = False
-    controller._tl_enabled = False
-    controller._startup_grace_remaining = 0
-    controller._startup_grace_seconds = 0.0
-    controller._transition(ScannerState.RUNNING)
-
-    def result(status: str, quality: str):
-        return SimpleNamespace(
-            status=status,
-            frame_quality=quality,
-            report=SimpleNamespace(missing=0),
-            detection_ratio=1.0,
-            alignment_ok=True,
-            machine_stop=False,
-            overlay=None,
-            image=None,
-        )
-
-    try:
-        controller._handle_result(result("OK", "GOOD"))
-        controller._handle_result(result("NOK", "LOW_QUALITY"))
-
-        status = controller.get_status()
-        assert status["ok_count"] == 1
-        assert status["nok_count"] == 0
-        assert status["low_quality_count"] == 1
-        assert status["total_inspections"] == 2
-    finally:
         controller.shutdown()

@@ -924,38 +924,24 @@ class ScannerPanel(QWidget):
             text = "↺  RESET FALLA" if stopped_by_fault else "↺  RESET"
             self.reset_btn.setText(text)
             # Parada normal (no falla): arrancar el auto-clear de 30s -> IDLE.
-            # Falla: el auto-clear lo arranca begin_fault_autoclear() cuando el
-            # operario confirma la pantalla de error. Aca no lo tocamos para no
-            # cancelar la cuenta ya iniciada ni arrancarla antes de tiempo.
+            # Falla: el boton queda hasta reconocimiento manual.
             if not stopped_by_fault:
                 if not self._reset_autohide_timer.isActive():
                     self._reset_autohide_timer.start()
+            else:
+                self._reset_autohide_timer.stop()
         else:
             self._reset_autohide_timer.stop()
         self.start_btn.setEnabled(state == ScannerState.IDLE)
         self.stop_btn.setEnabled(state in (ScannerState.RUNNING, ScannerState.FAULT, ScannerState.ERROR))
 
-    def begin_fault_autoclear(self) -> None:
-        """Arranca el auto-retorno a IDLE (30s) tras una parada por FALLA.
-
-        Se llama cuando el operario confirma la pantalla de error a pantalla
-        completa: al reconocerla, el sistema queda igual que en una parada
-        normal y vuelve solo a IDLE a los 30s (mismo mecanismo que RESET)."""
-        try:
-            s = self._scanner.get_status()
-            if s["state"] == ScannerState.STOPPED and bool(s.get("stopped_by_fault", False)):
-                self._reset_autohide_timer.start()
-        except Exception:
-            logger.exception("[%s] no se pudo armar auto-clear de falla", self._id)
-
     def _auto_clear_stop(self) -> None:
-        """A los 30s de una parada (normal o falla ya reconocida por el operario),
-        devuelve el scanner a IDLE para que el boton RESET/RESET FALLA desaparezca
-        y el display quede limpio. Re-verifica el estado por si cambio mientras
-        corria el timer."""
+        """A los 30s de una parada MANUAL/normal, devuelve el scanner a IDLE para
+        que el boton RESET desaparezca y el display quede limpio. Re-verifica el
+        estado por si entro una falla mientras corria el timer (esas no se limpian)."""
         try:
             s = self._scanner.get_status()
-            if s["state"] != ScannerState.STOPPED:
+            if s["state"] != ScannerState.STOPPED or bool(s.get("stopped_by_fault", False)):
                 return
             self._scanner.reset()  # STOPPED -> IDLE; el refresh siguiente oculta el boton
         except Exception:
@@ -1025,124 +1011,104 @@ class MachineStopDialog(QDialog):
         # Maximizar para ocupar toda la pantalla
         self.showMaximized()
 
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if not getattr(self, "_did_fade", False):
+            self._did_fade = True
+            from src.ui.anim import fade_in
+            fade_in(self, ms=110)  # rapido: es una alerta, no debe demorar
+
     def _build_ui(self) -> None:
-        self.setStyleSheet(f"background:{_BG};")
+        self.setStyleSheet("background:#120607;")
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Franja de acento superior (marca de alarma, delgada) ──────
-        accent = QFrame()
-        accent.setFixedHeight(6)
-        accent.setStyleSheet(
-            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f"stop:0 {_NOK_CLR}, stop:0.5 #ff8a80, stop:1 {_NOK_CLR});"
-        )
-        root.addWidget(accent)
-
-        # ── Encabezado: alarma + chip de scanner + instrucción ────────
+        # Encabezado orientado al operario: alarma + scanner bien dominante.
         top = QFrame()
-        top.setStyleSheet(f"background:{_PANEL};border-bottom:1px solid {_BORDER};")
+        top.setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+            "stop:0 #7f1d1d, stop:0.6 #991b1b, stop:1 #450a0a);"
+            "border-bottom:3px solid #fecaca;"
+        )
         top_lay = QVBoxLayout(top)
-        top_lay.setContentsMargins(40, 26, 40, 24)
-        top_lay.setSpacing(16)
+        top_lay.setContentsMargins(36, 22, 36, 22)
+        top_lay.setSpacing(10)
 
-        alarm_row = QHBoxLayout()
-        alarm_row.setSpacing(14)
-        alarm_row.addStretch(1)
-        dot = QLabel("●")
-        dot.setStyleSheet(
-            f"color:{_NOK_CLR};font-size:22px;background:transparent;"
-        )
-        alarm_row.addWidget(dot)
-        alarm_lbl = QLabel("DETENCIÓN DE MÁQUINA")
+        alarm_lbl = QLabel("DETENCION DE MAQUINA")
+        alarm_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         alarm_lbl.setStyleSheet(
-            f"color:{_NOK_CLR};font-size:26px;font-weight:800;"
-            "letter-spacing:4px;background:transparent;"
+            "color:#fff1f2;font-size:24px;font-weight:800;"
+            "letter-spacing:3px;background:transparent;"
         )
-        alarm_row.addWidget(alarm_lbl)
-        alarm_row.addStretch(1)
-        top_lay.addLayout(alarm_row)
+        top_lay.addWidget(alarm_lbl)
 
-        # Chip de scanner: superficie neutra oscura para máxima legibilidad.
-        chip_row = QHBoxLayout()
-        chip_row.addStretch(1)
+        # Placa oscura sólida: el fondo translúcido anterior se lavaba contra
+        # el degradé rojo y el texto quedaba poco legible.
         scanner_lbl = QLabel(self._scanner_label)
         scanner_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         scanner_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:38px;font-weight:900;letter-spacing:2px;"
-            f"background:{_CARD};border:1px solid {_BORDER};border-radius:14px;"
-            "padding:12px 30px;"
+            "color:#ffffff;font-size:46px;font-weight:900;"
+            "letter-spacing:2px;background:#0b0f14;"
+            "border:3px solid #f87171;border-radius:14px;padding:14px 24px;"
         )
-        chip_row.addWidget(scanner_lbl)
-        chip_row.addStretch(1)
-        top_lay.addLayout(chip_row)
+        top_lay.addWidget(scanner_lbl)
 
-        instruction_lbl = QLabel("Revisá esta estación antes de reanudar la línea")
+        instruction_lbl = QLabel("REVISAR ESTA ESTACION ANTES DE REANUDAR LA LINEA")
         instruction_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         instruction_lbl.setStyleSheet(
-            f"color:{_MUTED};font-size:16px;font-weight:600;"
+            "color:#fecaca;font-size:17px;font-weight:700;"
             "letter-spacing:1px;background:transparent;"
         )
         top_lay.addWidget(instruction_lbl)
         root.addWidget(top)
 
-        # ── Imagen del frame con el defecto (hero, tarjeta redondeada) ─
-        img_wrap = QFrame()
-        img_wrap.setStyleSheet(f"background:{_BG};")
-        wrap_lay = QVBoxLayout(img_wrap)
-        wrap_lay.setContentsMargins(24, 20, 24, 20)
-        wrap_lay.setSpacing(0)
+        # ── Imagen del frame con el defecto — máximo espacio ──────────
         self._img_lbl = QLabel()
         self._img_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_lbl.setStyleSheet(
-            f"background:#000000;border:1px solid {_BORDER};border-radius:12px;"
+            "background:#000000;border-top:1px solid #2b0b0b;border-bottom:1px solid #2b0b0b;"
         )
         self._img_lbl.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
-        wrap_lay.addWidget(self._img_lbl)
-        root.addWidget(img_wrap, stretch=1)
+        root.addWidget(self._img_lbl, stretch=1)
 
-        # ── Footer: motivo (tarjeta con borde de acento) + acción ─────
-        footer = QFrame()
-        footer.setStyleSheet(f"background:{_PANEL};border-top:1px solid {_BORDER};")
+        footer = QWidget()
+        footer.setFixedHeight(96)
+        footer.setStyleSheet("background:#1a0000;border-top:2px solid #7f1d1d;")
         foot_lay = QHBoxLayout(footer)
-        foot_lay.setContentsMargins(28, 18, 24, 18)
-        foot_lay.setSpacing(18)
+        foot_lay.setContentsMargins(26, 14, 18, 14)
+        foot_lay.setSpacing(16)
 
         reason_box = QFrame()
         reason_box.setStyleSheet(
-            f"background:{_CARD};border:1px solid {_BORDER};"
-            f"border-left:4px solid {_NOK_CLR};border-radius:12px;"
+            "background:#2a0d10;border:1px solid #7f1d1d;border-radius:12px;"
         )
         reason_lay = QVBoxLayout(reason_box)
-        reason_lay.setContentsMargins(22, 12, 22, 12)
+        reason_lay.setContentsMargins(18, 10, 18, 10)
         reason_lay.setSpacing(4)
 
-        reason_title = QLabel("MOTIVO DE LA DETENCIÓN")
+        reason_title = QLabel("MOTIVO DE LA DETENCION")
         reason_title.setStyleSheet(
-            f"color:{_MUTED};font-size:12px;font-weight:700;"
-            "letter-spacing:2px;background:transparent;"
+            "color:#fca5a5;font-size:12px;font-weight:800;letter-spacing:2px;background:transparent;"
         )
         reason_lbl = QLabel(self._reason.upper())
         reason_lbl.setStyleSheet(
-            f"color:{_TEXT};font-size:22px;font-weight:800;background:transparent;"
+            "color:#ffffff;font-size:22px;font-weight:800;background:transparent;"
         )
         reason_lay.addWidget(reason_title)
         reason_lay.addWidget(reason_lbl)
         foot_lay.addWidget(reason_box, stretch=1)
 
         btn = QPushButton("CONFIRMAR Y CONTINUAR")
-        btn.setFixedHeight(70)
-        btn.setMinimumWidth(300)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setFixedHeight(68)
+        btn.setMinimumWidth(280)
         btn.setStyleSheet(
-            "QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            f"stop:0 #ef4444, stop:1 {_NOK_CLR});color:#ffffff;"
-            "font-size:21px;font-weight:900;letter-spacing:1px;"
-            "border:none;border-radius:14px;padding:0 26px; }"
-            "QPushButton:hover { background:#ff6b60; }"
+            "QPushButton { background:#dc2626;color:#ffffff;"
+            "font-size:22px;font-weight:900;letter-spacing:1px;"
+            "border:none;border-radius:12px;padding:0 20px; }"
+            "QPushButton:hover { background:#ef4444; }"
             "QPushButton:pressed { background:#991b1b; }"
         )
         btn.clicked.connect(self.accept)
@@ -1157,10 +1123,6 @@ class MachineStopDialog(QDialog):
     def showEvent(self, event) -> None:
         super().showEvent(event)
         self._update_image()
-        if not getattr(self, "_did_fade", False):
-            self._did_fade = True
-            from src.ui.anim import fade_in
-            fade_in(self, ms=110)  # rapido: es una alerta, no debe demorar
 
     def _update_image(self) -> None:
         if self._overlay is None or self._img_lbl is None:
@@ -1447,14 +1409,9 @@ class OperatorWindow(QMainWindow):
         """Muestra el diálogo de parada a pantalla completa. Solo uno a la vez."""
         if self._stop_alert_dlg is not None and self._stop_alert_dlg.isVisible():
             return
-        # Panel que emitió la alerta (para armar su auto-retorno a IDLE al cerrar).
-        panel = self.sender()
         self._stop_alert_dlg = MachineStopDialog(overlay, label, reason, parent=self)
         self._stop_alert_dlg.exec()
         self._stop_alert_dlg = None
-        # El operario reconoció la pantalla de error → a los 30s vuelve solo a IDLE.
-        if isinstance(panel, ScannerPanel):
-            panel.begin_fault_autoclear()
 
     def _open_metrics(self) -> None:
         from src.ui.metrics_window import MetricsWindow

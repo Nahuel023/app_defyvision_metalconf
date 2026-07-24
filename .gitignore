@@ -32,12 +32,6 @@ data/dbg_*
 # Logs de runtime — no van a git
 logs/
 
-# Diagnósticos ad-hoc en la raíz (paridad scanner, baselines, etc.)
-scanner*_baseline.log
-scanner*_final.log
-scanner*_parity_diagnostics.tsv
-*_diagnostics.tsv
-
 # PyInstaller output
 dist/
 build/

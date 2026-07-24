@@ -113,18 +113,6 @@ _PARAMS: list[dict[str, Any]] = [
         vmin=2, vmax=9999, vstep=1,
     ),
     dict(
-        key="nok_count_reset_frames",
-        label="Reinicio del contador NOK",
-        desc=(
-            "Cantidad de frames OK consecutivos necesarios para volver a cero "
-            "el contador NOK acumulado que ve el operario. No cambia las reglas "
-            "de parada ni las rachas de seguridad."
-        ),
-        unit="frames OK",
-        vtype="int",
-        vmin=5, vmax=200, vstep=5,
-    ),
-    dict(
         key="pattern_align_severe_abs_max_px",
         label="Sensibilidad ante chapa torcida",
         desc=(

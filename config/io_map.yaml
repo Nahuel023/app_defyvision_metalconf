@@ -224,9 +224,7 @@ scanner_2:
       # y los falsos unificados pasan claramente por arriba.
       max_area: 250.0
       # Calibracion 24-07-2026 sobre 499 frames OK reales con zoom digital:
-      # el lote mide 309..917 de nitidez. El valor anterior (1200) marcaba
-      # absolutamente todos los frames como LOW_QUALITY y por eso el
-      # controlador no sumaba ni OK ni NOK. 300 conserva margen bajo el minimo.
+      # 1200 marcaba todos los frames como LOW_QUALITY e impedia sumar OK/NOK.
       blur_score_min: 300.0
       # Ajuste fino de borde de patron: bajar el gate lateral evita que una banda
       # tome la columna siguiente como borde y dibuje zigzag falso en el overlay.

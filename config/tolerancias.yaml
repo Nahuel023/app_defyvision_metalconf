@@ -37,9 +37,6 @@ clahe_tile: 8
 use_otsu: true
 continuous_position_threshold: 0.0
 max_inspection_hz: 25
-# Limpia el contador NOK acumulado tras 30 inspecciones OK seguidas
-# (~1,2 s a 25 Hz). No modifica las rachas que detienen la maquina.
-nok_count_reset_frames: 30
 # ---------------- Buffer circular de frames OK ----------------
 # Guarda las ultimas ok_buffer_count inspecciones correctas (con overlay verde)
 # en data/output/ok_buffer/<scanner_id>/ sobreescribiendo las mas viejas.

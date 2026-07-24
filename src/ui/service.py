@@ -1443,8 +1443,6 @@ class _HTTPSnapshotReader(QThread):
 class RecordingTab(QWidget):
     """Grabación continua de frames, análisis offline y navegador de resultados."""
 
-    recording_write_failed = pyqtSignal(str)
-
     def __init__(self, system: InspectionSystem, parent=None) -> None:
         super().__init__(parent)
         self._system       = system
@@ -1497,11 +1495,8 @@ class RecordingTab(QWidget):
         # IP camera live view - MJPEG worker (HTTP) or cv2 fallback (RTSP/USB)
         self._ip_worker: Optional[_MJPEGReader] = None
         self._ip_cap:    Optional[cv2.VideoCapture] = None
-        self._ip_last_frame = None
-        self._ip_last_frame_t = 0.0
         self._ip_timer = QTimer(self)
         self._ip_timer.timeout.connect(self._refresh_ip_camera)
-        self.recording_write_failed.connect(self._on_recording_write_failed)
 
         self._rec_timer = QTimer(self)
         self._rec_timer.timeout.connect(self._grab_frame)
@@ -1530,7 +1525,6 @@ class RecordingTab(QWidget):
         # Signal wiring
         self._btn_start.clicked.connect(self._on_start)
         self._btn_stop.clicked.connect(self._on_stop)
-        self._btn_open_rec_dir.clicked.connect(self._open_recordings_dir)
         self._btn_load.clicked.connect(self._on_load_recording)
         self._btn_analyze.clicked.connect(self._on_analyze)
         self._btn_read_cam.clicked.connect(self._refresh_cam_info)
@@ -1773,11 +1767,9 @@ class RecordingTab(QWidget):
 
         self._btn_start = self._mk_btn("INICIAR GRABACION", "#15803d", h=42, fs=13)
         self._btn_stop  = self._mk_btn("DETENER",           "#991b1b", h=42, fs=13)
-        self._btn_open_rec_dir = self._mk_btn("ABRIR CARPETA", "#334155", h=42, fs=11)
         self._btn_stop.setEnabled(False)
         act.addWidget(self._btn_start)
         act.addWidget(self._btn_stop)
-        act.addWidget(self._btn_open_rec_dir)
         act.addStretch()
 
         # State badge - prominent indicator panel
@@ -2536,8 +2528,6 @@ class RecordingTab(QWidget):
         if self._ip_cap is not None:
             self._ip_cap.release()
             self._ip_cap = None
-        self._ip_last_frame = None
-        self._ip_last_frame_t = 0.0
         self._ip_preview.setPixmap(QPixmap())
         self._ip_preview.setText("Sin señal")
         self._btn_ip_connect.setEnabled(True)
@@ -2551,8 +2541,6 @@ class RecordingTab(QWidget):
 
     def _on_ip_frame_ready(self, frame) -> None:
         self._ip_status_lbl.setText("Conectado")
-        self._ip_last_frame = frame.copy()
-        self._ip_last_frame_t = time.monotonic()
         self._show_ip_frame(frame)
 
     def _ip_auth_settings(self) -> dict:
@@ -2574,8 +2562,6 @@ class RecordingTab(QWidget):
         ret, frame = self._ip_cap.read()
         if not ret:
             return
-        self._ip_last_frame = frame.copy()
-        self._ip_last_frame_t = time.monotonic()
         self._show_ip_frame(frame)
 
     def _show_ip_frame(self, frame) -> None:
@@ -2993,37 +2979,15 @@ class RecordingTab(QWidget):
     def _on_start(self) -> None:
         sid = self._scanner_combo.currentText()
         cam = self._system.camera(sid)
-        preview_available = (
-            self._ip_last_frame is not None
-            and time.monotonic() - self._ip_last_frame_t < 2.0
-        )
-        if not cam.is_running and not preview_available:
-            msg = (
-                "La cámara no está activa y la vista previa todavía no recibió "
-                "ningún frame. Espere a ver imagen y vuelva a intentar."
-            )
-            self._status_lbl.setText(f"ALERTA  {msg}")
-            QMessageBox.warning(self, "No se puede grabar", msg)
+        if not cam.is_running:
+            self._status_lbl.setText("ALERTA  La cámara no está activa")
             return
 
         from datetime import datetime as _dt
         rec_date = _dt.now().strftime("%d-%m-%Y")
         rec_name = self._build_recording_folder_name(rec_date, sid)
         self._rec_dir = self._unique_recording_dir(rec_name)
-        try:
-            self._rec_dir.mkdir(parents=True, exist_ok=False)
-        except FileExistsError:
-            self._rec_dir = self._unique_recording_dir(rec_name)
-            self._rec_dir.mkdir(parents=True, exist_ok=False)
-        except Exception as exc:
-            logger.exception("[Grabación] no se pudo crear %s", self._rec_dir)
-            QMessageBox.critical(
-                self,
-                "Error al crear la grabación",
-                f"No se pudo crear la carpeta:\n{self._rec_dir}\n\n{exc}",
-            )
-            self._status_lbl.setText("ERROR  No se pudo crear la carpeta de grabación")
-            return
+        self._rec_dir.mkdir(parents=True, exist_ok=True)
         self._frame_paths.clear()
         self._results.clear()
         self._current_idx = 0
@@ -3058,20 +3022,9 @@ class RecordingTab(QWidget):
             "camera_settings": cam_settings,
             "cam_fps_real": cam.fps if cam.fps > 0 else None,
         }
-        try:
-            (self._rec_dir / "meta.json").write_text(
-                json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-        except Exception as exc:
-            logger.exception("[Grabación] no se pudo escribir meta.json en %s", self._rec_dir)
-            QMessageBox.critical(
-                self,
-                "Error al iniciar la grabación",
-                f"La carpeta se creó, pero no se puede escribir en ella:\n"
-                f"{self._rec_dir}\n\n{exc}",
-            )
-            self._status_lbl.setText("ERROR  No se puede escribir la grabación")
-            return
+        (self._rec_dir / "meta.json").write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
 
         from concurrent.futures import ThreadPoolExecutor
         self._write_executor = ThreadPoolExecutor(max_workers=1)
@@ -3093,7 +3046,7 @@ class RecordingTab(QWidget):
         self._live_chk.setEnabled(False)
 
         mode_txt = " (en vivo)" if self._live_chk.isChecked() else ""
-        self._status_lbl.setText(f"Grabando{mode_txt} -> {self._rec_dir.resolve()}")
+        self._status_lbl.setText(f"Grabando{mode_txt} -> {self._rec_dir.name}")
         self._set_rec_badge("recording", 0, self._rec_dir)
         logger.info(f"[Grabación] inicio en {self._rec_dir}  modelo={meta['model_display']}  fps={meta['fps']}")
 
@@ -3106,7 +3059,6 @@ class RecordingTab(QWidget):
         if self._write_executor is not None:
             self._write_executor.shutdown(wait=True)   # flush pending PNG writes
             self._write_executor = None
-        self._frame_paths = [p for p in self._frame_paths if p.is_file()]
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._btn_load.setEnabled(True)
@@ -3143,17 +3095,7 @@ class RecordingTab(QWidget):
     def _grab_frame(self) -> None:
         sid  = self._scanner_combo.currentText()
         cam  = self._system.camera(sid)
-        # La preview de Servicio usa una conexión independiente. Grabar el mismo
-        # frame visible evita que la pantalla muestre imagen mientras la conexión
-        # interna de producción todavía entrega None.
-        preview_is_fresh = (
-            self._ip_last_frame is not None
-            and time.monotonic() - self._ip_last_frame_t < 2.0
-        )
-        if preview_is_fresh:
-            frame = _zoom_live_frame(self._system, sid, self._ip_last_frame.copy())
-        else:
-            frame = cam.get_frame()
+        frame = cam.get_frame()
         if frame is None:
             return
         idx  = len(self._frame_paths)
@@ -3175,13 +3117,12 @@ class RecordingTab(QWidget):
         self._burn_stamp(frame_to_save, idx, _now)
 
         if self._write_executor is not None:
-            future = self._write_executor.submit(
-                self._write_recording_frame, path, frame_to_save
+            self._write_executor.submit(
+                cv2.imwrite, str(path), frame_to_save,
+                [cv2.IMWRITE_PNG_COMPRESSION, 1],
             )
-            future.add_done_callback(self._recording_write_done)
         else:
-            if not self._write_recording_frame(path, frame_to_save):
-                self.recording_write_failed.emit(str(path))
+            cv2.imwrite(str(path), frame_to_save, [cv2.IMWRITE_PNG_COMPRESSION, 1])
 
         if self._live_chk.isChecked():
             try:
@@ -3799,44 +3740,6 @@ class RecordingTab(QWidget):
         self._rec_state_lbl.setText(text)
         self._rec_count_lbl.setText(str(n_frames))
         self._rec_folder_lbl.setText(folder.name if folder else "-")
-        self._rec_folder_lbl.setToolTip(str(folder.resolve()) if folder else "")
-
-    @staticmethod
-    def _write_recording_frame(path: Path, frame: np.ndarray) -> bool:
-        try:
-            ok = cv2.imwrite(
-                str(path), frame, [cv2.IMWRITE_PNG_COMPRESSION, 1]
-            )
-            if not ok:
-                logger.error("[Grabación] cv2.imwrite devolvió False: %s", path)
-            return bool(ok)
-        except Exception:
-            logger.exception("[Grabación] error escribiendo frame: %s", path)
-            return False
-
-    def _recording_write_done(self, future) -> None:
-        try:
-            if not future.result():
-                self.recording_write_failed.emit(
-                    "No se pudo guardar un frame. Revise espacio y permisos del disco."
-                )
-        except Exception as exc:
-            logger.exception("[Grabación] fallo inesperado del escritor")
-            self.recording_write_failed.emit(str(exc))
-
-    def _on_recording_write_failed(self, detail: str) -> None:
-        self._status_lbl.setText(f"ERROR DE ESCRITURA  {detail}")
-
-    def _open_recordings_dir(self) -> None:
-        root = self._recordings_root()
-        try:
-            root.mkdir(parents=True, exist_ok=True)
-            os.startfile(str(root.resolve()))
-        except Exception as exc:
-            logger.exception("[Grabación] no se pudo abrir %s", root)
-            QMessageBox.warning(
-                self, "Abrir carpeta", f"No se pudo abrir:\n{root}\n\n{exc}"
-            )
 
     def _refresh_cam_info(self) -> None:
         sid = self._scanner_combo.currentText()
@@ -3870,7 +3773,7 @@ class RecordingTab(QWidget):
         return label or "SIN_MODELO"
 
     def _build_recording_folder_name(self, date_str: str, scanner_id: str = "") -> str:
-        root = self._recordings_root()
+        root = Path("data/recordings")
         model_label = self._recording_model_label()
         scanner_label = re.sub(r"[^A-Z0-9]+", "_", scanner_id.upper()).strip("_") if scanner_id else ""
         prefix = f"{date_str}-{model_label}_"
@@ -3893,7 +3796,7 @@ class RecordingTab(QWidget):
         return f"{date_str}-{model_label}_{next_idx}"
 
     def _unique_recording_dir(self, base_name: str) -> Path:
-        root = self._recordings_root()
+        root = Path("data/recordings")
         candidate = root / base_name
         if not candidate.exists():
             return candidate
@@ -3903,10 +3806,6 @@ class RecordingTab(QWidget):
             if not candidate.exists():
                 return candidate
             idx += 1
-
-    @staticmethod
-    def _recordings_root() -> Path:
-        return _ROOT / "data" / "recordings"
 
     # ── Model toggle buttons ──────────────────────────────────────────
 
@@ -4043,7 +3942,7 @@ class RecordingTab(QWidget):
         """Load an existing recording folder for analysis."""
         from src.patterns.pattern_io import infer_scanner_id
 
-        base = str(self._recordings_root().resolve())
+        base = str(Path("data/recordings").resolve())
         folder = QFileDialog.getExistingDirectory(
             self, "Seleccionar grabación", base,
             QFileDialog.Option.ShowDirsOnly,
@@ -4670,28 +4569,11 @@ class EventBrowserTab(QWidget):
         )
 
     def _discover_event_frames(self, folder: Path) -> list[Path]:
-        pre = sorted(folder.glob("frame_*.jpg"))
-        trigger = folder / "trigger.jpg"
-        retriggers = sorted(
-            folder.glob("retrigger_[0-9][0-9][0-9][0-9].jpg")
-        )
-        post = sorted(
-            path for path in folder.glob("post_*.jpg")
-            if "_overlay" not in path.name
-        )
-        ordered = pre + ([trigger] if trigger.is_file() else []) + retriggers + post
-        if ordered:
-            return ordered
-
-        # Compatibilidad con evidencias antiguas o carpetas importadas.
         patterns = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
         frames: list[Path] = []
         for pattern in patterns:
             frames.extend(folder.rglob(pattern))
-        return sorted(
-            path for path in frames
-            if path.is_file() and "_overlay" not in path.name
-        )
+        return sorted(path for path in frames if path.is_file())
 
     def _apply_filters(self) -> None:
         scanner = self._scanner_filter.currentText()

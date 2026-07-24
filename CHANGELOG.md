@@ -79,186 +79,29 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
-### Sesión 2026-07-24 - Tadeo + Codex
+### Sesión 2026-07-24 - Rollback real de producción
 
-#### Cambio 286 - Rollback seguro de Scanner 1, Scanner 2 preservado
+#### Cambio 281 - Base V20 estable para Scanner 1 + calibración nueva de Scanner 2
 
-**Motivo:** la corrección experimental posterior a `V19` hizo que Scanner 1
-clasificara todos los frames como NOK durante la prueba real en planta.
+**Problema:** los rollbacks anteriores solo retiraban el último experimento,
+pero seguían basados en `V19`, que tampoco funcionaba correctamente en la prueba
+real de Scanner 1.
 
-**Acción:**
+**Solución solicitada:**
 
-- Se revirtió por completo el commit experimental de borde de Scanner 1.
-- El árbol funcional volvió exactamente al contenido de `V19`.
-- La calibración correcta de Scanner 2 no se revirtió: conserva
-  `blur_score_min=300`, ROI `x=202, y=0, w=265, h=480`,
-  `pattern_align_stop_frames=3` y `frame_missing_nok_threshold=3`.
-- Se verificó que el commit `f46a133` de calibración de Scanner 2 continúa
-  presente en la historia activa.
+- Se restauró el árbol completo al commit estable de ayer
+  `c8404cc` (`DEFYVISION_METALCONF_V20_CYTHON_2026-07-23.zip`).
+- Scanner 1 quedó idéntico byte a byte a esa entrega: código de inspección,
+  grid fitting, borde, patrón `holes.json`, ROI y bloque de configuración.
+- Sobre esa base se reaplicaron únicamente los dos ajustes comprobados de
+  Scanner 2:
+  - `blur_score_min: 300.0`;
+  - ROI `x=202, y=0, w=265, h=480`.
+- Se descartaron todos los demás cambios de código realizados el 24/07.
 
-**Validación:** comparación completa contra `V19` sin diferencias y pruebas
-principales de configuración/controlador: **18 passed**.
-
----
-
-#### Cambio 285 - Validación final integral de ambos scanners
-
-**Pedido:** verificar de extremo a extremo Scanner 1 y Scanner 2 antes de
-entregar la versión a los operarios: frames, alineación automática de ROI,
-conteos, decisiones temporales, estados, evidencia y grabación.
-
-**Hallazgos y decisiones:**
-
-- El lote nuevo de Scanner 1 contiene 300 capturas OK, pero solo 50 posiciones
-  visualmente nuevas; las otras 250 son repeticiones mientras la chapa no
-  avanza. Con el filtro productivo de movimiento: **50/50 OK**, sin NOK,
-  `LOW_QUALITY`, desalineaciones ni paradas.
-- Scanner 2 mantiene **394/394 inspecciones efectivas OK** sobre sus 499
-  capturas, sin falsos eventos.
-- Se evaluó recentrar permanentemente Scanner 1 de X=213 a X=219. Aunque el
-  lote del 24/07 también queda OK, esa posición rompe corridas válidas del
-  21/07. Se conserva X=213: el recentrado productivo aprende el desfase inicial
-  de cada corrida y corrige únicamente una deriva posterior sostenida.
-- Simulando una deriva lateral real, la ROI automática movió Scanner 1
-  **213→217** y Scanner 2 **202→206**, siempre en pasos de 1 px, respetando
-  warmup, racha y cooldown; no produjo ninguna parada.
-- Defectos controlados sobre frames actuales verificaron el circuito de
-  faltantes persistentes: ambos scanners marcan la evidencia y paran recién en
-  el **tercer frame consecutivo**; un frame aislado seguido por uno bueno
-  reinicia la evidencia.
-- Los lotes históricos de Scanner 2 continúan sin falsos NOK y la secuencia
-  editada conserva NOK/parada. Las grabaciones antiguas de Scanner 1 tienen
-  otra posición/zoom de cámara y no se usaron para sobrescribir la calibración
-  física actual.
-
-**Blindaje agregado:**
-
-- Prueba del contrato de contadores: un frame `GOOD/OK` incrementa OK y un
-  `LOW_QUALITY` queda inconcluso sin inventar OK/NOK.
-- Prueba de los umbrales de nitidez calibrados: Scanner 1 = 200 y Scanner 2 =
-  300.
-
-**Validación del proceso completo:**
-
-- Configuración, compilación e imports críticos: OK.
-- CLI y comandos de producción/Servicio cargan correctamente.
-- FSM, licencia, inicio/parada/reset, cámara, PLC simulado, contadores,
-  desalineación temporal, machine stop, evidencia exacta, timeline, métricas,
-  grabación manual y cierre del sistema: cubiertos por la suite automatizada.
-- Suite completa: **70 passed**.
-
----
-
-#### Cambio 284 - Recalibración real de Microperforado en Scanner 2
-
-**Problema:** luego de replicar por software el zoom óptico de Sony, Scanner 2
-mostraba imagen en inspección pero no aumentaba ni el contador OK ni el NOK.
-El perfil conservaba `blur_score_min: 1200`; las 499 capturas reales entregadas
-midieron entre 309 y 917, por lo que el 100 % quedaba como `LOW_QUALITY`. Ese
-estado es inconcluso por diseño y no se contabiliza como OK ni como NOK.
-
-**Cambios:**
-
-- `blur_score_min` de `scanner_2/modelo_B` baja de **1200 a 300**, con margen
-  bajo el peor frame OK medido.
-- La ROI de Microperforado de Scanner 2 se recentra de **X=218 a X=202** para
-  la posición real posterior al zoom digital; así queda sin desplazamiento
-  sistemático y aumenta la cantidad de puntos útiles comparados.
-- Se agrega una aserción de regresión para impedir que el perfil productivo
-  vuelva al umbral incompatible de 1200.
-
-**Validación:**
-
-- Lote nuevo: **499/499 OK**, 0 `LOW_QUALITY`, 0 desalineaciones y 0 paradas.
-- Falsos NOK históricos: **12/12 + 376/376 OK**, sin paradas.
-- Corrida OK histórica del 17-06: **283/283 OK**, sin paradas.
-- Secuencia editada con agujeros borrados: conserva NOK y parada sostenida.
-
----
-
-#### Cambio 283 - Reinicio más rápido del contador NOK acumulado
-
-**Pedido:** 200 frames OK consecutivos tardaban demasiado en limpiar el contador
-NOK visible para el operario.
-
-**Cambios:**
-
-- `nok_count_reset_frames` baja globalmente de **200 a 30** para scanner 1,
-  scanner 2, Esterilla y Microperforado (aprox. 1,2 s a 25 Hz).
-- Se agregó el parámetro **Reinicio del contador NOK** a la ventana
-  **Tolerancias**, con rango seguro de 5 a 200 frames OK.
-- El cambio guardado desde Tolerancias se aplica en caliente mediante
-  `set_model()`/`reload_cache()`, sin reiniciar la aplicación.
-- Esto solo limpia el contador acumulado mostrado al operario: no modifica las
-  rachas específicas de parada, que ya se reinician inmediatamente al llegar
-  un frame válido.
-
----
-
-#### Cambio 282 - Evidencia exacta y completa para paradas/fallas
-
-**Problema detectado en auditoría:** el buffer agregaba el frame antes de
-inspeccionarlo y aplicaba limitación de FPS, por lo que el frame puntual que
-disparaba un `machine_stop`, una desalineación o un `fault` no estaba garantizado.
-Además, la FSM detenía el hilo inspector inmediatamente y la supuesta ventana
-post-evento quedaba normalmente sin frames. La asociación posterior de overlays
-buscaba "el último post guardado", una carrera que podía relacionar un overlay
-con el frame incorrecto.
-
-**Cambios:**
-
-- `EventRecorder.flush_event()` recibe y guarda siempre el frame disparador
-  exacto como `trigger.jpg` y su resultado visual como
-  `trigger_overlay.jpg`, independientemente del rate-limit o de que el buffer
-  previo esté vacío.
-- Si el mismo frame ya era el último del buffer se elimina la copia duplicada:
-  queda una única versión inequívoca como disparador.
-- La carpeta de evento y la ventana post se activan sincrónicamente antes de la
-  escritura pesada, evitando perder los primeros frames posteriores.
-- `ScannerController` mantiene una captura liviana desde la cámara durante
-  `post_event_seconds` aunque la inspección/FSM ya se haya detenido.
-- El manifest registra `trigger_frames_count`, nombres de trigger,
-  `frames_count` y conteos/tamaño finales reales.
-- Un segundo fallo dentro de la misma ventana queda como
-  `retrigger_NNNN.jpg`/overlay, con motivo y timestamp en
-  `additional_triggers`, en vez de perderse.
-- Pérdida de cámara y crash del inspector también vuelcan la evidencia previa.
-- Se eliminó la asociación asíncrona ambigua del overlay con "el último post".
-- Los visores de Operador y Servicio muestran en orden: previos, disparador
-  exacto y posteriores; el disparador aparece con borde rojo en Operador.
-- Las simulaciones de `machine_stop`/NOK ahora incluyen imagen cruda para poder
-  probar el circuito real de evidencia.
-
-**Validación:** pruebas de creación sin buffer previo, bypass del rate-limit,
-deduplicación, trigger+overlay exactos, captura post, segundo disparador,
-manifest y motivo de desalineación. Suite completa: **67 passed**.
-
----
-
-#### Cambio 281 - Reparación y diagnóstico visible de la grabación manual
-
-**Problema:** en `Servicio → Cámara → Grabación` podía verse correctamente la
-vista previa IP, pero el grabador leía otra conexión (`system.camera`). Si esa
-segunda ruta todavía no tenía frame, el contador quedaba en cero aunque el
-operador estuviera viendo imagen. Además, `cv2.imwrite` se ejecutaba en segundo
-plano sin comprobar su resultado, por lo que un error de permisos, disco o
-escritura podía pasar silenciosamente.
-
-**Cambios (`src/ui/service.py`):**
-
-- La grabación manual usa primero el frame reciente de la misma vista previa que
-  ve el operador; conserva como respaldo la cámara interna de producción.
-- `data/recordings` se resuelve desde `app_root`, quedando siempre junto al
-  ejecutable independientemente del directorio del acceso directo.
-- La ruta absoluta se muestra mientras graba y se agregó el botón
-  **ABRIR CARPETA**.
-- La creación de carpeta y `meta.json` ahora informa errores mediante diálogo.
-- Se valida el resultado real de cada escritura PNG; los fallos se registran y
-  se muestran en el estado de la grabación.
-- Al detener, el contador se recalcula con los archivos que realmente existen.
-
-**Validación:** se agregaron pruebas para la ruta anclada y la escritura PNG en
-`tests/test_service_recording.py`. Suite completa: **62 passed**.
+**Objetivo de entrega:** un build híbrido y conservador: Scanner 1 exactamente
+como funcionaba ayer y Scanner 2 con la calibración real que resolvió sus
+contadores hoy.
 
 ---
 
