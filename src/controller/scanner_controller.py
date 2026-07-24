@@ -70,7 +70,9 @@ class ScannerController:
         # produciendo buenas, tras esta cantidad de frames OK seguidos se
         # resetea a 0 — evita que el operador vea un NOK viejo colgado en
         # pantalla por horas cuando la produccion esta corriendo limpia.
-        self._nok_count_reset_frames = int(tols.get("nok_count_reset_frames", 200))
+        self._nok_count_reset_frames = max(
+            1, int(tols.get("nok_count_reset_frames", 30))
+        )
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._save_nok      = bool(insp_cfg.get("save_nok_frames", True))
         self._save_ok       = bool(insp_cfg.get("save_ok_frames",  False))
@@ -593,6 +595,10 @@ class ScannerController:
     def reload_cache(self) -> None:
         """Invalida recursos y pide recargar la sesión viva en el próximo frame."""
         model = self._io.scanner_config(self._id).get("model", "")
+        tols = load_tolerances(model, scanner_id=self._id)
+        self._nok_count_reset_frames = max(
+            1, int(tols.get("nok_count_reset_frames", 30))
+        )
         self._inspector.invalidate(model=model or None, scanner_id=self._id)
         with self._lock:
             self._cache_revision += 1
@@ -617,12 +623,16 @@ class ScannerController:
             insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
         )
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
+        self._nok_count_reset_frames = max(
+            1, int(tols.get("nok_count_reset_frames", 30))
+        )
         self._inspector.invalidate(model=model, scanner_id=self._id)
         with self._lock:
             self._cache_revision += 1
         logger.info(f"[{self._id}] modelo cambiado a '{model}' "
                     f"(consecutive_nok={self._consecutive_nok}, "
-                    f"machine_stop_enabled={self._machine_stop_enabled})")
+                    f"machine_stop_enabled={self._machine_stop_enabled}, "
+                    f"nok_reset={self._nok_count_reset_frames})")
 
     # ------------------------------------------------------------------
     # Propiedades de estado (thread-safe)

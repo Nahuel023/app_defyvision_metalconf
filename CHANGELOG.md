@@ -81,6 +81,25 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
+#### Cambio 283 - Reinicio más rápido del contador NOK acumulado
+
+**Pedido:** 200 frames OK consecutivos tardaban demasiado en limpiar el contador
+NOK visible para el operario.
+
+**Cambios:**
+
+- `nok_count_reset_frames` baja globalmente de **200 a 30** para scanner 1,
+  scanner 2, Esterilla y Microperforado (aprox. 1,2 s a 25 Hz).
+- Se agregó el parámetro **Reinicio del contador NOK** a la ventana
+  **Tolerancias**, con rango seguro de 5 a 200 frames OK.
+- El cambio guardado desde Tolerancias se aplica en caliente mediante
+  `set_model()`/`reload_cache()`, sin reiniciar la aplicación.
+- Esto solo limpia el contador acumulado mostrado al operario: no modifica las
+  rachas específicas de parada, que ya se reinician inmediatamente al llegar
+  un frame válido.
+
+---
+
 #### Cambio 282 - Evidencia exacta y completa para paradas/fallas
 
 **Problema detectado en auditoría:** el buffer agregaba el frame antes de

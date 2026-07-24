@@ -133,6 +133,7 @@ def test_every_production_pattern_uses_safe_stop_defaults() -> None:
             cfg = load_tolerances(model=model, scanner_id=scanner_id)
             assert cfg["pattern_align_stop_frames"] >= 3
             assert cfg["consecutive_nok_frames"] >= 500
+            assert cfg["nok_count_reset_frames"] == 30
 
 
 def test_tolerance_window_cannot_reenable_single_frame_alignment_stop() -> None:
