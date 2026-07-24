@@ -131,13 +131,7 @@ def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
 
 
 def test_microperforado_blur_profiles_match_real_camera_recordings() -> None:
-    scanner_1 = load_tolerances("modelo_B", "scanner_1")
-    assert scanner_1["blur_score_min"] == 200.0
-    assert scanner_1["grid_affine_refinement"] is True
-    assert scanner_1["grid_max_missing"] == 3
-    assert scanner_1["compare_left_ignore_px"] == 40.0
-    assert scanner_1["compare_bottom_ignore_px"] == 45.0
-    assert scanner_1["machine_stop_ignore_near_miss"] is False
+    assert load_tolerances("modelo_B", "scanner_1")["blur_score_min"] == 200.0
     assert load_tolerances("modelo_B", "scanner_2")["blur_score_min"] == 300.0
 
 

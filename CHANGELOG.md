@@ -81,56 +81,6 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-24 - Tadeo + Codex
 
-#### Cambio 286 - Scanner 1: borde robusto y eliminación de NOK falsos
-
-**Problema:** el lote OK
-`24-07-2026-MICROPERFORADO_2_SCANNER_1` producía demasiados NOK y avisos de
-`PATRON DESALINEADO`. El borde visual saltaba entre columnas y se veía
-claramente incorrecto.
-
-**Causa raíz:**
-
-- El borde escalar del patrón se calculaba con el `min/max` absoluto de todos
-  los contornos. Un único reflejo en el lateral movía la medición entre 17 y
-  20 px aunque las columnas reales estuvieran rectas.
-- La selección de columna externa comparaba solamente los dos clusters más
-  exteriores. Dos reflejos consecutivos igualmente escasos podían validarse
-  entre sí como una columna real.
-- Se exigía la primera columna izquierda incluso cuando entraba parcialmente
-  en cuadro, y cualquier missing aislado convertía el frame en NOK.
-- El refinamiento affine estaba desactivado, dejando ráfagas grandes de
-  missing cuando la fase sufría perspectiva/curvatura puntual.
-- `machine_stop_ignore_near_miss=true` podía descartar un defecto real: en la
-  grilla alternada, el agujero de la fila vecina queda naturalmente a menos de
-  `2*tol`.
-
-**Cambios:**
-
-- El borde físico escalar se obtiene ahora de las líneas robustas por bandas,
-  ya filtradas, y no de un contorno extremo aislado.
-- La columna exterior debe tener densidad material respecto de la columna
-  dominante; se saltan cadenas completas de reflejos de 1-2 blobs.
-- Scanner 1 usa margen izquierdo 40 px y margen inferior 45 px para excluir
-  únicamente los bordes parciales/timestamp que no aportan evidencia fiable.
-- Se activa `grid_affine_refinement` y se toleran hasta 3 missing aislados.
-  Los faltantes siguen llegando al detector temporal.
-- La parada conserva la firma fuerte: 4 faltantes en la misma columna durante
-  3 frames, sin descartar por near-miss.
-- Dos regresiones unitarias cubren reflejo extremo único y cadena de reflejos.
-
-**Validación:**
-
-- Antes: 162 inspecciones efectivas, **17 NOK**, 10 avisos de desalineación.
-- Después: **162/162 OK**, 0 NOK, 0 desalineaciones, 0 paradas.
-- Procesamiento forzado con ROI fija: **569/569 OK**, máximo 3 missing
-  aislados tolerados.
-- Offset de borde: antes hasta -18,6 px; después estable entre +1,0 y +6,9 px.
-- Defecto controlado actual de 4 agujeros en una columna: NOK inmediato y
-  `machine_stop` exactamente en el tercer frame consecutivo.
-- Suite completa: **72 passed**.
-
----
-
 #### Cambio 285 - Validación final integral de ambos scanners
 
 **Pedido:** verificar de extremo a extremo Scanner 1 y Scanner 2 antes de
