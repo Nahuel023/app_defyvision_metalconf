@@ -1961,6 +1961,20 @@ class RecordingTab(QWidget):
             f"border-bottom-right-radius:5px;background:{_DARK}; }}"
         )
         bot_row.addWidget(self._spin_roi_step)
+
+        # Ancho: achicar (−) / agrandar (+). Mueve el borde derecho, respeta el minimo.
+        ancho_chip = QLabel("ANCHO")
+        ancho_chip.setStyleSheet(CHIP_SS)
+        bot_row.addWidget(ancho_chip)
+        self._btn_w_minus = QPushButton("−")
+        self._btn_w_plus  = QPushButton("+")
+        self._btn_w_minus.setStyleSheet(ARROW_SS)
+        self._btn_w_plus.setStyleSheet(ARROW_SS)
+        self._btn_w_minus.clicked.connect(lambda: self._roi_width(-1))
+        self._btn_w_plus.clicked.connect(lambda: self._roi_width(+1))
+        bot_row.addWidget(self._btn_w_minus)
+        bot_row.addWidget(self._btn_w_plus)
+
         bot_row.addStretch()
         self._roi_result_lbl = QLabel("w=—")
         self._roi_result_lbl.setStyleSheet(
@@ -2086,11 +2100,25 @@ class RecordingTab(QWidget):
             return
         step = self._spin_roi_step.value() * direction
         W = self._roi_frame.shape[1]
-        # Mover TODO el ROI izquierda/derecha conservando el ancho (el ancho no se edita).
+        # Mover TODO el ROI izquierda/derecha conservando el ancho.
         w = self._roi_rx - self._roi_lx
         new_lx = max(0, min(W - w, self._roi_lx + step))
         self._roi_lx = new_lx
         self._roi_rx = new_lx + w
+        self._roi_redraw()
+
+    def _roi_width(self, direction: int) -> None:
+        """Agranda (+) o achica (−) el ancho moviendo el borde derecho. Izquierda fija.
+
+        No baja del minimo (roi_min_width) ni supera el ancho del frame. Al GUARDAR,
+        el patron se reconstruye con el nuevo ancho, asi image_size queda consistente.
+        """
+        if self._roi_frame is None:
+            return
+        step = self._spin_roi_step.value() * direction
+        W = self._roi_frame.shape[1]
+        min_w = self._roi_min_width()
+        self._roi_rx = max(self._roi_lx + min_w, min(W, self._roi_rx + step))
         self._roi_redraw()
 
     def _roi_min_width(self) -> int:
@@ -2248,13 +2276,17 @@ class RecordingTab(QWidget):
                     self._refresh_current_roi_label()
                 except Exception as exc:
                     msg += f" · ERROR restaurando ROI: {exc}"
-            if hasattr(self, "_roi_status_lbl"):
-                self._on_rebuild_done(msg, ok)
+            live_note = ""
             if ok and _sid and hasattr(self, "_system"):
                 try:
+                    # Hot-reload: el scanner en RUN toma el nuevo ROI/patron en el
+                    # proximo frame, sin necesidad de DETENER y volver a INICIAR.
                     self._system.scanner(_sid).reload_cache()
+                    live_note = " · aplicado en vivo (sin detener)"
                 except Exception:
                     pass
+            if hasattr(self, "_roi_status_lbl"):
+                self._on_rebuild_done(msg + live_note, ok)
         worker.done.connect(_on_done)
         worker.finished.connect(self._on_rebuild_finished)
         self._rebuild_worker = worker   # retener referencia mientras corre

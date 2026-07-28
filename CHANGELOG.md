@@ -81,6 +81,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-28 - Tadeo + Claude
 
+#### Cambio 285 - Botones de ANCHO en editores de ROI + confirmacion de hot-reload en vivo
+
+**Pedido:** poder cambiar el ancho del ROI desde la UI (agrandar/achicar) sin editar codigo,
+y que al guardar se aplique al run activo sin detener/reiniciar.
+
+**Cambios:**
+- `src/ui/tolerance_window.py` (Area de analisis) y `src/ui/service.py` (Servicio): se agrega el
+  control \textbf{ANCHO −/+} junto al paso. Mueve el borde derecho (izquierda fija); respeta el
+  minimo `roi_min_width` (hoy 255) y el ancho del frame. Metodos nuevos `_width_step` /
+  `_roi_width` y helper `_roi_min_width` en tolerance_window.
+- Al GUARDAR, ambos editores ya reconstruyen el patron (`build_pattern_from_image`) con el nuevo
+  ancho, asi `image_size` queda consistente y no dispara el ERROR de desincronizacion.
+- \textbf{Hot-reload:} ambos editores ya llamaban `scanner.reload_cache()` tras guardar; el run
+  loop recrea la `InspectionSession` en el proximo frame estando en RUNNING (no hace falta DETENER
+  ni INICIAR). Se agrego el aviso ``aplicado en vivo (sin detener)'' en el editor de Servicio.
+- Requiere recompilar el `.exe` (cambios de UI en codigo).
+
 #### Cambio 284 - Ambos ROI de modelo_B a ancho 255 + candado activado
 
 **Pedido:** dejar el ancho del ROI en 255 en ambos scanners.

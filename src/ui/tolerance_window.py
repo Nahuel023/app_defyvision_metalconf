@@ -355,6 +355,22 @@ class _RoiPanel(QWidget):
         )
         edges_row.addWidget(self._width_lbl)
 
+        # Ancho: achicar / agrandar (mueve el borde derecho, respeta el minimo).
+        ancho_chip = QLabel("ANCHO")
+        ancho_chip.setStyleSheet(
+            f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
+            f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
+        )
+        edges_row.addWidget(ancho_chip)
+        self._btn_w_minus = QPushButton("−")   # achicar
+        self._btn_w_plus  = QPushButton("+")          # agrandar
+        self._btn_w_minus.setStyleSheet(self._ARROW_SS)
+        self._btn_w_plus.setStyleSheet(self._ARROW_SS)
+        self._btn_w_minus.clicked.connect(lambda: self._width_step(-1))
+        self._btn_w_plus.clicked.connect(lambda: self._width_step(+1))
+        edges_row.addWidget(self._btn_w_minus)
+        edges_row.addWidget(self._btn_w_plus)
+
         edges_row.addStretch()
 
         # Posición del borde derecho (solo lectura — el ancho es fijo).
@@ -515,6 +531,31 @@ class _RoiPanel(QWidget):
         new_lx = max(0, min(W - w, self._roi_lx + step))
         self._roi_lx = new_lx
         self._roi_rx = new_lx + w
+        self._redraw()
+
+    def _roi_min_width(self) -> int:
+        """Ancho minimo permitido (candado roi_min_width) del scanner/modelo actual."""
+        try:
+            from src.patterns.roi import roi_min_width_for
+            sid = self._current_sid()
+            return max(1, roi_min_width_for(self._model_for(sid), sid))
+        except Exception:
+            return 1
+
+    def _width_step(self, direction: int) -> None:
+        """Agranda (+) o achica (-) el ancho moviendo el borde derecho. Izquierda fija.
+
+        Nunca baja del minimo (roi_min_width) ni se pasa del ancho del frame. Al
+        GUARDAR el patron se reconstruye con el nuevo ancho, asi image_size queda
+        consistente y no genera ERROR de desincronizacion.
+        """
+        if self._roi_frame is None:
+            return
+        step = self._step_spin.value() * direction
+        W = self._roi_frame.shape[1]
+        min_w = self._roi_min_width()
+        new_rx = max(self._roi_lx + min_w, min(W, self._roi_rx + step))
+        self._roi_rx = new_rx
         self._redraw()
 
     def _redraw(self) -> None:
