@@ -2,7 +2,7 @@
   "version": 2,
   "model": "modelo_B",
   "image_size": [
-    265,
+    255,
     480
   ],
   "points": [
@@ -1632,7 +1632,7 @@
   "built_with_roi": {
     "x": 218,
     "y": 0,
-    "w": 265,
+    "w": 255,
     "h": 480
   }
 }

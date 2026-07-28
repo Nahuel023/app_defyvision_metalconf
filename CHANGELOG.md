@@ -81,6 +81,26 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-28 - Tadeo + Claude
 
+#### Cambio 284 - Ambos ROI de modelo_B a ancho 255 + candado activado
+
+**Pedido:** dejar el ancho del ROI en 255 en ambos scanners.
+
+**Analisis de seguridad:** los puntos del patron llegan hasta x=221 (scanner_1) y x=216
+(scanner_2), muy por debajo de 255. El ancho solo define el margen derecho vacio; la grilla
+usa `grid.cells` explicitos (no depende del ancho). Verificado tambien que `inspection.py:424`
+valida `image_size == frame post-ROI` (tira ERROR si no coinciden) y que `image_size` NO escala
+el patron (solo chequeo de consistencia). Por eso basta con mover `roi.w` y `image_size` juntos.
+
+**Cambios (source + dist):**
+- `data/patterns/scanner_1/modelo_B/`: `roi.json` w 242->255; `holes.json` image_size
+  [242]->[255], built_with_roi.w 242->255. Puntos/grilla/radios intactos (170 puntos).
+- `data/patterns/scanner_2/modelo_B/`: `roi.json` w 265->255; `holes.json` image_size
+  [265]->[255], built_with_roi.w 265->255. Puntos/grilla/radios intactos (179 puntos).
+- `config/tolerancias.yaml`, `models.modelo_B`: `roi_min_width: 0 -> 255` (candado ahora activo:
+  el ROI nunca baja de 255 y coincide con el image_size del patron).
+- No hizo falta reconstruir con camara: no habia frames reales en disco (buffers con placeholders
+  10x10) y el cambio no afecta ningun punto del patron.
+
 #### Cambio 283 - Editor de ROI: ancho fijo, solo mover izq/der (se quitan botones de bordes)
 
 **Pedido:** en la edición de ROI (pestaña "Área de análisis" y modo servicio) el operario aún
