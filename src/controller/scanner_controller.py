@@ -60,9 +60,10 @@ class ScannerController:
         model    = cfg.get("model", "")
         tols     = load_tolerances(model, scanner_id=scanner_id)
 
-        self._consecutive_nok = int(
-            insp_cfg.get("consecutive_nok_frames",
-                         tols["consecutive_nok_frames"])
+        self._consecutive_nok = max(
+            int(tols.get("stop_min_frames", 0)),   # piso DURO por scanner (ej. 5 en scanner_1)
+            int(insp_cfg.get("consecutive_nok_frames",
+                             tols["consecutive_nok_frames"])),
         )
         self._low_quality_max_streak = int(tols.get("low_quality_max_streak", 10))
         # Si el contador de NOK de la sesion queda "pegado" en un numero chico
@@ -591,8 +592,9 @@ class ScannerController:
         cfg["model"] = model
         insp_cfg = cfg.get("inspection", {})
         tols     = load_tolerances(model, scanner_id=self._id)
-        self._consecutive_nok = int(
-            insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])
+        self._consecutive_nok = max(
+            int(tols.get("stop_min_frames", 0)),   # piso DURO por scanner (ej. 5 en scanner_1)
+            int(insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])),
         )
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._inspector.invalidate(model=model, scanner_id=self._id)

@@ -28,9 +28,9 @@ scanner_1:
       pattern_align_enabled: true
       pattern_global_offset_max_px: 8.0
       pattern_slope_delta_max_deg: 1.0
-      # Cambio 279 (23-07-2026): ninguna desalineacion aislada puede detener la
-      # maquina; scanner_1 exige como minimo 3 frames consecutivos.
-      pattern_align_stop_frames: 3
+      # scanner_1 exige como minimo 4 frames consecutivos para cualquier parada
+      # (racha NOK / faltantes / desalineacion). Ver stop_min_frames abajo (piso duro).
+      pattern_align_stop_frames: 4
       pattern_align_severe_abs_max_px: 0.0
       # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
       # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
@@ -59,6 +59,11 @@ scanner_1:
       # cruzado el gate global de NOK.
       machine_stop_min_missing: 4
       machine_stop_require_frame_nok: false
+      machine_stop_missing_frames: 4   # scanner_1: faltantes persistentes exigen 4 frames
+      # PISO DURO por scanner (solo scanner_1): ninguna parada — racha NOK (FAULT),
+      # faltantes persistentes NI desalineacion — dispara antes de 4 frames consecutivos.
+      # Enforced en codigo (no se puede bajar por config). scanner_2 NO lo define → sigue igual.
+      stop_min_frames: 4
       # ROI recenter en modo MOVE (Cambio 235): a diferencia del modo resize (que
       # causaba el desync de Cambio 185/189 al ir agrandando w), move desplaza la
       # ventana en x sin tocar w, asi el frame post-ROI sigue calzando siempre con
@@ -69,7 +74,7 @@ scanner_1:
       # "corregir" solo). El centrado absoluto actua unicamente si el desvio se
       # sostiene varios frames; ya no espera missing porque el objetivo es corregir
       # la ROI antes de que el recorte llegue a perder agujeros.
-      roi_recenter_enabled: true
+      roi_recenter_enabled: false   # FIJO: el ROI NO se auto-mueve ni se re-guarda; la posicion queda exactamente como se calibro (evita el corrimiento lateral al reiniciar)
       roi_recenter_mode: move
       # Sigue automaticamente cualquier deriva respecto de la relacion ROI/chapa
       # aprendida al arrancar; no intenta forzar el ROI al centro geometrico.
@@ -131,7 +136,7 @@ scanner_2:
       # los frames es sintoma de un problema mecanico real, no algo que el ROI deba
       # "corregir" solo). Solo actua si la deriva se sostiene durante varios frames;
       # deriva gradual y persistente, no un salto puntual.
-      roi_recenter_enabled: true
+      roi_recenter_enabled: false   # FIJO: el ROI NO se auto-mueve ni se re-guarda; la posicion queda exactamente como se calibro (evita el corrimiento lateral al reiniciar)
       roi_recenter_mode: move
       # Seguir la deriva antes de que el recorte llegue a perder agujeros. El
       # baseline se aprende solo despues del movimiento real de RUN.

@@ -332,8 +332,12 @@ def _inspect_bgr(
     pattern_align_machine_stop = bool(tolerances.get("pattern_align_machine_stop", True))
     # Frames consecutivos con desalineacion necesarios para disparar machine_stop.
     # La defensa en codigo impide valores menores a 3 aunque una configuracion quede mal.
+    # `stop_min_frames` es un piso DURO por scanner (ej. 5 en scanner_1): eleva el minimo
+    # de TODA parada (faltantes y desalineacion) sin poder ser bajado por configuracion.
+    stop_min_frames = max(0, int(tolerances.get("stop_min_frames", 0)))
     pattern_align_stop_frames = max(
         _MIN_DESALIGN_STOP_FRAMES,
+        stop_min_frames,
         int(tolerances.get("pattern_align_stop_frames", _MIN_DESALIGN_STOP_FRAMES)),
     )
     pattern_global_offset_max_px = float(tolerances.get("pattern_global_offset_max_px", 0.0))

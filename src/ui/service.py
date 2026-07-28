@@ -2093,11 +2093,25 @@ class RecordingTab(QWidget):
             return
         step = self._spin_roi_step.value() * direction
         W = self._roi_frame.shape[1]
+        min_w = self._roi_min_width()
         if edge == "lx":
-            self._roi_lx = max(0, min(self._roi_rx - 1, self._roi_lx + step))
+            # El borde izquierdo no puede acercarse tanto al derecho que el ancho baje del mínimo.
+            self._roi_lx = max(0, min(self._roi_rx - min_w, self._roi_lx + step))
         else:
-            self._roi_rx = max(self._roi_lx + 1, min(W, self._roi_rx + step))
+            # El borde derecho no puede acercarse tanto al izquierdo que el ancho baje del mínimo.
+            self._roi_rx = max(self._roi_lx + min_w, min(W, self._roi_rx + step))
         self._roi_redraw()
+
+    def _roi_min_width(self) -> int:
+        """Ancho mínimo de ROI (candado) para el scanner/modelo seleccionado en la UI."""
+        try:
+            from src.patterns.roi import roi_min_width_for
+            from src.utils.model_names import to_internal as _to_int
+            scanner_id = self._roi_scanner_combo.currentText() or None
+            internal = _to_int(self._model_combo.currentText())
+            return max(1, roi_min_width_for(internal, scanner_id))
+        except Exception:
+            return 1
 
     def _roi_redraw(self) -> None:
         if self._roi_frame is None:
@@ -2148,10 +2162,15 @@ class RecordingTab(QWidget):
         scanner_id = self._roi_scanner_combo.currentText() or None
         model_disp = self._model_combo.currentText()
         from src.utils.model_names import to_internal as _to_int
-        from src.patterns.roi import ROI, load_roi, save_roi
+        from src.patterns.roi import ROI, load_roi, save_roi, enforce_min_width, roi_min_width_for
         internal = _to_int(model_disp)
         previous_roi = load_roi(internal, scanner_id)
-        requested_roi = ROI(x=lx, y=0, w=rx - lx, h=H)
+        # Candado de ancho mínimo: la ROI guardada Y el patrón reconstruido usan
+        # el mismo ancho, así nunca queda un patrón calibrado para una ROI angosta.
+        requested_roi = enforce_min_width(
+            ROI(x=lx, y=0, w=rx - lx, h=H),
+            roi_min_width_for(internal, scanner_id),
+        )
         save_roi(requested_roi, internal, scanner_id)
         self._btn_roi_save.setEnabled(False)
         self._roi_status_lbl.setText("ROI guardado — reconstruyendo patrón…")

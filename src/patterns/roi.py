@@ -38,6 +38,36 @@ class RuntimeROIInfo:
     warning: str = ""
 
 
+def roi_min_width_for(model: str | None, scanner_id: str | None) -> int:
+    """Ancho mínimo de ROI (px) configurado para este modelo/scanner.
+
+    Lee ``roi_min_width`` de tolerancias. 0 = sin candado. Import perezoso para
+    no crear un ciclo con ``src.utils.config``.
+    """
+    try:
+        from src.utils.config import load_tolerances
+        tols = load_tolerances(model, scanner_id=scanner_id)
+        return int(tols.get("roi_min_width", 0) or 0)
+    except Exception:
+        return 0
+
+
+def enforce_min_width(roi: ROI, min_width: int) -> ROI:
+    """Devuelve una ROI cuyo ancho nunca es menor a ``min_width``.
+
+    Ensancha hacia la derecha conservando el borde izquierdo (``x``), que es el
+    origen del patrón — así las coordenadas del patrón no se corren. El recorte
+    final al frame lo maneja ``apply_roi`` / ``_fit_roi_to_frame``.
+    """
+    if min_width <= 0 or roi.w >= min_width:
+        return roi
+    _log.info(
+        "ROI ancho %dpx < mínimo %dpx → forzado a %dpx (candado roi_min_width)",
+        roi.w, min_width, min_width,
+    )
+    return ROI(x=roi.x, y=roi.y, w=min_width, h=roi.h)
+
+
 def roi_path(model: str, scanner_id: str | None = None) -> Path:
     """Return the canonical write path for a ROI (does not check existence)."""
     if scanner_id:
@@ -61,7 +91,8 @@ def load_roi(model: str, scanner_id: str | None = None) -> Optional[ROI]:
             continue
         try:
             payload = json.loads(p.read_text(encoding="utf-8"))
-            return ROI(int(payload["x"]), int(payload["y"]), int(payload["w"]), int(payload["h"]))
+            roi = ROI(int(payload["x"]), int(payload["y"]), int(payload["w"]), int(payload["h"]))
+            return enforce_min_width(roi, roi_min_width_for(model, scanner_id))
         except Exception as exc:
             _log.error("ROI invalida o corrupta en %s: %s", p, exc)
             continue
@@ -69,7 +100,12 @@ def load_roi(model: str, scanner_id: str | None = None) -> Optional[ROI]:
 
 
 def save_roi(roi: ROI, model: str, scanner_id: str | None = None) -> Path:
-    """Persiste una ROI de forma atomica y devuelve su ruta canonica."""
+    """Persiste una ROI de forma atomica y devuelve su ruta canonica.
+
+    Aplica el candado ``roi_min_width``: nunca se persiste un ancho menor al
+    mínimo configurado (recenter resize, precal, EMA lenta, edición manual).
+    """
+    roi = enforce_min_width(roi, roi_min_width_for(model, scanner_id))
     p = roi_path(model, scanner_id)
     atomic_write_json(
         p,

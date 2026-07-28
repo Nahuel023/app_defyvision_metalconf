@@ -84,7 +84,11 @@ class InspectionSession:
             if bool(tols.get("machine_stop_enabled", False)):
                 self._preloaded["machine_stop_detector"] = MachineStopDetector(
                     enabled=True,
-                    missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                    # Piso DURO por scanner: nunca por debajo de stop_min_frames (ej. 5 en scanner_1).
+                    missing_frames=max(
+                        int(tols.get("machine_stop_missing_frames", 5)),
+                        int(tols.get("stop_min_frames", 0)),
+                    ),
                     min_missing=int(tols.get("machine_stop_min_missing", 1)),
                     same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
                     ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),
@@ -273,7 +277,11 @@ class Inspector:
             tols = self._get_tols(model, scanner_id)
             self._detectors[key] = MachineStopDetector(
                 enabled=bool(tols.get("machine_stop_enabled", False)),
-                missing_frames=int(tols.get("machine_stop_missing_frames", 5)),
+                # Piso DURO por scanner: nunca por debajo de stop_min_frames (ej. 5 en scanner_1).
+                missing_frames=max(
+                    int(tols.get("machine_stop_missing_frames", 5)),
+                    int(tols.get("stop_min_frames", 0)),
+                ),
                 min_missing=int(tols.get("machine_stop_min_missing", 1)),
                 same_zone_px=float(tols.get("machine_stop_same_zone_px", 35.0)),
                 ignore_near_miss=bool(tols.get("machine_stop_ignore_near_miss", True)),

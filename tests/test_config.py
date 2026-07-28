@@ -109,7 +109,9 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert cfg["frame_missing_nok_threshold"] == 3
     assert cfg["machine_stop_min_missing"] == 1
     assert cfg["machine_stop_require_frame_nok"] is False
-    assert cfg["roi_recenter_enabled"] is True
+    # ROI FIJO: el auto-recentrado quedo desactivado en ambos scanners para que la
+    # posicion del ROI no se corra ni se re-guarde al reiniciar (pedido operativo).
+    assert cfg["roi_recenter_enabled"] is False
     assert cfg["roi_recenter_mode"] == "move"
     assert cfg["roi_recenter_require_edge_missing"] is False
     assert cfg["roi_precal_enabled"] is False

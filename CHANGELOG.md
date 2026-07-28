@@ -79,6 +79,54 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-07-28 - Tadeo + Claude
+
+#### Cambio 282 - ROI fijo (sin drift al reiniciar), candado de ancho y piso duro de 4 frames en Scanner 1
+
+**Pedido del operario (4 puntos):**
+1. Explicar el "FALLA DETECTADA sin imagen" que aparece en Scanner 2.
+2. Fijar el ancho del ROI (poder mover izq/der, nunca más angosto de 255px) y que no se resetee.
+3. Que la máquina NUNCA pare con 1 solo frame de error.
+4. Piso duro de 4 frames (racha NOK / mal estado) para parar, **solo Scanner 1**; Scanner 2 igual.
+
+**Diagnóstico:**
+- **"FALLA DETECTADA sin imagen":** el badge muestra ese texto solo en estado `FAULT`.
+  El FAULT por racha NOK (`scanner_controller.py:1214`) NO llama a `on_result`, por eso no
+  dibuja frame (a diferencia del `machine_stop`, que muestra alerta a pantalla completa).
+  En config `consecutive_nok_frames: 9999` deshabilita ese FAULT → el síntoma proviene del
+  `.exe` desplegado (build 24-07 11:31), no del código fuente actual. Recomendado: recompilar.
+- **Drift lateral del ROI al reiniciar:** causado por `roi_recenter_enabled: true` (modo `move`),
+  que desplaza `x` en runtime y lo **persiste en `roi.json`** (`inspection.py` `_maybe_recenter_roi`).
+  Al reabrir carga la posición corrida.
+- **Parada con "1 frame":** el código ya tiene pisos duros (faltantes `max(2,·)` en
+  `machine_stop.py:48`; desalineación `_MIN_DESALIGN_STOP_FRAMES=3` en `inspection.py`). Con la
+  chapa detenida los frames son casi idénticos, así la racha de 3 se completa en <1s (parece
+  instantáneo). No hay ningún camino que pare con 1 frame literal.
+
+**Cambios:**
+- `config/io_map.yaml` (+ copia en `dist`): `roi_recenter_enabled: true -> false` en **ambos**
+  scanners → el ROI queda EXACTAMENTE como se calibró, no se auto-mueve ni se re-guarda.
+- Piso duro de 4 frames **solo Scanner 1** (`scanner_1/modelo_B`): `pattern_align_stop_frames: 3 -> 4`,
+  `machine_stop_missing_frames: 4` (nuevo), y `stop_min_frames: 4` (nuevo, piso duro en código).
+  Scanner 2 sin cambios (sigue en 3 frames).
+- Nueva tolerancia `stop_min_frames` (`config.py`, default 0): piso duro por scanner aplicado en
+  código a las 3 vías de parada — racha NOK (`scanner_controller.py`), faltantes persistentes
+  (`inspector.py`) y desalineación (`inspection.py` `_advance_desalignment_streak`). No se puede
+  bajar por config.
+- Candado de ancho de ROI (mecanismo listo, **inactivo**): nueva tolerancia `roi_min_width`
+  (default 0) + `enforce_min_width()` en `roi.py` (`load_roi`/`save_roi`) y en la UI de servicio
+  (`_roi_move`/`_on_roi_save`). Se dejó en `0` porque forzar 255 sin reconstruir el patrón
+  desalinea `image_size` (Scanner 1 patrón=242, Scanner 2=265) y cliparía agujeros. Para
+  activarlo: reconstruir AMBOS patrones a ROI w=255 (Servicio → ROI → GUARDAR, que reconstruye
+  el patrón) y luego poner `roi_min_width: 255`.
+- `tests/test_config.py`: actualizado el assert de `roi_recenter_enabled` a `False` (ROI fijo).
+
+**Pendiente para el operario:** recompilar el `.exe` para que apliquen los cambios de código
+(piso `stop_min_frames`, candado de ancho). El fix del drift del ROI y los frames de Scanner 1
+ya funcionan en el exe actual (son config leída de disco).
+
+---
+
 ### Sesión 2026-07-24 - Tadeo + Codex
 
 #### Cambio 281 - V20 con calibración real de Scanner 2
