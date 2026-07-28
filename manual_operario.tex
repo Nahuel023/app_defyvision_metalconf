@@ -1,0 +1,413 @@
+% =====================================================================
+%  MANUAL DE USUARIO — DEFYVISION METALCONF
+%  Sistema de inspeccion visual de chapas perforadas
+%  Compilar en Overleaf con: pdfLaTeX
+% =====================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[spanish,es-noindentfirst,es-noshorthands]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{tcolorbox}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{amssymb}
+\usepackage[hidelinks]{hyperref}
+\tcbuselibrary{skins,breakable}
+
+% ---- Paleta de marca -------------------------------------------------
+\definecolor{brand}{HTML}{7C3AED}      % violeta DefyVision
+\definecolor{brandDark}{HTML}{4C1D95}
+\definecolor{okGreen}{HTML}{166534}
+\definecolor{nokRed}{HTML}{991B1B}
+\definecolor{warnAmber}{HTML}{B45309}
+\definecolor{idleBlue}{HTML}{1D4ED8}
+\definecolor{ink}{HTML}{1F2937}
+\definecolor{muted}{HTML}{6B7280}
+\definecolor{soft}{HTML}{F3F4F6}
+
+% ---- Encabezado / pie ------------------------------------------------
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0.4pt}
+\lhead{\small\textcolor{brandDark}{\textbf{DEFYVISION METALCONF}}}
+\rhead{\small\textcolor{muted}{Manual del operario}}
+\lfoot{\small\textcolor{muted}{Inspeccion visual de chapa perforada}}
+\rfoot{\small\thepage}
+
+% ---- Titulos de seccion ---------------------------------------------
+\titleformat{\section}{\Large\bfseries\color{brandDark}}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\large\bfseries\color{brand}}{\thesubsection}{0.6em}{}
+
+% ---- Cajas reutilizables --------------------------------------------
+\newtcolorbox{infobox}{colback=soft,colframe=brand,boxrule=0.8pt,
+  arc=2pt,left=8pt,right=8pt,top=6pt,bottom=6pt,breakable}
+\newtcolorbox{warnbox}{colback=warnAmber!8,colframe=warnAmber,boxrule=0.8pt,
+  arc=2pt,left=8pt,right=8pt,top=6pt,bottom=6pt,breakable,
+  title=\textbf{\textcolor{warnAmber}{ATENCION}}}
+\newtcolorbox{dangerbox}{colback=nokRed!7,colframe=nokRed,boxrule=0.8pt,
+  arc=2pt,left=8pt,right=8pt,top=6pt,bottom=6pt,breakable,
+  title=\textbf{\textcolor{nokRed}{IMPORTANTE}}}
+
+\newcommand{\btn}[1]{\colorbox{ink}{\textcolor{white}{\small\,\textbf{#1}\,}}}
+\newcommand{\estado}[2]{\colorbox{#1}{\textcolor{white}{\small\,\textbf{#2}\,}}}
+
+% =====================================================================
+\begin{document}
+
+% ---------------------- PORTADA --------------------------------------
+\begin{titlepage}
+\centering
+\vspace*{2.5cm}
+{\Huge\bfseries\color{brandDark} DEFYVISION METALCONF\par}
+\vspace{0.6cm}
+{\LARGE\color{brand} Manual del Operario\par}
+\vspace{0.3cm}
+{\large\color{muted} Sistema de inspeccion visual de chapas perforadas\par}
+\vspace{2.2cm}
+\begin{tcolorbox}[colback=soft,colframe=brand,width=0.8\textwidth,arc=3pt]
+\centering\large
+Deteccion automatica de agujeros faltantes\\[4pt]
+Comparacion contra patron de referencia\\[4pt]
+Clasificacion OK / NOK y parada de maquina\\[4pt]
+Integracion con PLC (Coolmay CX3G, Modbus TCP)
+\end{tcolorbox}
+\vfill
+{\large\color{muted} Version del manual: 1.0 \quad$\cdot$\quad Uso interno de planta\par}
+\vspace{1cm}
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+% =====================================================================
+\section{Que hace este sistema}
+El programa inspecciona en tiempo real las chapas metalicas perforadas que
+pasan por la linea. Con una camara y una luz de fondo (\emph{backlight}),
+detecta los agujeros de cada pieza y los compara contra un \textbf{patron de
+referencia} previamente calibrado. Si a una pieza le faltan agujeros, el
+sistema la marca como defectuosa y, si el problema persiste, \textbf{detiene
+la maquina} para que se revise.
+
+\begin{infobox}
+\textbf{En una frase:} el sistema mira cada chapa, cuenta y ubica los
+agujeros, y avisa (o para la maquina) cuando encuentra un defecto real y
+sostenido.
+\end{infobox}
+
+El equipo trabaja con \textbf{dos scanners} independientes (Scanner 1 y
+Scanner 2), cada uno con su propia camara, su patron y su semaforo.
+
+% =====================================================================
+\section{Encendido y arranque del programa}
+\begin{enumerate}[leftmargin=1.4em]
+  \item Encender la PC, el PLC, las camaras y la iluminacion de fondo.
+  \item Abrir el programa desde el acceso directo del escritorio
+        (\textbf{DEFYVISION}) o, si se trabaja por consola, con el comando
+        de \emph{produccion}.
+  \item Esperar a que aparezca la pantalla de operario con los dos scanners
+        y que el indicador de \textbf{PLC} figure como \textcolor{okGreen}{Conectado}.
+\end{enumerate}
+
+\begin{infobox}
+\textbf{Tres formas de abrir el sistema:}
+\begin{itemize}[leftmargin=1.2em,nosep]
+  \item \textbf{Produccion} (\texttt{run}): PLC + camaras + pantalla de
+        operario en vivo. Es el modo normal de trabajo.
+  \item \textbf{Servicio} (\texttt{service}): pantalla tecnica con
+        \textbf{clave de acceso}. Solo personal autorizado (calibracion,
+        diagnostico, ROI, tolerancias).
+  \item \textbf{Analisis de carpeta} (\texttt{operator-ui}): revisar
+        imagenes ya guardadas, sin camara ni PLC.
+\end{itemize}
+\end{infobox}
+
+\begin{dangerbox}
+Lo mas importante: \textbf{la aplicacion siempre debe poder abrirse}. Si al
+arrancar aparece un error de consola y no abre la ventana, no insista:
+avise a soporte tecnico. Nunca modifique archivos de configuracion sin
+autorizacion.
+\end{dangerbox}
+
+% =====================================================================
+\section{La pantalla del operario}
+Cada scanner ocupa un panel con la siguiente informacion:
+
+\begin{center}
+\renewcommand{\arraystretch}{1.35}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.6cm} p{10.2cm}}
+\toprule
+\textbf{Elemento} & \textbf{Que significa}\\
+\midrule
+\textbf{Titulo} & \texttt{SCANNER 1 $\cdot$ Microperforado} (numero de scanner y modelo activo).\\
+\textbf{Estado} & Cartel de color con el estado actual (ver Seccion~\ref{sec:estados}).\\
+\textbf{Modo} & \texttt{MANUAL} o \texttt{AUTO} (posicion de la maneta).\\
+\textbf{Racha} & Frames NOK seguidos / umbral para parar (ej. \texttt{2 / 4}).\\
+\textbf{NOK} & Cantidad de piezas defectuosas de la sesion.\\
+\textbf{OK} & Cantidad de piezas correctas de la sesion.\\
+\textbf{Tiempo} & Tiempo en marcha desde que se apreto INICIAR.\\
+\textbf{Camara} & Vista en vivo con borde verde (en marcha) o rojo (detenido).\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =====================================================================
+\section{Estados del sistema}\label{sec:estados}
+El cartel de estado cambia de color y texto segun lo que esta pasando:
+
+\begin{center}
+\renewcommand{\arraystretch}{1.5}
+\begin{tabular}{c >{\raggedright\arraybackslash}p{11.5cm}}
+\toprule
+\textbf{Cartel} & \textbf{Significado y que hacer}\\
+\midrule
+\estado{idleBlue}{EN ESPERA} & El scanner esta listo pero no inspeccionando.
+  Apriete \btn{INICIAR} para comenzar.\\
+\estado{okGreen}{INSPECCIONANDO} & Funcionando normal, analizando cada pieza.
+  No requiere accion.\\
+\estado{warnAmber}{FALLA DETECTADA} & Se detuvo por una racha de piezas
+  defectuosas. Revise la pieza/punzon y haga \btn{RESET FALLA}.\\
+\estado{nokRed}{DETENIDO} & La maquina fue detenida (por falla o manualmente).
+  Revise y reinicie el ciclo.\\
+\estado{ink}{ERROR} & Problema tecnico (ej. camara sin senal). Ver
+  Seccion~\ref{sec:errores}.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{infobox}
+\textbf{Diferencia clave:} \estado{warnAmber}{FALLA DETECTADA} y
+\estado{nokRed}{DETENIDO} ambos frenan la produccion, pero la
+\textbf{PARADA DE MAQUINA} (Seccion~\ref{sec:parada}) ademas muestra en
+pantalla completa la \emph{foto de la pieza} que causo el problema.
+\end{infobox}
+
+% =====================================================================
+\section{Modos: MANUAL y AUTO}
+El modo lo define la \textbf{maneta} conectada al PLC:
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{AUTO:} el sistema inspecciona y, ante un defecto sostenido,
+        acciona la salida hacia el PLC (corta la electrovalvula / detiene).
+        Es el modo de produccion.
+  \item \textbf{MANUAL:} el sistema inspecciona y muestra resultados, pero
+        no acciona la parada automatica. Util para pruebas y ajuste.
+\end{itemize}
+
+\begin{warnbox}
+Si el cartel dice \texttt{MANETA: SIN SENAL}, el PLC no esta leyendo la
+posicion de la maneta. Avise a mantenimiento antes de producir.
+\end{warnbox}
+
+% =====================================================================
+\section{Botones y flujo de trabajo}
+\begin{center}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{c >{\raggedright\arraybackslash}p{11.8cm}}
+\toprule
+\textbf{Boton} & \textbf{Accion}\\
+\midrule
+\btn{$\blacktriangleright$ INICIAR} & Arranca la inspeccion. El estado pasa a
+  \estado{okGreen}{INSPECCIONANDO}.\\
+\btn{$\blacksquare$ DETENER} & Detiene la inspeccion de forma controlada.\\
+\btn{$\circlearrowleft$ RESET FALLA} & Aparece solo cuando el scanner se detuvo
+  por una falla. Limpia la falla y deja el scanner \estado{idleBlue}{EN ESPERA}.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Ciclo normal de trabajo:}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Verificar \textcolor{okGreen}{PLC conectado} y modo \texttt{AUTO}.
+  \item Apretar \btn{INICIAR} en cada scanner.
+  \item Trabajar. El sistema cuenta OK/NOK solo.
+  \item Ante una parada por falla: revisar la pieza $\to$ \btn{RESET FALLA}
+        $\to$ \btn{INICIAR} de nuevo.
+  \item Al terminar el turno: \btn{DETENER}.
+\end{enumerate}
+
+% =====================================================================
+\section{El semaforo (luces del PLC)}
+Cada scanner comanda una torre de luces:
+
+\begin{center}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{c >{\raggedright\arraybackslash}p{11.5cm}}
+\toprule
+\textbf{Luz} & \textbf{Significado}\\
+\midrule
+\textcolor{idleBlue}{$\blacksquare$} \textbf{Azul} & En espera / listo para arrancar.\\
+\textcolor{okGreen}{$\blacksquare$} \textbf{Verde} & Funcionando correctamente.\\
+\textcolor{warnAmber}{$\blacksquare$} \textbf{Amarilla} & Racha de NOK en curso (advertencia; aun no paro).\\
+\textcolor{nokRed}{$\blacksquare$} \textbf{Roja} & Falla / parada: requiere intervencion.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{infobox}
+La \textbf{luz de fondo (backlight)} de la inspeccion permanece \emph{siempre
+encendida} mientras el sistema esta activo; no es parte del semaforo.
+\end{infobox}
+
+% =====================================================================
+\section{Parada de maquina y fallas}\label{sec:parada}
+El sistema \textbf{no para por una sola pieza dudosa}. Para evitar falsas
+alarmas, exige que el defecto se repita durante \textbf{varios frames
+seguidos} antes de detener:
+
+\begin{center}
+\renewcommand{\arraystretch}{1.4}
+\begin{tabular}{>{\raggedright\arraybackslash}p{5.2cm} >{\raggedright\arraybackslash}p{9.6cm}}
+\toprule
+\textbf{Tipo de parada} & \textbf{Como se dispara}\\
+\midrule
+\textbf{Faltantes persistentes} & Una misma columna/zona con agujeros
+  ausentes durante varios frames consecutivos (probable punzon roto o tapado).\\
+\textbf{Patron desalineado} & La chapa entra corrida o inclinada de forma
+  sostenida (problema mecanico), no un agujero suelto.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{infobox}
+\textbf{Regla de los frames (Scanner 1):} ninguna parada se dispara antes de
+\textbf{4 frames} consecutivos con el mismo problema. Scanner 2 usa su propio
+ajuste. Con la chapa detenida los frames son casi identicos, por eso la
+parada puede sentirse ``instantanea'', pero siempre requiere varios frames.
+\end{infobox}
+
+\textbf{Cuando ocurre una PARADA DE MAQUINA:}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Aparece una \textbf{alerta a pantalla completa} con la foto de la
+        pieza que causo la parada y el motivo.
+  \item La luz roja queda encendida y la electrovalvula se corta.
+  \item El operario debe: \textbf{retirar/revisar la pieza} $\to$ apretar
+        \btn{CONFIRMAR Y CONTINUAR} (o \btn{RESET FALLA}) $\to$ \btn{INICIAR}.
+\end{enumerate}
+
+\begin{warnbox}
+Si la maquina para muy seguido \emph{sin un defecto real visible}, casi
+siempre es un problema de \textbf{calibracion} (iluminacion, suciedad en el
+lente, ROI corrido o chapa mal posicionada), no un problema del programa.
+Avise a personal de servicio para recalibrar.
+\end{warnbox}
+
+% =====================================================================
+\section{Tabla de errores frecuentes}\label{sec:errores}
+\begin{center}
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{>{\raggedright\arraybackslash}p{4.8cm} >{\raggedright\arraybackslash}p{10cm}}
+\toprule
+\textbf{Sintoma} & \textbf{Causa probable / solucion}\\
+\midrule
+\estado{ink}{ERROR} \textbf{o} ``CAMARA'' con segundos & La camara dejo de
+  enviar imagen. Revisar cable de red / alimentacion de la camara. Reiniciar
+  si persiste.\\
+\texttt{PLC: Desconectado} & Sin comunicacion con el PLC. Revisar red y que
+  el PLC este encendido.\\
+\texttt{MANETA: SIN SENAL} & El PLC no lee el selector MANUAL/AUTO. Avisar a
+  mantenimiento.\\
+Muchas piezas NOK siendo buenas & Iluminacion cambiada, lente sucio o ROI
+  corrido. Limpiar y, si sigue, recalibrar (modo Servicio).\\
+Parada de maquina muy frecuente & Punzon realmente roto/tapado \emph{o}
+  desalineacion mecanica de la chapa. Revisar primero la pieza real.\\
+La ventana no abre / consola con texto rojo & Problema tecnico de arranque.
+  No tocar archivos; llamar a soporte.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% =====================================================================
+\section{Modo Servicio (personal autorizado)}
+Se abre con el comando \texttt{service} e ingresando la \textbf{clave} en la
+pantalla ``Activar sistema''. Da acceso a herramientas tecnicas:
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{GRABACION / ANALISIS / CALIBRACION / CONEXION:} vistas de
+        camara para grabar evidencia, analizar y ajustar la toma.
+  \item \textbf{PLC I/O:} estado de entradas/salidas del PLC en vivo.
+  \item \textbf{Diagnostico:} informacion tecnica del sistema.
+  \item \textbf{Tolerancias:} parametros de deteccion (umbral, area, etc.).
+  \item \textbf{Area de analisis:} incluye el \textbf{editor de ROI}.
+\end{itemize}
+
+\begin{dangerbox}
+Las \textbf{Tolerancias} y el \textbf{ROI} definen si una pieza es OK o NOK.
+Modificarlos mal puede llenar de falsas alarmas o, peor, dejar pasar piezas
+defectuosas. Solo debe tocarlos personal capacitado, y siempre validando con
+piezas conocidas.
+\end{dangerbox}
+
+% =====================================================================
+\section{Editor de ROI (region de inspeccion)}
+El \textbf{ROI} es el rectangulo dentro de la imagen donde el sistema busca
+los agujeros (la franja de la chapa). Se ajusta en \emph{Area de analisis} o
+en el \emph{modo Servicio}.
+
+\begin{infobox}
+\textbf{Ancho fijo:} el ROI tiene un \textbf{ancho constante}. Solo se puede
+\textbf{mover a izquierda o derecha} con los botones \btn{MOVER ROI $\blacktriangleleft$}
+\ / \btn{$\blacktriangleright$}. Ya \textbf{no} se puede hacer mas ancho ni mas
+angosto (eso causaba errores). El campo \texttt{PASO px} define cuantos pixeles
+se mueve por click.
+\end{infobox}
+
+\textbf{Para reubicar el ROI:}
+\begin{enumerate}[leftmargin=1.5em]
+  \item Abrir una imagen de referencia o activar \btn{Camara en vivo}.
+  \item Con \btn{MOVER ROI} centrar el rectangulo sobre la chapa.
+  \item Apretar \btn{GUARDAR ROI}. El sistema guarda la posicion \textbf{y
+        reconstruye el patron} automaticamente.
+\end{enumerate}
+
+\begin{warnbox}
+La posicion del ROI \textbf{queda guardada y no se mueve sola} al reiniciar el
+programa. Si notas que ``se corrio'', es porque alguien lo movio manualmente;
+volve a centrarlo y \btn{GUARDAR ROI}.
+\end{warnbox}
+
+% =====================================================================
+\section{Buenas practicas y mantenimiento}
+\begin{itemize}[leftmargin=1.4em]
+  \item Mantener el \textbf{lente limpio} y la \textbf{luz de fondo} sin
+        obstrucciones ni cambios de intensidad.
+  \item Verificar que la chapa entre \textbf{derecha y centrada} en el ROI.
+  \item Al empezar el turno, controlar contadores OK/NOK en cero y estado
+        \estado{idleBlue}{EN ESPERA}.
+  \item Ante cambios de pieza, lente, camara o iluminacion, \textbf{recalibrar}
+        (patron + tolerancias) con personal de servicio.
+  \item No apagar la PC de golpe; cerrar el programa correctamente.
+\end{itemize}
+
+% =====================================================================
+\section{Glosario}
+\begin{description}[leftmargin=2.2cm,style=nextline]
+  \item[ROI] Region de interes: la franja de la imagen donde se inspecciona.
+  \item[Patron] Mapa de referencia de donde deben estar los agujeros de una
+        pieza buena.
+  \item[OK / NOK] Pieza correcta / pieza defectuosa (le faltan agujeros).
+  \item[Frame] Cada cuadro de imagen que analiza la camara.
+  \item[Racha NOK] Cantidad de frames defectuosos seguidos.
+  \item[Parada de maquina] Detencion automatica por defecto sostenido.
+  \item[Backlight] Luz de fondo que ilumina la chapa por detras.
+  \item[PLC] Controlador que maneja luces, electrovalvulas y sensores.
+  \item[Modbus TCP] Protocolo de comunicacion con el PLC por red.
+\end{description}
+
+% =====================================================================
+\section*{Soporte tecnico}
+\addcontentsline{toc}{section}{Soporte tecnico}
+\begin{infobox}
+Ante cualquier duda, error que no figure en este manual, o comportamiento
+inesperado del sistema, \textbf{no modifique la configuracion}: registre lo
+que paso (foto de la pantalla si es posible) y contacte a soporte tecnico.
+\end{infobox}
+
+\end{document}
