@@ -304,21 +304,21 @@ class _RoiPanel(QWidget):
         edges_row = QHBoxLayout()
         edges_row.setSpacing(14)
 
-        # Borde izquierdo
-        lx_chip = QLabel("BORDE IZQ")
-        lx_chip.setStyleSheet(
+        # Mover ROI completo (ancho fijo): solo traslada izquierda/derecha.
+        move_chip = QLabel("MOVER ROI")
+        move_chip.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
             f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
         )
-        edges_row.addWidget(lx_chip)
-        self._btn_lx_left  = QPushButton("◄")
-        self._btn_lx_right = QPushButton("►")
-        self._btn_lx_left.setStyleSheet(self._ARROW_SS)
-        self._btn_lx_right.setStyleSheet(self._ARROW_SS)
-        self._btn_lx_left.clicked.connect(lambda: self._move("lx", -1))
-        self._btn_lx_right.clicked.connect(lambda: self._move("lx", +1))
-        edges_row.addWidget(self._btn_lx_left)
-        edges_row.addWidget(self._btn_lx_right)
+        edges_row.addWidget(move_chip)
+        self._btn_move_left  = QPushButton("◄")
+        self._btn_move_right = QPushButton("►")
+        self._btn_move_left.setStyleSheet(self._ARROW_SS)
+        self._btn_move_right.setStyleSheet(self._ARROW_SS)
+        self._btn_move_left.clicked.connect(lambda: self._move("roi", -1))
+        self._btn_move_right.clicked.connect(lambda: self._move("roi", +1))
+        edges_row.addWidget(self._btn_move_left)
+        edges_row.addWidget(self._btn_move_right)
         self._lx_val_lbl = QLabel("x=—")
         self._lx_val_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;background:transparent;"
@@ -357,21 +357,13 @@ class _RoiPanel(QWidget):
 
         edges_row.addStretch()
 
-        # Borde derecho
-        rx_chip = QLabel("BORDE DER")
+        # Posición del borde derecho (solo lectura — el ancho es fijo).
+        rx_chip = QLabel("DER")
         rx_chip.setStyleSheet(
             f"color:{_MUTED};font-size:10px;font-weight:700;letter-spacing:1px;"
             f"background:{_DARK};border:1px solid {_BORDER};border-radius:4px;padding:2px 8px;"
         )
         edges_row.addWidget(rx_chip)
-        self._btn_rx_left  = QPushButton("◄")
-        self._btn_rx_right = QPushButton("►")
-        self._btn_rx_left.setStyleSheet(self._ARROW_SS)
-        self._btn_rx_right.setStyleSheet(self._ARROW_SS)
-        self._btn_rx_left.clicked.connect(lambda: self._move("rx", -1))
-        self._btn_rx_right.clicked.connect(lambda: self._move("rx", +1))
-        edges_row.addWidget(self._btn_rx_left)
-        edges_row.addWidget(self._btn_rx_right)
         self._rx_val_lbl = QLabel("x=—")
         self._rx_val_lbl.setStyleSheet(
             f"color:{_TEXT};font-size:11px;font-family:Consolas,monospace;background:transparent;"
@@ -513,14 +505,16 @@ class _RoiPanel(QWidget):
     # ── Dibujo del preview ────────────────────────────────────────────
 
     def _move(self, edge: str, direction: int) -> None:
+        """Traslada el ROI completo (ancho fijo). El ancho ya no se edita."""
         if self._roi_frame is None:
             return
         step = self._step_spin.value() * direction
         W = self._roi_frame.shape[1]
-        if edge == "lx":
-            self._roi_lx = max(0, min(self._roi_rx - 1, self._roi_lx + step))
-        else:
-            self._roi_rx = max(self._roi_lx + 1, min(W, self._roi_rx + step))
+        # Mover toda la ventana izquierda/derecha conservando el ancho.
+        w = self._roi_rx - self._roi_lx
+        new_lx = max(0, min(W - w, self._roi_lx + step))
+        self._roi_lx = new_lx
+        self._roi_rx = new_lx + w
         self._redraw()
 
     def _redraw(self) -> None:

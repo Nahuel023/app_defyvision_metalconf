@@ -81,6 +81,20 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesión 2026-07-28 - Tadeo + Claude
 
+#### Cambio 283 - Editor de ROI: ancho fijo, solo mover izq/der (se quitan botones de bordes)
+
+**Pedido:** en la edición de ROI (pestaña "Área de análisis" y modo servicio) el operario aún
+podía cambiar el ancho con los botones de los extremos. Debe poder mover el ROI izquierda/derecha
+solamente, sin poder agrandarlo ni angostarlo. Sacar los botones de los extremos.
+
+**Cambios:**
+- `src/ui/tolerance_window.py`: se reemplazan los pares de botones "BORDE IZQ ◄►" y "BORDE DER ◄►"
+  por un único par "MOVER ROI ◄►". `_move()` ahora traslada TODO el ROI conservando el ancho.
+  El borde derecho queda como lectura ("DER x=…").
+- `src/ui/service.py`: idem — fila "MOVER ROI" con `_roi_move("roi", ±)` que desplaza lx y rx
+  juntos; se elimina la fila de botones del borde derecho; `_roi_redraw` sigue mostrando w (fijo).
+- Requiere recompilar el `.exe` (cambios de UI en código).
+
 #### Cambio 282 - ROI fijo (sin drift al reiniciar), candado de ancho y piso duro de 4 frames en Scanner 1
 
 **Pedido del operario (4 puntos):**

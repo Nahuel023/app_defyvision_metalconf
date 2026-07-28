@@ -1548,10 +1548,8 @@ class RecordingTab(QWidget):
         self._btn_roi_pick_img.clicked.connect(self._on_roi_pick_image)
         self._btn_roi_pick_dir.clicked.connect(self._on_roi_pick_folder)
         self._btn_roi_live.clicked.connect(self._on_roi_toggle_live)
-        self._btn_lx_left.clicked.connect(lambda: self._roi_move("lx", -1))
-        self._btn_lx_right.clicked.connect(lambda: self._roi_move("lx", +1))
-        self._btn_rx_left.clicked.connect(lambda: self._roi_move("rx", -1))
-        self._btn_rx_right.clicked.connect(lambda: self._roi_move("rx", +1))
+        self._btn_move_left.clicked.connect(lambda: self._roi_move("roi", -1))
+        self._btn_move_right.clicked.connect(lambda: self._roi_move("roi", +1))
         self._btn_roi_save.clicked.connect(self._on_roi_save)
         self._refresh_current_roi_label()
 
@@ -1908,18 +1906,19 @@ class RecordingTab(QWidget):
         )
         lay.addWidget(self._roi_health_lbl)
 
-        # ── Controles borde izquierdo ─────────────────────────────────
+        # ── Mover ROI completo (ancho fijo) ───────────────────────────
+        # Solo traslada izquierda/derecha; el ancho no se puede editar.
         lx_row = QHBoxLayout()
         lx_row.setSpacing(6)
-        lx_chip = QLabel("BORDE IZQ")
+        lx_chip = QLabel("MOVER ROI")
         lx_chip.setStyleSheet(CHIP_SS)
         lx_row.addWidget(lx_chip)
-        self._btn_lx_left  = QPushButton("◄")
-        self._btn_lx_right = QPushButton("►")
-        self._btn_lx_left.setStyleSheet(ARROW_SS)
-        self._btn_lx_right.setStyleSheet(ARROW_SS)
-        lx_row.addWidget(self._btn_lx_left)
-        lx_row.addWidget(self._btn_lx_right)
+        self._btn_move_left  = QPushButton("◄")
+        self._btn_move_right = QPushButton("►")
+        self._btn_move_left.setStyleSheet(ARROW_SS)
+        self._btn_move_right.setStyleSheet(ARROW_SS)
+        lx_row.addWidget(self._btn_move_left)
+        lx_row.addWidget(self._btn_move_right)
         lx_row.addStretch()
         self._roi_lx_lbl = QLabel("x=—")
         self._roi_lx_lbl.setStyleSheet(
@@ -1928,18 +1927,12 @@ class RecordingTab(QWidget):
         lx_row.addWidget(self._roi_lx_lbl)
         lay.addLayout(lx_row)
 
-        # ── Controles borde derecho ───────────────────────────────────
+        # ── Posición borde derecho (solo lectura) ─────────────────────
         rx_row = QHBoxLayout()
         rx_row.setSpacing(6)
-        rx_chip = QLabel("BORDE DER")
+        rx_chip = QLabel("DER")
         rx_chip.setStyleSheet(CHIP_SS)
         rx_row.addWidget(rx_chip)
-        self._btn_rx_left  = QPushButton("◄")
-        self._btn_rx_right = QPushButton("►")
-        self._btn_rx_left.setStyleSheet(ARROW_SS)
-        self._btn_rx_right.setStyleSheet(ARROW_SS)
-        rx_row.addWidget(self._btn_rx_left)
-        rx_row.addWidget(self._btn_rx_right)
         rx_row.addStretch()
         self._roi_rx_lbl = QLabel("x=—")
         self._roi_rx_lbl.setStyleSheet(
@@ -2093,13 +2086,11 @@ class RecordingTab(QWidget):
             return
         step = self._spin_roi_step.value() * direction
         W = self._roi_frame.shape[1]
-        min_w = self._roi_min_width()
-        if edge == "lx":
-            # El borde izquierdo no puede acercarse tanto al derecho que el ancho baje del mínimo.
-            self._roi_lx = max(0, min(self._roi_rx - min_w, self._roi_lx + step))
-        else:
-            # El borde derecho no puede acercarse tanto al izquierdo que el ancho baje del mínimo.
-            self._roi_rx = max(self._roi_lx + min_w, min(W, self._roi_rx + step))
+        # Mover TODO el ROI izquierda/derecha conservando el ancho (el ancho no se edita).
+        w = self._roi_rx - self._roi_lx
+        new_lx = max(0, min(W - w, self._roi_lx + step))
+        self._roi_lx = new_lx
+        self._roi_rx = new_lx + w
         self._roi_redraw()
 
     def _roi_min_width(self) -> int:
