@@ -123,6 +123,20 @@ class ScannerController:
         self._camera_missing_total_s: float = 0.0
         self._camera_missing_events: int = 0
 
+        # Watchdog de INSPECCION DETENIDA: la camara entrega frames pero ninguno
+        # llega a analizarse (imagen congelada, gate de movimiento nunca superado).
+        # Sin esto el scanner queda "en marcha" indefinidamente con 0 OK, 0 NOK y
+        # ningun error. Avisa a los _stall_warn_s y escala a ERROR (cortando el
+        # solenoide) a los _stall_timeout_s. 0 = deshabilitado.
+        self._stall_warn_s: float = float(
+            tols.get("inspection_stall_warn_s", 15.0)
+        )
+        self._stall_timeout_s: float = float(
+            tols.get("inspection_stall_timeout_s", 120.0)
+        )
+        self._last_inspection_mono: Optional[float] = None
+        self._stall_warned: bool = False
+
         # Buffer circular de frames OK en disco (best-effort, prioridad baja)
         self._ok_buf_enabled  = bool(tols.get("ok_buffer_enabled", True))
         self._ok_buf_max      = max(10, int(tols.get("ok_buffer_count", 200)))
@@ -249,6 +263,8 @@ class ScannerController:
             self._camera_missing_warned   = False
             self._camera_missing_total_s  = 0.0
             self._camera_missing_events   = 0
+            self._last_inspection_mono    = None
+            self._stall_warned            = False
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -358,6 +374,8 @@ class ScannerController:
             self._camera_missing_warned     = False
             self._camera_missing_total_s    = 0.0
             self._camera_missing_events     = 0
+            self._last_inspection_mono      = None
+            self._stall_warned              = False
 
         self._transition(ScannerState.IDLE)
         self._set_lights(blue=True)
@@ -410,6 +428,8 @@ class ScannerController:
             self._camera_missing_warned   = False
             self._camera_missing_total_s  = 0.0
             self._camera_missing_events   = 0
+            self._last_inspection_mono    = None
+            self._stall_warned            = False
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -642,6 +662,15 @@ class ScannerController:
                 self._low_quality_count / self._total_inspections * 100.0
                 if self._total_inspections > 0 else 0.0
             )
+            # Segundos que el scanner lleva RUNNING sin analizar ningun frame.
+            stall_sec = 0.0
+            if (
+                self._state == ScannerState.RUNNING
+                and self._mode == OperationMode.AUTO
+                and self._last_inspection_mono is not None
+            ):
+                stall_sec = max(0.0, time.monotonic() - self._last_inspection_mono)
+
             inspection_uptime_pct = 0.0
             camera_missing_sec = 0.0
             if self._session_start is not None:
@@ -678,6 +707,9 @@ class ScannerController:
                 "camera_missing_timeout_s": self._camera_missing_timeout_s,
                 "camera_missing_events": self._camera_missing_events,
                 "inspection_uptime_pct": inspection_uptime_pct,
+                "inspection_stall_sec":  stall_sec,
+                "inspection_stall_warn_s": self._stall_warn_s,
+                "inspection_stall_timeout_s": self._stall_timeout_s,
             }
 
     # ------------------------------------------------------------------
@@ -936,6 +968,11 @@ class ScannerController:
         # variable en arrancar. Se ancla en _handle_result al primer frame que
         # supera el gate de movimiento y entra realmente al analisis.
         self._run_loop_start_mono     = 0.0
+        # Referencia del watchdog de inspeccion detenida: se ancla aca (no en
+        # start()) para no contar el selftest ni la pre-calibracion como parada.
+        with self._lock:
+            self._last_inspection_mono = time.monotonic()
+            self._stall_warned = False
         if self._startup_grace_remaining > 0 or self._startup_grace_seconds > 0.0:
             logger.info(
                 "[%s] startup grace: %d frames y/o %.1fs sin machine_stop ni fault",
@@ -1034,11 +1071,67 @@ class ScannerController:
                 self._last_position_diff = session.last_position_diff
 
             if res is None:
+                # Llegan frames pero ninguno se analiza: si esto se sostiene, el
+                # scanner estaria "en marcha" sin inspeccionar nada.
+                if self._check_inspection_stall(session.last_position_diff):
+                    return
                 self._stop_event.wait(timeout=0.005)
                 continue
 
+            with self._lock:
+                self._last_inspection_mono = time.monotonic()
+                self._stall_warned = False
+
             self._handle_result(res, model, session=session)
             self._stop_event.wait(timeout=0.005)
+
+    def _check_inspection_stall(self, position_diff: float) -> bool:
+        """Vigila que las inspecciones sigan ocurriendo mientras el scanner corre.
+
+        La camara puede seguir entregando frames y el scanner quedar igual sin
+        analizar nada (imagen congelada, o movimiento siempre por debajo de
+        continuous_position_threshold). En ese caso no se cuenta ni un OK ni un
+        NOK, no hay racha, no hay parada: el sistema "funciona" para siempre sin
+        inspeccionar. Avisa a los _stall_warn_s y a los _stall_timeout_s corta el
+        solenoide y pasa a ERROR.
+
+        Devuelve True si escalo a ERROR (el loop debe terminar).
+        """
+        if self._stall_timeout_s <= 0 and self._stall_warn_s <= 0:
+            return False
+
+        now = time.monotonic()
+        with self._lock:
+            if self._state != ScannerState.RUNNING or self._last_inspection_mono is None:
+                return False
+            stalled_s = now - self._last_inspection_mono
+            warn = (
+                self._stall_warn_s > 0
+                and not self._stall_warned
+                and stalled_s >= self._stall_warn_s
+            )
+            if warn:
+                self._stall_warned = True
+            escalate = self._stall_timeout_s > 0 and stalled_s >= self._stall_timeout_s
+
+        if warn:
+            logger.warning(
+                f"[{self._id}] SIN ANALISIS hace {stalled_s:.1f}s — llegan frames "
+                f"pero ninguno se inspecciona (movimiento={position_diff:.2f} "
+                f"umbral={self._cont_pos_thr:.2f})"
+            )
+        if not escalate:
+            return False
+
+        logger.error(
+            f"[{self._id}] ERROR por inspeccion detenida — {stalled_s:.1f}s sin "
+            f"analizar ningun frame (movimiento={position_diff:.2f} "
+            f"umbral={self._cont_pos_thr:.2f})"
+        )
+        self._cut_solenoid_critical("inspeccion detenida")
+        self._set_lights(red=True)
+        self._transition(ScannerState.ERROR)
+        return True
 
     def _handle_result(
         self,

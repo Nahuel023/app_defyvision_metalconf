@@ -88,6 +88,10 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "pre_event_jpeg_quality": 80,      # calidad JPEG del buffer (10-95)
     "pre_event_max_ram_mb": 256.0,     # 1 min × 5 fps × ~100 KB ≈ 30 MB; 256 con margen
     "camera_missing_error_timeout_s": 3.0,  # segundos sin frames antes de ERROR en AUTO
+    # Watchdog de inspeccion detenida (el scanner corre pero no analiza ningun
+    # frame: imagen congelada, movimiento siempre por debajo del umbral).
+    "inspection_stall_warn_s": 15.0,        # aviso en log + UI ("SIN ANALISIS Xs"); 0 = deshabilitado
+    "inspection_stall_timeout_s": 120.0,    # corta solenoide y pasa a ERROR; 0 = deshabilitado
     # ──────────────────────────────────────────────────────────────────
     "pattern_desalign_enabled": False,
     "pattern_desalign_missing_ratio": 0.5,

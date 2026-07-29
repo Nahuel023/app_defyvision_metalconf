@@ -573,6 +573,16 @@ class ScannerPanel(QWidget):
         camera_missing = bool(s.get("camera_missing", False))
         camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
         stopped_by_fault = bool(s.get("stopped_by_fault", False))
+        # Watchdog de inspeccion detenida: el scanner corre pero no analiza nada
+        # (imagen congelada / sin movimiento). Sin este aviso quedaba "EN MARCHA"
+        # con 0 OK y 0 NOK indefinidamente.
+        stall_sec    = float(s.get("inspection_stall_sec", 0.0))
+        stall_warn_s = float(s.get("inspection_stall_warn_s", 15.0))
+        stalled = (
+            state == ScannerState.RUNNING
+            and stall_warn_s > 0
+            and stall_sec >= stall_warn_s
+        )
 
         # Leida directo del IOMap (no via get_status()): el poller que actualiza
         # mode_switch_raw en el controller solo corre mientras el scanner esta
@@ -687,6 +697,8 @@ class ScannerPanel(QWidget):
         elif result is not None:
             if camera_missing and state == ScannerState.RUNNING:
                 health_txt, health_c = f"CAMARA {camera_missing_sec:.1f}s", "#d29922"
+            elif stalled:
+                health_txt, health_c = f"SIN ANALISIS {stall_sec:.0f}s", "#d29922"
             elif state == ScannerState.FAULT:
                 health_txt, health_c = "FAULT", "#b91c1c"
             elif ratio >= 0.8:
@@ -699,6 +711,10 @@ class ScannerPanel(QWidget):
             self._result_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{health_c};")
         elif camera_missing and state == ScannerState.RUNNING:
             self._result_val[1].setText(f"CAMARA {camera_missing_sec:.1f}s")
+            self._result_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#d29922;")
+        elif stalled:
+            # Sin ningun resultado todavia: el scanner corre pero no analiza nada.
+            self._result_val[1].setText(f"SIN ANALISIS {stall_sec:.0f}s")
             self._result_val[1].setStyleSheet("font-size:15px;font-weight:700;color:#d29922;")
 
         # CENTRADO: márgenes laterales y offset del patrón respecto a los bordes de la chapa

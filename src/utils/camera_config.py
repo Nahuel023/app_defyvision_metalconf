@@ -29,6 +29,9 @@ DEFAULTS: dict[str, Any] = {
     "zoom": 100,    # % digital zoom; 100 = sin zoom
     "pan_x": 0,     # -100..100, desplazamiento horizontal del recorte
     "pan_y": 0,     # -100..100, desplazamiento vertical del recorte
+    # Segundos sin recibir una imagen NUEVA (frames identicos o todos rechazados)
+    # antes de soltar el frame retenido y tratarlo como camara perdida. 0 = off.
+    "frozen_frame_timeout_s": 10.0,
 }
 
 

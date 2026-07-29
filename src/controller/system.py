@@ -57,8 +57,16 @@ class InspectionSystem:
 
         # Anti-bleed: each camera rejects frames identical to another camera's feed.
         # This prevents DSHOW index drift from making two scanners show the same image.
-        for scanner_id, camera in self._cameras.items():
-            camera.set_frame_validator(self._make_bleed_validator(scanner_id))
+        # SOLO aplica a camaras USB locales (indice DSHOW). Ver _is_local_device().
+        _local_ids = [
+            sid for sid, cam in self._cameras.items()
+            if self._is_local_device(cam.index)
+        ]
+        if len(_local_ids) > 1:
+            for scanner_id in _local_ids:
+                self._cameras[scanner_id].set_frame_validator(
+                    self._make_bleed_validator(scanner_id, _local_ids)
+                )
 
         self._recorder = MetricsRecorder()
         self._recorder.start(self)
@@ -165,20 +173,43 @@ class InspectionSystem:
 
     # ------------------------------------------------------------------
 
-    def _make_bleed_validator(self, scanner_id: str) -> Callable:
+    @staticmethod
+    def _is_local_device(source) -> bool:
+        """True si la fuente es una camara USB local (indice DSHOW), no una IP cam.
+
+        El anti-bleed existe unicamente por el re-enumerado de indices de DSHOW.
+        Una camara de red se identifica por URL: dos URLs distintas NUNCA pueden
+        ser el mismo dispositivo, asi que compararlas por imagen no aporta nada
+        y solo genera falsos positivos (ver docstring de _make_bleed_validator).
+        """
+        if isinstance(source, int):
+            return True
+        src = str(source).strip().lower()
+        if "://" in src:
+            return False
+        return src.isdigit()
+
+    def _make_bleed_validator(self, scanner_id: str, peer_ids: list[str]) -> Callable:
         """Return a frame validator that rejects frames identical to any other camera.
 
         DSHOW can re-enumerate device indices when a camera disconnects, causing
         a reconnecting camera to open the still-connected sibling device instead
-        of its own. The validator detects this by comparing a sample of pixels;
-        two distinct real-world views will never be near-identical.
+        of its own. The validator detects this by comparing a sample of pixels.
+
+        SOLO se instala entre camaras USB locales. Con camaras IP (una URL por
+        scanner) este chequeo era un bug critico: los dos scanners miran la MISMA
+        chapa microperforada, el parche central sale casi identico (medido 1.7-7.4px
+        en produccion, umbral 8.0) y la camara quedaba rechazando TODOS sus frames.
+        El resultado era un scanner "en marcha" para siempre con la ultima imagen
+        congelada: 0 OK, 0 NOK y ningun error.
         """
         cameras = self._cameras  # capture reference, not copy
 
         def validator(frame: np.ndarray) -> bool:
-            for sid, cam in cameras.items():
+            for sid in peer_ids:
                 if sid == scanner_id:
                     continue
+                cam = cameras[sid]
                 # Comparar ambos feeds CRUDOS. get_frame() aplica zoom/pan y
                 # podia ocultar que dos indices DSHOW apuntaban a la misma camara.
                 other = cam.get_raw_frame()

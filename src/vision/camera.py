@@ -120,6 +120,20 @@ class Camera:
         self._snapshot_ok: bool = False
         self._snapshot_conn: http.client.HTTPConnection | None = None
 
+        # Watchdog de IMAGEN CONGELADA. Sin esto, cualquier situacion que deje de
+        # refrescar self._frame pero NO lo ponga en None (validador rechazando
+        # todos los frames, camara IP devolviendo siempre el mismo JPEG cacheado)
+        # hace que get_frame() siga entregando la MISMA imagen para siempre: el
+        # scanner queda "en marcha" sin inspeccionar nada, sin OK, sin NOK y sin
+        # error. Al vencer el timeout se suelta el frame retenido y el scanner lo
+        # trata como perdida de camara (ya escala a ERROR y corta el solenoide).
+        self._freeze_timeout_s: float = float(
+            self._settings.get("frozen_frame_timeout_s", 10.0)
+        )
+        self._last_fresh_mono: float = 0.0
+        self._last_sig: Optional[np.ndarray] = None
+        self._frozen_logged: bool = False
+
     # ------------------------------------------------------------------
     # Ciclo de vida
     # ------------------------------------------------------------------
@@ -169,7 +183,10 @@ class Camera:
             with self._lifecycle_lock:
                 self._thread = None
         with self._lock:
-            self._frame = None
+            self._frame           = None
+            self._last_sig        = None
+            self._last_fresh_mono = 0.0
+            self._frozen_logged   = False
         logger.info("Camera %s: detenida", self._source_label())
 
     # ------------------------------------------------------------------
@@ -189,6 +206,55 @@ class Camera:
         """Devuelve el ultimo frame sin zoom, para diagnostico/anti-bleed."""
         with self._lock:
             return None if self._frame is None else self._frame.copy()
+
+    # ------------------------------------------------------------------
+    # Watchdog de imagen congelada
+    # ------------------------------------------------------------------
+
+    def _publish_frame(self, frame: np.ndarray) -> None:
+        """Publica un frame aceptado y refresca el watchdog de imagen congelada."""
+        # Firma barata (submuestreo 1/16) para saber si la imagen cambio de verdad.
+        sig = frame[::16, ::16].copy()
+        now = time.monotonic()
+        with self._lock:
+            changed = self._last_sig is None or not np.array_equal(sig, self._last_sig)
+            self._last_sig    = sig
+            self._frame       = frame
+            self._snapshot_ok = True
+            if changed:
+                self._last_fresh_mono = now
+                self._frozen_logged   = False
+        self._frame_times.append(now)
+        if not changed:
+            self._check_frozen(now)
+
+    def _check_frozen(self, now: float | None = None) -> None:
+        """Suelta el frame retenido si hace demasiado que no llega uno NUEVO.
+
+        Se llama tanto al publicar un frame identico al anterior como al
+        descartar uno (validador). Al poner _frame=None, get_frame() devuelve
+        None y el ScannerController lo escala por su via de camara perdida.
+        """
+        if self._freeze_timeout_s <= 0:
+            return
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            if self._frame is None or self._last_fresh_mono <= 0.0:
+                return
+            elapsed = now - self._last_fresh_mono
+            if elapsed < self._freeze_timeout_s:
+                return
+            self._frame       = None
+            self._snapshot_ok = False
+            self._last_sig    = None
+            already_logged    = self._frozen_logged
+            self._frozen_logged = True
+        if not already_logged:
+            logger.error(
+                "Camera %s: IMAGEN CONGELADA — sin imagen nueva hace %.1fs; "
+                "se descarta el frame retenido",
+                self._source_label(), elapsed,
+            )
 
     def _apply_zoom(self, frame: np.ndarray) -> np.ndarray:
         """Aplica el zoom/pan digital configurado para esta camara."""
@@ -408,9 +474,7 @@ class Camera:
             self._release_capture()
             return False
 
-        with self._lock:
-            self._frame = test_frame
-        self._frame_times.append(time.monotonic())
+        self._publish_frame(test_frame)
         logger.info(
             "Camera %s: MJPEG HTTP %sx%s abierto en %.1fs",
             self._source_label(), test_frame.shape[1], test_frame.shape[0],
@@ -569,6 +633,10 @@ class Camera:
                 if self._frame_validator is not None and not self._frame_validator(frame):
                     logger.warning("Camera %s: frame duplicado detectado",
                                    self._source_label())
+                    # Un rechazo tampoco es imagen nueva: si el validador rechaza
+                    # todo, el watchdog suelta el frame retenido en vez de dejar
+                    # al scanner corriendo sobre una imagen congelada.
+                    self._check_frozen()
                     continue
                 if not _first_frame_logged:
                     logger.info(
@@ -576,10 +644,7 @@ class Camera:
                         self._source_label(), frame.shape[1], frame.shape[0],
                     )
                     _first_frame_logged = True
-                with self._lock:
-                    self._frame       = frame
-                    self._snapshot_ok = True
-                self._frame_times.append(time.monotonic())
+                self._publish_frame(frame)
 
         dec_thread = threading.Thread(
             target=_decode_worker,
@@ -760,6 +825,4 @@ class Camera:
                 retry_wait = 0.0
                 continue
 
-            with self._lock:
-                self._frame = frame
-            self._frame_times.append(time.monotonic())
+            self._publish_frame(frame)

@@ -79,6 +79,77 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesión 2026-07-29 - Tadeo + Claude
+
+#### Cambio 286 - CRITICO: scanner_2 "en marcha" para siempre sin contar ni un OK
+
+**Sintoma reportado:** el operario pulsa INICIAR en scanner 2 y el scanner queda
+funcionando indefinidamente: nunca cuenta imagenes OK, nunca cuenta NOK, nunca
+muestra un error y nunca se detiene. Todo parece normal (badge EN MARCHA, luz verde)
+pero no se esta inspeccionando NADA — la maquina produce sin control visual.
+
+**Causa raiz (confirmada con `logs/defyvision.log`):** el validador *anti-bleed*
+de `system.py` se instalaba sobre TODAS las camaras. Ese chequeo existe solo por
+el re-enumerado de indices de DSHOW en camaras USB: rechaza un frame si el parche
+central de 200x200 es casi identico al de la otra camara (umbral 8.0 px). Con las
+camaras IP actuales (`192.168.1.2` y `192.168.1.3`) los dos scanners miran la
+MISMA chapa microperforada, asi que el parche central sale casi identico — en el
+log de produccion quedaron registradas diferencias de **1.7 a 7.4 px**, todas por
+debajo del umbral. Resultado: la camara rechazaba todos sus frames.
+
+Y como el rechazo NO ponia `_frame = None` (solo hacia `continue`), `get_frame()`
+seguia devolviendo la ultima imagen aceptada, siempre la misma. La cadena completa:
+
+1. `get_frame()` devuelve un frame → el watchdog de camara perdida nunca dispara.
+2. El frame es identico al anterior → `InspectionSession.inspect_frame()` calcula
+   `diff = 0.0 < continuous_position_threshold (4.0)` y devuelve `None`.
+3. `_handle_result()` nunca se ejecuta → `ok_count`/`nok_count` se quedan en 0, no
+   hay racha NOK, no hay machine_stop, no hay FAULT.
+4. El scanner queda en RUNNING con luz verde para siempre.
+
+**Cambios (3 defensas, de la causa raiz al ultimo colchon):**
+
+- `src/controller/system.py`: el validador anti-bleed se instala **solo entre
+  camaras USB locales** (indice DSHOW), via el nuevo `_is_local_device()`. Dos URLs
+  distintas nunca pueden ser el mismo dispositivo, asi que compararlas por imagen
+  no aporta nada y solo genera falsos positivos. `_make_bleed_validator()` ahora
+  recibe la lista de pares locales a comparar.
+- `src/vision/camera.py`: nuevo **watchdog de IMAGEN CONGELADA**. Todos los caminos
+  de captura publican via `_publish_frame()`, que compara una firma barata
+  (submuestreo 1/16) contra el frame anterior. Si no llega una imagen NUEVA durante
+  `frozen_frame_timeout_s` (default 10 s, en `camera_config.DEFAULTS`) — porque el
+  validador rechaza todo o porque la camara IP devuelve siempre el mismo JPEG — se
+  suelta el frame retenido (`_frame = None`) y el ScannerController lo escala por
+  su via ya probada de camara perdida (ERROR + corte de solenoide + aviso en UI).
+  El rechazo del validador tambien llama a `_check_frozen()`.
+- `src/controller/scanner_controller.py`: nuevo **watchdog de INSPECCION DETENIDA**
+  (`_check_inspection_stall()`), que cubre cualquier otra causa (p.ej. el gate de
+  movimiento nunca superado). Si el scanner esta RUNNING y no analiza ni un frame
+  durante `inspection_stall_warn_s` (default 15 s) avisa en log y en la UI; a los
+  `inspection_stall_timeout_s` (default 120 s) corta el solenoide y pasa a ERROR.
+  Ambos configurables por scanner; `0` los deshabilita. El contador se ancla al
+  inicio del run loop (no cuenta selftest ni pre-calibracion) y se reinicia con
+  cada inspeccion real.
+- `src/ui/operator.py`: la casilla de salud muestra **"SIN ANALISIS Xs"** en ambar,
+  tambien cuando todavia no hubo ningun resultado (antes esa rama no actualizaba
+  nada y por eso el sintoma era invisible para el operario).
+- `src/utils/config.py`: nuevas tolerancias `inspection_stall_warn_s` (15.0) e
+  `inspection_stall_timeout_s` (120.0).
+- `src/utils/camera_config.py`: nuevo setting `frozen_frame_timeout_s` (10.0).
+- `tests/test_frozen_camera_watchdog.py`: 6 tests de regresion — anti-bleed solo
+  entre camaras locales (y que sigue funcionando entre USB), liberacion del frame
+  congelado por repeticion y por rechazo del validador, recuperacion automatica al
+  volver imagen nueva, y escalado/no-escalado del watchdog de inspeccion detenida.
+
+**Verificado:** 66/66 tests OK. Construccion real de `InspectionSystem` con el
+`io_map.yaml` de produccion: ambas camaras quedan con `validator=None` y el
+watchdog de congelamiento armado en 10 s.
+
+**Pendiente para el operario:** recompilar el `.exe` — son cambios de codigo, no de
+config; el build desplegado sigue teniendo el bug.
+
+---
+
 ### Sesión 2026-07-28 - Tadeo + Claude
 
 #### Cambio 285 - Botones de ANCHO en editores de ROI + confirmacion de hot-reload en vivo
