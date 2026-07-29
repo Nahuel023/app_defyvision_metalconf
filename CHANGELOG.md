@@ -145,13 +145,13 @@ seguia devolviendo la ultima imagen aceptada, siempre la misma. La cadena comple
 `io_map.yaml` de produccion: ambas camaras quedan con `validator=None` y el
 watchdog de congelamiento armado en 10 s.
 
-**Build V21 (2026-07-29 09:14, commit `eee30fc`):** generado con
+**Build V22 (2026-07-29 09:14, commit `eee30fc`):** generado con
 `scripts\build_exe.ps1` — Cython obligatorio (`license.cp314-win_amd64.pyd`),
 `scipy.optimize._lsap` presente, smoke test del EXE congelado OK. Verificado ademas
 que el PYZ del `.exe` contiene el codigo nuevo (`_is_local_device`, `IMAGEN CONGELADA`,
 `_check_inspection_stall`, `SIN ANALISIS`). Entrega:
-`dist\DEFYVISION_METALCONF_V21_CYTHON_2026-07-29.zip` (136.7 MB).
-Este build ya NO tiene el bug; el V20 y anteriores si.
+`dist\DEFYVISION_METALCONF_V22_CYTHON_2026-07-29.zip` (136.7 MB), tag `V22`.
+Este build ya NO tiene el bug; el V21 y anteriores si.
 
 ---
 
