@@ -105,6 +105,18 @@ vuelva a impedir el arranque ni a detener produccion por una fecha o codigo.
 **Validacion:** `68 passed`; imports del camino critico de arranque correctos y
 `is_licensed() is True` sin consultar reloj ni archivos locales.
 
+**Entrega V25 Cython (PC de desarrollo, no planta):**
+- ZIP: `dist/DEFYVISION_METALCONF_V25_CYTHON_2026-07-31.zip`.
+- Fuente empaquetada: commit `7b6c112420187abb081fe4b4042cfabc2a822f58`.
+- Tamano: `143294959` bytes.
+- SHA-256: `7D70ECEBDA5C22D4720D2AA7FF3DC2C0C1A2272A4BA7EB90170B43CE99D18186`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), un unico
+  `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- Alcance de esta validacion: tests y arranque seguro/offline en la PC de
+  desarrollo. No equivale a una prueba de PLC, camaras, iluminacion ni senales
+  fisicas en la PC de produccion de planta; esa aceptacion debe realizarse al
+  instalar V25 en planta.
+
 #### Cambio 287 - CRITICO: Esterilla scanner_2 calibrada y fail-safe contra RUN sin decisiones
 
 **Pedido:** calibrar ESTERILLA con los 501 frames OK de
