@@ -111,6 +111,10 @@ class Camera:
         self._mjpeg_response = None
         self._mjpeg_buffer = b""
         self._frame: Optional[np.ndarray] = None
+        # Generacion del ultimo frame visualmente NUEVO. Permite que el
+        # controlador procese cada captura fresca una sola vez, sin volver a
+        # contar la misma imagen retenida entre dos lecturas de camara.
+        self._fresh_frame_seq: int = 0
         self._lock = threading.Lock()
         self._lifecycle_lock = threading.Lock()
         self._running = False
@@ -202,6 +206,20 @@ class Camera:
             frame = self._frame.copy()
         return self._apply_zoom(frame)
 
+    def get_fresh_frame(self) -> tuple[Optional[np.ndarray], int]:
+        """Devuelve el ultimo frame y su generacion visual de forma atomica.
+
+        La generacion solo avanza cuando ``_publish_frame`` observa una imagen
+        distinta. El consumidor puede ignorar una generacion ya procesada y asi
+        nunca contabilizar varias veces el mismo frame retenido.
+        """
+        with self._lock:
+            if self._frame is None:
+                return None, self._fresh_frame_seq
+            frame = self._frame.copy()
+            seq = self._fresh_frame_seq
+        return self._apply_zoom(frame), seq
+
     def get_raw_frame(self) -> Optional[np.ndarray]:
         """Devuelve el ultimo frame sin zoom, para diagnostico/anti-bleed."""
         with self._lock:
@@ -222,6 +240,7 @@ class Camera:
             self._frame       = frame
             self._snapshot_ok = True
             if changed:
+                self._fresh_frame_seq += 1
                 self._last_fresh_mono = now
                 self._frozen_logged   = False
         self._frame_times.append(now)

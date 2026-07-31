@@ -98,19 +98,27 @@ models:
     pattern_edge_boundary_tol_px: 8.0
     chapa_edge_inner_px: 5
     grid_min_spacing: 18.0
-    grid_dx: 39.0
-    grid_dy: 21.0
-    grid_stagger_x_odd: 20.0
+    # Calibracion scanner_2 31-07-2026 (501 frames OK): geometria real de
+    # ESTERILLA. Los valores anteriores 39/21 acumulaban error de fase y
+    # generaban 9-47 faltantes falsos en todos los frames.
+    grid_dx: 41.9
+    grid_dy: 22.46
+    grid_stagger_x_odd: 20.95
+    grid_allow_row_parity_flip: true
+    grid_parity_selection_tol_px: 8.0
     grid_derotate: true
     grid_derotate_min_deg: 0.4
     grid_max_missing: 80
     bbox_filter_margin_px: 60.0
     pattern_hull_margin_px: 10.0
     grid_affine_refinement: true
+    use_hungarian_matching: true
     extra_min_dist_factor: 2.0
     compare_top_ignore_px: 0.0
     compare_bottom_ignore_px: 0.0
-    blur_score_min: 800.0
+    # Lote real: 234..470. 255 separa los pares con blur/missing transitorio
+    # sin convertir todo el lote en LOW_QUALITY (el bug de 800 dejaba 0 OK/0 NOK).
+    blur_score_min: 255.0
     frame_missing_nok_threshold: 5
     consecutive_nok_frames: 9999
     continuous_position_threshold: 3.0

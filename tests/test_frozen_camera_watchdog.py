@@ -17,6 +17,7 @@ si el scanner corre sin analizar nada.
 """
 
 import time
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -75,6 +76,27 @@ def test_frozen_feed_is_released_so_camera_loss_can_escalate() -> None:
     assert cam.get_frame() is not None
 
 
+def test_camera_sequence_advances_only_for_visually_fresh_frames() -> None:
+    cam = Camera("http://192.168.1.2/oneshotimage.jpg")
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+
+    cam._publish_frame(frame.copy())
+    first, first_seq = cam.get_fresh_frame()
+    assert first is not None
+    assert first_seq > 0
+
+    cam._publish_frame(frame.copy())
+    repeated, repeated_seq = cam.get_fresh_frame()
+    assert repeated is not None
+    assert repeated_seq == first_seq
+
+    fresh = frame.copy()
+    fresh[0, 0] = 255  # la firma submuestreada incluye este pixel
+    cam._publish_frame(fresh)
+    _, fresh_seq = cam.get_fresh_frame()
+    assert fresh_seq == first_seq + 1
+
+
 def test_rejected_frames_also_trip_the_freeze_watchdog() -> None:
     cam = Camera("http://192.168.1.2/oneshotimage.jpg")
     cam._freeze_timeout_s = 0.05
@@ -111,5 +133,35 @@ def test_inspection_stall_does_not_fire_while_inspecting() -> None:
 
         assert controller._check_inspection_stall(0.0) is False
         assert controller.state == ScannerState.RUNNING
+    finally:
+        controller.shutdown()
+
+
+def test_sustained_low_quality_stops_instead_of_running_blind() -> None:
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    controller._recorder = None
+    controller._low_quality_stop_frames = 3
+    result = SimpleNamespace(
+        status="OK",
+        frame_quality="LOW_QUALITY",
+        detection_ratio=1.0,
+        alignment_ok=True,
+        machine_stop=False,
+        overlay=None,
+        image=None,
+        report=SimpleNamespace(missing=0),
+    )
+    try:
+        controller._transition(ScannerState.RUNNING)
+        controller._handle_result(result)
+        controller._handle_result(result)
+        assert controller.state == ScannerState.RUNNING
+        assert controller.get_status()["ok_count"] == 0
+        assert controller.get_status()["nok_count"] == 0
+
+        controller._handle_result(result)
+        assert controller.state == ScannerState.ERROR
+        assert controller._stop_event.is_set()
+        assert ("scanner_1.solenoid", False) in controller._io.writes
     finally:
         controller.shutdown()

@@ -79,6 +79,75 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-07-31 - Tadeo + Codex
+
+#### Cambio 287 - CRITICO: Esterilla scanner_2 calibrada y fail-safe contra RUN sin decisiones
+
+**Pedido:** calibrar ESTERILLA con los 501 frames OK de
+`C:\Users\DefyC\Downloads\31-07-2026-ESTERILLA_1_SCANNER_2` y corregir el
+incidente gravisimo donde el operario pulsa INICIAR pero el scanner queda en
+marcha sin contar ningun OK ni NOK.
+
+**Hallazgos de Codex:**
+- La causa inmediata del contador en cero era `blur_score_min=800`: el lote real
+  mide solamente `233.8..469.9`, por lo que **501/501** frames quedaban
+  `LOW_QUALITY`. Esa politica no suma OK/NOK y tampoco detenia la maquina ante
+  una racha infinita, reproduciendo exactamente el estado de produccion sin control.
+- El patron activo tambien estaba mal: geometria configurada `dx=39, dy=21`
+  contra una geometria real robusta de aproximadamente `dx=41.9, dy=22.46`.
+  Ademas, desde la fila 7 las celdas de `holes.json` estaban corruptas/incompletas.
+  El baseline era `501/501 raw NOK`, con `9..47 missing` falsos por frame.
+- Al cambiar de Microperforado a Esterilla se recargaban patron/tolerancias dentro
+  del pipeline, pero `ScannerController` conservaba fuera de la sesion el gate de
+  movimiento, FPS y watchdogs del modelo anterior.
+- `Camera.get_frame()` podia devolver varias veces la misma captura retenida; no
+  existia una identidad atomica de frame fresco para impedir doble conteo.
+
+**Cambios hechos por Tadeo + Codex:**
+- `config/tolerancias.yaml`, `modelo_A`: grilla recalibrada a
+  `41.9 x 22.46`, stagger `20.95`, seleccion segura de paridad y Hungarian;
+  `blur_score_min=255`, calibrado con la distribucion real.
+- `data/patterns/scanner_2/modelo_A/holes.json`: patron regularizado de 94 celdas
+  unicas (filas alternadas de 4/5 agujeros), puntos/radios coherentes y
+  `built_with_roi` explicitado para la ROI `x=110, w=415`.
+- `config/io_map.yaml`, `scanner_2/modelo_A`: inspeccion por cada frame fresco
+  (`continuous_position_threshold=0`), piso duro de 3 frames para faltantes y
+  desalineacion, FAULT generico en `9999`, detector severo de un frame apagado,
+  `low_quality_stop_frames=16` y stall watchdog `3s aviso / 10s ERROR`.
+- `scanner_2/modelo_B` recibe el mismo fail-safe operativo (`stop_min_frames=3`,
+  16 LOW_QUALITY sostenidos y stall watchdog 3s/15s), sin cambiar su calibracion
+  optica ni sus umbrales de matching.
+- `src/vision/camera.py`: nueva generacion atomica de frame visualmente fresco;
+  el controlador procesa una captura nueva una sola vez y no vuelve a contar la
+  imagen retenida entre lecturas.
+- `src/controller/scanner_controller.py`: al cambiar/recargar modelo ahora se
+  actualizan tambien gate de movimiento, FPS, rachas y watchdogs. Una racha
+  `LOW_QUALITY` sostenida pasa a ERROR, corta solenoide, enciende rojo y conserva
+  el ultimo frame para diagnostico; ya no puede seguir produciendo indefinidamente.
+- `src/utils/config.py`: default global fail-safe `low_quality_stop_frames=25`.
+- Tests de regresion para secuencia de frame fresco y corte por LOW_QUALITY sostenido.
+
+**Validacion:**
+- Lote completo real: `501` frames procesados, `465 OK` contabilizables,
+  `36 LOW_QUALITY` aislados, `0 NOK` contabilizables, `0 machine_stop`,
+  `501/501 decision temporal OK`; racha LOW_QUALITY maxima `3/16`.
+- Los unicos cuatro raw NOK son dos pares borrosos (`0075/0076`, `0343/0344`) y
+  quedan correctamente LOW_QUALITY, sin sumar NOK ni producir una parada falsa.
+- Missing: mediana `0`, p95 `0`, media `0.164`, maximo `10` solo en esos pares LQ.
+- Suite completa `68/68` tests OK; import CLI y construccion real de
+  `InspectionSystem(disable_plc_outputs=True)` OK con ambos scanners.
+
+**Riesgos / oportunidades:**
+- Este lote contiene solo estados OK. Queda validada la ausencia de falsos NOK y
+  la seguridad temporal, pero la sensibilidad final a un punzon realmente roto
+  debe confirmarse cuando exista una captura NOK real de ESTERILLA. No se activo
+  el detector geometrico `pattern_align_enabled` de modelo_A porque sus metricas
+  normales se solapan con los umbrales de Microperforado y provocarian falsas
+  paradas; cualquier parada geometrica futura igualmente respeta el piso duro de
+  3 frames y nunca puede disparar por una imagen aislada.
+
+---
+
 ### Sesión 2026-07-29 - Tadeo + Claude
 
 #### Cambio 286 - CRITICO: scanner_2 "en marcha" para siempre sin contar ni un OK

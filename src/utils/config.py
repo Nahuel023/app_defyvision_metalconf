@@ -54,7 +54,10 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "blur_score_min": 0.0,            # 0 = deshabilitado; >0 = varianza mín del Laplaciano
     "roi_min_width": 0,               # 0 = deshabilitado; >0 = ancho mínimo (px) que el ROI NUNCA baja (recenter/precal/ema/UI). Evita ROIs angostas que clipan agujeros.
     "stop_min_frames": 0,             # 0 = usa pisos globales (faltantes>=2, desalineacion>=3). >0 = piso DURO por scanner: ninguna parada (racha NOK/faltantes/desalineacion) dispara antes de N frames consecutivos.
-    "low_quality_max_streak": 10,     # frames LOW_QUALITY consecutivos antes de resetear racha
+    "low_quality_max_streak": 10,     # frames LOW_QUALITY consecutivos antes de resetear la racha NOK previa
+    # Fail-safe: una camara que solo entrega LOW_QUALITY tampoco esta inspeccionando.
+    # Tras esta racha se corta la maquina y se pasa a ERROR. 0 = deshabilitado.
+    "low_quality_stop_frames": 25,
     "nok_count_reset_frames": 200,    # frames OK seguidos antes de resetear a 0 el contador NOK de la sesion
     "extra_min_dist_factor": 0.0,     # 0 = todos los extras se muestran; >0 = umbral en múltiplos de tol_xy_px
     "machine_stop_enabled": False,

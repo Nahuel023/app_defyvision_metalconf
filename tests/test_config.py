@@ -116,10 +116,17 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert cfg["roi_recenter_require_edge_missing"] is False
     assert cfg["roi_precal_enabled"] is False
     assert cfg["roi_recenter_cooldown_frames"] == cfg["roi_recenter_cooldown_max_frames"]
-    assert esterilla["grid_dx"] == 39.0
-    assert esterilla["grid_dy"] == 21.0
+    assert esterilla["grid_dx"] == 41.9
+    assert esterilla["grid_dy"] == 22.46
+    assert esterilla["grid_stagger_x_odd"] == 20.95
+    assert esterilla["grid_allow_row_parity_flip"] is True
+    assert esterilla["grid_parity_selection_tol_px"] < esterilla["grid_dy"] / 2.0
+    assert esterilla["blur_score_min"] == 255.0
     assert esterilla["tol_xy_px"] == 18.0
     assert esterilla["roi_recenter_enabled"] is False
+    assert esterilla["stop_min_frames"] == 3
+    assert esterilla["low_quality_stop_frames"] == 16
+    assert esterilla["continuous_position_threshold"] == 0.0
 
 
 def test_both_microperforado_scanners_require_three_alignment_frames() -> None:

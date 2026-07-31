@@ -66,6 +66,9 @@ class ScannerController:
                              tols["consecutive_nok_frames"])),
         )
         self._low_quality_max_streak = int(tols.get("low_quality_max_streak", 10))
+        self._low_quality_stop_frames = max(
+            0, int(tols.get("low_quality_stop_frames", 25))
+        )
         # Si el contador de NOK de la sesion queda "pegado" en un numero chico
         # (p.ej. 1 o 2 piezas NOK aisladas al principio) y la linea sigue
         # produciendo buenas, tras esta cantidad de frames OK seguidos se
@@ -592,6 +595,7 @@ class ScannerController:
     def reload_cache(self) -> None:
         """Invalida recursos y pide recargar la sesión viva en el próximo frame."""
         model = self._io.scanner_config(self._id).get("model", "")
+        self._refresh_runtime_tolerances(model)
         self._inspector.invalidate(model=model or None, scanner_id=self._id)
         with self._lock:
             self._cache_revision += 1
@@ -610,19 +614,45 @@ class ScannerController:
     def set_model(self, model: str) -> None:
         cfg      = self._io.scanner_config(self._id)
         cfg["model"] = model
-        insp_cfg = cfg.get("inspection", {})
-        tols     = load_tolerances(model, scanner_id=self._id)
-        self._consecutive_nok = max(
-            int(tols.get("stop_min_frames", 0)),   # piso DURO por scanner (ej. 5 en scanner_1)
-            int(insp_cfg.get("consecutive_nok_frames", tols["consecutive_nok_frames"])),
-        )
-        self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
+        self._refresh_runtime_tolerances(model)
         self._inspector.invalidate(model=model, scanner_id=self._id)
         with self._lock:
             self._cache_revision += 1
         logger.info(f"[{self._id}] modelo cambiado a '{model}' "
                     f"(consecutive_nok={self._consecutive_nok}, "
                     f"machine_stop_enabled={self._machine_stop_enabled})")
+
+    def _refresh_runtime_tolerances(self, model: str) -> None:
+        """Recarga parametros que el loop conserva fuera de InspectionSession.
+
+        Sin esto, cambiar Microperforado/Esterilla renovaba el pipeline visual
+        pero dejaba activos el gate de movimiento, FPS y watchdogs anteriores.
+        """
+        cfg = self._io.scanner_config(self._id)
+        insp_cfg = cfg.get("inspection", {})
+        tols = load_tolerances(model, scanner_id=self._id)
+        self._consecutive_nok = max(
+            int(tols.get("stop_min_frames", 0)),
+            int(insp_cfg.get(
+                "consecutive_nok_frames", tols["consecutive_nok_frames"]
+            )),
+        )
+        self._low_quality_max_streak = int(
+            tols.get("low_quality_max_streak", 10)
+        )
+        self._low_quality_stop_frames = max(
+            0, int(tols.get("low_quality_stop_frames", 25))
+        )
+        self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
+        self._cont_pos_thr = float(
+            tols.get("continuous_position_threshold", 8.0)
+        )
+        max_hz = float(tols.get("max_inspection_hz", 0))
+        self._min_insp_interval = (1.0 / max_hz) if max_hz > 0 else 0.0
+        self._stall_warn_s = float(tols.get("inspection_stall_warn_s", 15.0))
+        self._stall_timeout_s = float(
+            tols.get("inspection_stall_timeout_s", 120.0)
+        )
 
     # ------------------------------------------------------------------
     # Propiedades de estado (thread-safe)
@@ -934,6 +964,7 @@ class ScannerController:
 
     def _continuous_loop_impl(self) -> None:
         frame_counter = 0
+        last_camera_seq: int | None = None
 
         with self._lock:
             model_init = self._io.scanner_config(self._id)["model"]
@@ -987,6 +1018,7 @@ class ScannerController:
                 model = self._io.scanner_config(self._id)["model"]
                 cache_revision = self._cache_revision
             if model != session._model or cache_revision != session_cache_revision:
+                self._refresh_runtime_tolerances(model)
                 session = InspectionSession(
                     model,
                     scanner_id=self._id,
@@ -1002,7 +1034,13 @@ class ScannerController:
                     self._id, model, session_cache_revision,
                 )
 
-            frame = self._camera.get_frame()
+            get_fresh = getattr(self._camera, "get_fresh_frame", None)
+            if callable(get_fresh):
+                frame, camera_seq = get_fresh()
+            else:
+                # Compatibilidad con camaras de prueba/implementaciones antiguas.
+                frame = self._camera.get_frame()
+                camera_seq = None
             if frame is None:
                 now = time.monotonic()
                 escalate = False
@@ -1030,6 +1068,17 @@ class ScannerController:
                     return
                 self._stop_event.wait(timeout=0.033)
                 continue
+
+            # get_frame() devuelve el ultimo frame retenido; sin una generacion
+            # fresca el loop podia analizar/contar varias veces la misma captura.
+            # Tambien mantenemos activo el watchdog mientras esperamos una nueva.
+            if camera_seq is not None and camera_seq == last_camera_seq:
+                if self._check_inspection_stall(session.last_position_diff):
+                    return
+                self._stop_event.wait(timeout=0.005)
+                continue
+            if camera_seq is not None:
+                last_camera_seq = camera_seq
 
             with self._lock:
                 if self._camera_missing_since is not None:
@@ -1176,6 +1225,7 @@ class ScannerController:
 
         fault_triggered = False
         machine_stop_triggered = False
+        quality_stop_triggered = False
         streak_start_mono: Optional[float] = None
         with self._lock:
             self._last_result = result
@@ -1190,9 +1240,19 @@ class ScannerController:
                 # Hold: frame borroso/degradado no incrementa ni resetea la racha NOK.
                 self._lq_streak += 1
                 if self._low_quality_max_streak > 0 and self._lq_streak >= self._low_quality_max_streak:
-                    # Demasiados frames de baja calidad seguidos → resetear racha
+                    # Una racha NOK previa no debe sobrevivir indefinidamente a
+                    # una zona larga sin evidencia visual confiable.
                     self._nok_streak = 0
-                    self._lq_streak  = 0
+                    self._streak_start_mono = None
+                if (
+                    self._low_quality_stop_frames > 0
+                    and self._lq_streak >= self._low_quality_stop_frames
+                    and self._state == ScannerState.RUNNING
+                ):
+                    # LOW_QUALITY no es OK ni NOK. Si se sostiene, el sistema
+                    # esta produciendo sin poder inspeccionar y debe cortar.
+                    self._state = ScannerState.ERROR
+                    quality_stop_triggered = True
                 # Los contadores de ok/nok no se actualizan para frames de baja calidad
             else:
                 self._lq_streak = 0
@@ -1270,6 +1330,31 @@ class ScannerController:
                     fault_triggered = True
                     self._fault_count += 1
                     streak_start_mono = self._streak_start_mono
+
+        if quality_stop_triggered:
+            logger.error(
+                "[%s] ERROR por calidad de imagen - %d frames LOW_QUALITY "
+                "consecutivos; se corta la maquina para no producir sin control",
+                self._id, self._lq_streak,
+            )
+            self._cut_solenoid_critical("calidad de imagen baja sostenida")
+            self._set_lights(red=True)
+            self._stop_event.set()
+            self._fire_state_changed()
+            if self._recorder is not None:
+                try:
+                    self._recorder.flush_event(
+                        "low_quality_stop",
+                        f"{self._lq_streak} frames de calidad baja",
+                    )
+                except Exception as _exc:
+                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+            if self.on_result:
+                try:
+                    self.on_result(result, streak)
+                except Exception as _exc:
+                    logger.error(f"[{self._id}] on_result error (LOW_QUALITY): {_exc}")
+            return
 
         if machine_stop_triggered:
             _ms_reason = self._derive_stop_reason(result)

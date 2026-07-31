@@ -113,6 +113,25 @@ scanner_2:
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X2 no llega al PLC
   inspection_models:
+    modelo_A:
+      # ESTERILLA scanner_2, calibrada con 501 frames OK del 31-07-2026.
+      # Se inspecciona cada frame visualmente nuevo de la camara; el sequence gate
+      # del controlador evita contar dos veces una captura retenida.
+      continuous_position_threshold: 0.0
+      # Mismas reglas temporales seguras que Microperforado scanner_2: ninguna
+      # parada por faltantes/desalineacion puede disparar con un solo frame.
+      consecutive_nok_frames: 9999
+      machine_stop_missing_frames: 3
+      pattern_align_stop_frames: 3
+      pattern_align_severe_abs_max_px: 0.0
+      stop_min_frames: 3
+      # LOW_QUALITY aislado no decide. Una racha sostenida si corta: seguir
+      # produciendo sin imagen confiable es un fallo de inspeccion, no un OK.
+      low_quality_stop_frames: 16
+      inspection_stall_warn_s: 3.0
+      inspection_stall_timeout_s: 10.0
+      roi_recenter_enabled: false
+      roi_precal_enabled: false
     modelo_B:
       # Overrides especificos para microperforado en scanner_2.
       # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
@@ -122,6 +141,12 @@ scanner_2:
       # - blur/open/close chicos limpian ruido sin volver a unir filas;
       # - bajar max_area corta blobs fusionados grandes en la zona baja;
       # - reducir chapa_edge_inner_px estabiliza la toma de borde de chapa.
+      # Blindaje comun de scanner_2: nunca producir indefinidamente sin una
+      # decision visual, y nunca parar por una unica evidencia geometrica.
+      stop_min_frames: 3
+      low_quality_stop_frames: 16
+      inspection_stall_warn_s: 3.0
+      inspection_stall_timeout_s: 15.0
       threshold: 145
       use_channel: gray
       use_clahe: false
