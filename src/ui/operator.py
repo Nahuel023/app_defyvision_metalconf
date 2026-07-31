@@ -45,7 +45,7 @@ from PyQt6.QtWidgets import (
 from src.controller.system import InspectionSystem
 from src.inspection import InspectionResult
 from src.utils.state import OperationMode, ScannerState
-from src.utils.license import is_licensed, save_license_file, update_heartbeat, validate_key
+from src.utils.license import save_license_file, update_heartbeat, validate_key
 
 from src.utils.paths import app_root
 _ROOT = app_root()
@@ -96,7 +96,7 @@ _SAFE_OFF_FG   = "#bbf7d0"
 
 
 # ----------------------------------------------------------------------
-# Diálogo de bloqueo de sistema (licencia vencida)
+# Dialogo historico de activacion (sin rutas operativas; se conserva por compatibilidad)
 # ----------------------------------------------------------------------
 
 class LicenseBlockDialog(QDialog):
@@ -251,10 +251,8 @@ class LicenseBlockDialog(QDialog):
 
 
 def ensure_license_or_prompt(parent=None) -> bool:
-    if is_licensed():
-        return True
-    dlg = LicenseBlockDialog(parent)
-    return dlg.exec() == QDialog.DialogCode.Accepted and is_licensed()
+    """Compatibilidad historica: la operacion esta habilitada permanentemente."""
+    return True
 
 
 # ----------------------------------------------------------------------
@@ -1186,18 +1184,6 @@ class OperatorWindow(QMainWindow):
         self._status_timer.timeout.connect(self._refresh_status)
         self._status_timer.start(_STATUS_REFRESH_MS)
 
-        # Produccion: no debe existir expiracion artificial por hora fija.
-        # Verificación periódica de licencia cada 30 min
-        self._license_timer = QTimer(self)
-        self._license_timer.timeout.connect(self._check_license)
-        self._license_timer.start(30 * 60 * 1000)
-
-        # Heartbeat para detección de rollback de reloj (cada 10 min)
-        self._heartbeat_timer = QTimer(self)
-        self._heartbeat_timer.timeout.connect(update_heartbeat)
-        self._heartbeat_timer.start(10 * 60 * 1000)
-
-
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
@@ -1388,19 +1374,6 @@ class OperatorWindow(QMainWindow):
             except Exception:
                 logger.exception(f"[{sid}] error en refresh_status()")
 
-    def _check_license(self) -> None:
-        if self.isHidden():
-            return
-        if is_licensed():
-            return
-        # Detener todos los scanners antes de bloquear
-        for sid in self._system.scanner_ids():
-            try:
-                self._system.scanner(sid).stop()
-            except Exception:
-                pass
-        ensure_license_or_prompt(self)
-
     def _open_errors(self) -> None:
         """Abre el visor de frames para el operario (paradas + OK recientes).
 
@@ -1564,9 +1537,6 @@ def launch_operator_ui(system: InspectionSystem) -> None:
     icon_pix = QPixmap(str(_ico)) if _ico.exists() else QPixmap(str(_jpg))
     if not icon_pix.isNull():
         app.setWindowIcon(QIcon(icon_pix))
-
-    if not ensure_license_or_prompt(None):
-        return
 
     win = OperatorWindow(system)
     win.showMaximized()

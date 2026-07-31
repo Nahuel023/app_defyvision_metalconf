@@ -81,6 +81,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-07-31 - Tadeo + Codex
 
+#### Cambio 288 - Eliminacion permanente del bloqueo por fecha/licencia
+
+**Pedido:** retirar el bloqueo agregado para julio y asegurar que la aplicacion no
+vuelva a impedir el arranque ni a detener produccion por una fecha o codigo.
+
+**Cambios aplicados:**
+- `src/utils/license.py`: se elimino toda dependencia de fecha, clave mensual,
+  marcador de desbloqueo y deteccion de rollback del reloj. `is_licensed()` queda
+  permanentemente habilitado y las APIs historicas se conservan como no-op para
+  no romper imports ni integraciones existentes.
+- `src/main.py` y `src/ui/operator.py`: se retiraron los gates de licencia del
+  arranque, la comprobacion periodica y el heartbeat que podian abrir un dialogo
+  modal o detener todos los scanners.
+- `src/controller/scanner_controller.py`: se quitaron los bloqueos de `start()` y
+  `start_simulate()`, el control cada 10 segundos y la ruta antigua que podia
+  cortar el solenoide por licencia.
+- `tests/test_license.py` y `tests/test_scanner_controller.py`: se reemplazaron las
+  pruebas del bloqueo por verificaciones de operacion permanentemente habilitada.
+- La proteccion del entregable con Cython se mantiene: `src.utils.license` sigue
+  compilado como `.pyd` y el fuente `.py` no se distribuye en el EXE.
+
+**Validacion:** `68 passed`; imports del camino critico de arranque correctos y
+`is_licensed() is True` sin consultar reloj ni archivos locales.
+
 #### Cambio 287 - CRITICO: Esterilla scanner_2 calibrada y fail-safe contra RUN sin decisiones
 
 **Pedido:** calibrar ESTERILLA con los 501 frames OK de

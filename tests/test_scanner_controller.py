@@ -61,20 +61,6 @@ class _StuckThread:
         self.join_calls += 1
 
 
-def test_start_is_blocked_when_license_invalid(monkeypatch) -> None:
-    io = _FakeIO()
-    camera = _FakeCamera()
-    controller = ScannerController("scanner_1", io, camera)
-    monkeypatch.setattr(controller, "_license_allows_operation", lambda: False)
-
-    try:
-        assert controller.start() is False
-        assert camera.start_calls == 0
-        assert controller.state == ScannerState.IDLE
-    finally:
-        controller.shutdown()
-
-
 def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
     io = _FakeIO()
     camera = _FakeCamera()
@@ -99,28 +85,6 @@ def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
         controller.shutdown()
 
 
-def test_handle_license_failure_stops_running_scanner() -> None:
-    io = _FakeIO()
-    camera = _FakeCamera()
-    controller = ScannerController("scanner_1", io, camera)
-
-    try:
-        controller._transition(ScannerState.RUNNING)
-        controller._handle_license_failure()
-
-        assert controller.state == ScannerState.STOPPED
-        assert controller._stop_event.is_set()
-        assert ("scanner_1.solenoid", False) in io.writes
-        assert io.batches[-1] == [
-            ("scanner_1.light_blue", False),
-            ("scanner_1.light_green", False),
-            ("scanner_1.light_yellow", False),
-            ("scanner_1.light_red", False),
-        ]
-    finally:
-        controller.shutdown()
-
-
 def test_start_enters_running_even_if_solenoid_is_blocked(monkeypatch) -> None:
     """El IOMap bloquea el solenoide en modo seguro, pero start() arranca igual:
     la escritura se intenta y su rechazo no impide la sesión de inspección."""
@@ -128,8 +92,6 @@ def test_start_enters_running_even_if_solenoid_is_blocked(monkeypatch) -> None:
     io.block_solenoid_on = True
     camera = _FakeCamera()
     controller = ScannerController("scanner_1", io, camera)
-    monkeypatch.setattr(controller, "_license_allows_operation", lambda: True)
-
     try:
         assert controller.start() is True
         assert controller.state == ScannerState.RUNNING
@@ -150,8 +112,6 @@ def test_start_is_blocked_while_previous_worker_is_still_alive(monkeypatch) -> N
     controller = ScannerController("scanner_1", io, camera)
     stuck = _StuckThread()
     controller._poller_thread = stuck
-    monkeypatch.setattr(controller, "_license_allows_operation", lambda: True)
-
     try:
         assert controller.start() is False
         assert controller.state == ScannerState.IDLE
