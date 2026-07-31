@@ -137,6 +137,18 @@ marcha sin contar ningun OK ni NOK.
 - Suite completa `68/68` tests OK; import CLI y construccion real de
   `InspectionSystem(disable_plc_outputs=True)` OK con ambos scanners.
 
+**Build V24 (2026-07-31 08:31, commit fuente `6f529ed`):**
+- Generado `dist\DEFYVISION_METALCONF_V24_CYTHON_2026-07-31.zip`
+  (`143,321,187 bytes`, SHA-256
+  `97E53507FE095ACF09E005A5B3B6913319D265AC07DE0A202CEBF6282DF25178`).
+- Proteccion verificada dentro del ZIP: `license.cp314-win_amd64.pyd` presente y
+  `license.py` ausente; `scipy.optimize._lsap` presente para matching Hungarian.
+- Smoke test del EXE congelado confirmado con `BUILD_SMOKE_OK`, sin conectar
+  PLC ni camaras.
+- `config/io_map.yaml`, `config/tolerancias.yaml` y el patron
+  `scanner_2/modelo_A/holes.json` dentro de la entrega coinciden byte por byte
+  con los archivos fuente calibrados y validados.
+
 **Riesgos / oportunidades:**
 - Este lote contiene solo estados OK. Queda validada la ausencia de falsos NOK y
   la seguridad temporal, pero la sensibilidad final a un punzon realmente roto
