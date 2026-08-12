@@ -81,6 +81,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-12 - Tadeo + Codex
 
+#### Cambio 290 - Esterilla scanner_2 no cuenta capturas con la chapa quieta
+
+**Pedido:** en scanner 2 con Esterilla, el contador de inspecciones seguia
+aumentando aunque la chapa no se moviera.
+
+**Causa:** el perfil productivo `scanner_2/modelo_A` sobrescribia el umbral de
+movimiento calibrado del modelo (`3.0`) con `continuous_position_threshold: 0.0`.
+La secuencia de camara evitaba procesar dos veces la misma captura retenida, pero
+cualquier captura JPEG nueva —incluido su ruido normal— se consideraba una nueva
+posicion de chapa.
+
+**Cambio:** `config/io_map.yaml` restaura el umbral de movimiento de Esterilla a
+`3.0`. Las capturas nuevas con la chapa en la misma posicion ya no entran al
+pipeline ni incrementan inspecciones, OK/NOK o rachas de baja calidad. Se agrega
+una regresion en `tests/test_config.py` para impedir que el perfil vuelva a cero.
+
+**Seguridad:** no se desactivan los watchdogs de camara ni de inspeccion. Si el
+scanner queda en RUN sin movimiento por el tiempo configurado, se detiene con la
+causa explicita `Sin analisis...`; simplemente deja de inventar inspecciones sobre
+la misma zona de material.
+
+**Validacion:** `69 passed`; `scripts/verify_config.py` confirma
+`modelo_A continuous_position_threshold = 3.0`; `py_compile` correcto para el
+camino critico de produccion. Queda pendiente la prueba fisica de planta con
+chapa quieta y luego en movimiento.
+
 #### Cambio 289 - ERROR con causa visible y persistente para el operario
 
 **Pedido:** la pantalla de produccion mostraba solamente `ERROR`, sin explicar

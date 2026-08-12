@@ -126,7 +126,9 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert esterilla["roi_recenter_enabled"] is False
     assert esterilla["stop_min_frames"] == 3
     assert esterilla["low_quality_stop_frames"] == 16
-    assert esterilla["continuous_position_threshold"] == 0.0
+    # Una captura nueva de la camara no implica material nuevo: Esterilla debe
+    # ignorar el ruido/JPEG mientras la chapa permanece en la misma posicion.
+    assert esterilla["continuous_position_threshold"] == 3.0
 
 
 def test_both_microperforado_scanners_require_three_alignment_frames() -> None:

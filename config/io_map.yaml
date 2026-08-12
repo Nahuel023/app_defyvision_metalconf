@@ -115,9 +115,10 @@ scanner_2:
   inspection_models:
     modelo_A:
       # ESTERILLA scanner_2, calibrada con 501 frames OK del 31-07-2026.
-      # Se inspecciona cada frame visualmente nuevo de la camara; el sequence gate
-      # del controlador evita contar dos veces una captura retenida.
-      continuous_position_threshold: 0.0
+      # Solo inspeccionar cuando cambia realmente la posicion de la chapa. La
+      # secuencia de camara evita duplicar una captura retenida y este umbral
+      # adicional filtra ruido/JPEG de capturas nuevas con la chapa quieta.
+      continuous_position_threshold: 3.0
       # Mismas reglas temporales seguras que Microperforado scanner_2: ninguna
       # parada por faltantes/desalineacion puede disparar con un solo frame.
       consecutive_nok_frames: 9999
