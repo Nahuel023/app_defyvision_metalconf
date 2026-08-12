@@ -97,8 +97,17 @@ antes de 30 segundos.
   ambos materiales de scanner 2.
 
 **Validacion:** `75 passed`; `scripts/verify_config.py` correcto y carga efectiva
-confirmada en `30.0` para `scanner_2/modelo_A` y `scanner_2/modelo_B`. Build
-Cython pendiente.
+confirmada en `30.0` para `scanner_2/modelo_A` y `scanner_2/modelo_B`.
+
+**Entrega V29 Cython para PC industrial (2026-08-12):**
+- ZIP: `dist/DEFYVISION_METALCONF_V29_CYTHON_2026-08-12.zip`.
+- Fuente empaquetada: commit `e9273927edecd3438ac0019ede9d5240a4f1ef93`.
+- Tamano: `143303702` bytes.
+- SHA-256: `27C410D6882A00912F74BA77AFF01413EA7034909276DC2EF56BEBFC761E4524`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); Cython verificado con un
+  unico `license.cp314-win_amd64.pyd` y ningun `license.py`; `_lsap` incluido.
+- El `io_map.yaml` empaquetado confirma `30.0` para Esterilla y Microperforado
+  de scanner 2. ZIP con `636` entradas, CRC sin errores y archivos requeridos.
 
 #### Cambio 292 - Nitidez editable por scanner y material desde Tolerancias
 
