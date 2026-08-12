@@ -107,6 +107,21 @@ la misma zona de material.
 camino critico de produccion. Queda pendiente la prueba fisica de planta con
 chapa quieta y luego en movimiento.
 
+**Entrega V26 Cython para PC industrial (2026-08-12):**
+- ZIP: `dist/DEFYVISION_METALCONF_V26_CYTHON_2026-08-12.zip`.
+- Fuente empaquetada: commit `e73e603ccd1f46a502dfe19532097cd4d92507a1`;
+  incluye el motivo concreto de ERROR (Cambio 289) y el filtro de chapa quieta
+  para Esterilla scanner 2 (Cambio 290).
+- Tamano: `143296452` bytes.
+- SHA-256: `0D4AF2A4F5C2453652CDA408B167A7E71646A070F0D6D8CD7A6162C1B6D1BF21`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); un unico
+  `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- `config/io_map.yaml` del paquete coincide byte por byte con la fuente y
+  conserva `scanner_2/modelo_A continuous_position_threshold: 3.0`.
+- Integridad ZIP correcta: `636` entradas, CRC sin errores, EXE/config/build-info
+  presentes. La aceptacion final de PLC, camaras y movimiento queda para la
+  prueba de instalacion en planta.
+
 #### Cambio 289 - ERROR con causa visible y persistente para el operario
 
 **Pedido:** la pantalla de produccion mostraba solamente `ERROR`, sin explicar
