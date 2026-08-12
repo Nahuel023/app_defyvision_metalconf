@@ -81,6 +81,23 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-12 - Tadeo + Codex
 
+#### Cambio 294 - Ambos scanners amplian a 60 segundos la espera antes de ERROR
+
+**Pedido:** ampliar a 60 segundos el tiempo normal de arranque de la cinta en
+ambos scanners y ambos materiales.
+
+**Cambios:**
+- `config/io_map.yaml`: `inspection_stall_timeout_s: 60.0` para scanner 1 y
+  scanner 2, tanto Esterilla como Microperforado.
+- `tests/test_config.py`: la regresion exige 60 segundos en las cuatro
+  combinaciones scanner/material.
+- El aviso preventivo permanece desde los 3 segundos; solamente el corte y el
+  estado ERROR por `Sin analisis` se postergan hasta completar 60 segundos.
+
+**Validacion:** `75 passed`; `scripts/verify_config.py` correcto y carga efectiva
+confirmada en `60.0` para las cuatro combinaciones scanner/material. Build Cython
+pendiente.
+
 #### Cambio 293 - Scanner 2 espera 30 segundos antes de ERROR sin analisis
 
 **Pedido:** la cinta del scanner 2 puede demorar normalmente en comenzar a

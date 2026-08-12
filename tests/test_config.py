@@ -131,10 +131,11 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert esterilla["continuous_position_threshold"] == 3.0
 
 
-def test_scanner2_all_materials_wait_30_seconds_before_stall_error() -> None:
-    for model in ("modelo_A", "modelo_B"):
-        cfg = load_tolerances(model=model, scanner_id="scanner_2")
-        assert cfg["inspection_stall_timeout_s"] == 30.0
+def test_all_scanners_and_materials_wait_60_seconds_before_stall_error() -> None:
+    for scanner_id in ("scanner_1", "scanner_2"):
+        for model in ("modelo_A", "modelo_B"):
+            cfg = load_tolerances(model=model, scanner_id=scanner_id)
+            assert cfg["inspection_stall_timeout_s"] == 60.0
 
 
 def test_both_microperforado_scanners_require_three_alignment_frames() -> None:

@@ -13,6 +13,10 @@ scanner_1:
   model: "modelo_B"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X0 no llega al PLC
+  inspection:
+    # La cinta puede demorar normalmente al iniciar despues de pulsar RUN.
+    # Aplica a Esterilla y Microperforado de scanner_1.
+    inspection_stall_timeout_s: 60.0
   inspection_models:
     modelo_B:
       # Calibracion 21-07-2026 con zoom digital 150%: el microperforado ocupa una
@@ -131,8 +135,8 @@ scanner_2:
       low_quality_stop_frames: 16
       inspection_stall_warn_s: 3.0
       # La cinta puede demorar normalmente al iniciar despues de pulsar RUN.
-      # Esperar 30s completos sin analisis antes de pasar a ERROR.
-      inspection_stall_timeout_s: 30.0
+      # Esperar 60s completos sin analisis antes de pasar a ERROR.
+      inspection_stall_timeout_s: 60.0
       roi_recenter_enabled: false
       roi_precal_enabled: false
     modelo_B:
@@ -149,8 +153,8 @@ scanner_2:
       stop_min_frames: 3
       low_quality_stop_frames: 16
       inspection_stall_warn_s: 3.0
-      # Mismo tiempo de arranque permitido para todo scanner_2.
-      inspection_stall_timeout_s: 30.0
+      # Mismo tiempo de arranque permitido para ambos scanners/materiales.
+      inspection_stall_timeout_s: 60.0
       threshold: 145
       use_channel: gray
       use_clahe: false
