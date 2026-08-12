@@ -103,7 +103,18 @@ OK.
 **Validacion:** `71 passed`; `py_compile` y `scripts/verify_config.py` correctos.
 Render Qt offscreen revisado a `800x650`: jerarquia, contraste, textos y boton
 legibles. La prueba del dialogo confirma que Escape y cerrar no lo descartan y
-que el boton de confirmacion si lo hace. Nueva entrega EXE pendiente.
+que el boton de confirmacion si lo hace.
+
+**Entrega V27 Cython para PC industrial (2026-08-12):**
+- ZIP: `dist/DEFYVISION_METALCONF_V27_CYTHON_2026-08-12.zip`.
+- Fuente empaquetada: commit `005c430efe09d9f611d6adc59724b1cdb5c9c5fa`.
+- Tamano: `143301471` bytes.
+- SHA-256: `8A775B6FC0E5214F4D0F5DCBD4F6174DCFBA2FE5E1BA3B62F7102C3BC38E291E`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); un unico
+  `license.cp314-win_amd64.pyd`, ningun `license.py`, `_lsap` incluido y
+  configuracion del paquete identica a la fuente.
+- Integridad ZIP correcta: `636` entradas, CRC sin errores y EXE/config/build-info
+  presentes. Queda pendiente la aceptacion fisica en planta.
 
 #### Cambio 290 - Esterilla scanner_2 no cuenta capturas con la chapa quieta
 
