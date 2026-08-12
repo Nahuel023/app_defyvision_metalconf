@@ -79,6 +79,42 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-12 - Tadeo + Codex
+
+#### Cambio 289 - ERROR con causa visible y persistente para el operario
+
+**Pedido:** la pantalla de produccion mostraba solamente `ERROR`, sin explicar
+por que se habia detenido el scanner. El operario debia buscar el archivo de log
+para distinguir una camara perdida, imagen borrosa, inspeccion detenida o un fallo
+interno.
+
+**Diagnostico del incidente:** los eventos reales `12-08-2026_STOP_11/12/13`
+confirmaron paradas por `LOW_QUALITY` en ambos scanners. Scanner 1 bajo de una
+nitidez historica mediana aproximada de 366 a 204 (el overlay en vivo registro
+190 con minimo 200). Scanner 2 paso de frames nitidos cercanos a 330 a desenfoque
+vertical de hasta 89, con hasta 14 falsos faltantes. PLC y camaras permanecieron
+conectados; no fue un crash ni una perdida de comunicacion.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`: nuevo `state_reason` thread-safe,
+  incluido en `get_status()`. Cada ruta anormal guarda una explicacion breve:
+  inicio/perdida de camara, autodiagnostico fallido, inspeccion detenida, imagen
+  borrosa con valor y minimo, imagen inestable, excepcion interna, racha NOK y
+  parada por faltantes/desalineacion. El motivo se conserva al pasar a `STOPPED`
+  y se limpia unicamente con `RESET` o al iniciar una sesion nueva.
+- `src/ui/operator.py`: debajo del badge `ERROR`/`FAULT` aparece una franja visible
+  con la causa concreta. Tambien permanece en una parada proveniente de falla.
+- `src/ui/service.py`: Estado del sistema y Simulacion FSM muestran el mismo motivo.
+- `tests/test_frozen_camera_watchdog.py` y `tests/test_scanner_controller.py`:
+  regresiones para motivo de imagen borrosa, inspeccion detenida, fallo al iniciar
+  camara, persistencia al detener y limpieza al resetear.
+
+**Validacion:** `69 passed`; `py_compile` correcto; construccion y refresco de la
+UI de Operador en modo Qt offscreen correctos (`OPERATOR_UI_SMOKE_OK`). No se
+cambiaron umbrales opticos ni se desactivo la parada segura por baja calidad.
+
+---
+
 ### Sesion 2026-07-31 - Tadeo + Codex
 
 #### Cambio 288 - Eliminacion permanente del bloqueo por fecha/licencia

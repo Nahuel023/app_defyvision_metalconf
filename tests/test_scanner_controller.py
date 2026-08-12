@@ -1,5 +1,5 @@
 from src.controller.scanner_controller import ScannerController
-from src.utils.state import ScannerState
+from src.utils.state import OperationMode, ScannerState
 
 
 class _FakeIO:
@@ -46,6 +46,12 @@ class _FakeCamera:
         self.start_calls += 1
         self.is_running = True
         return True
+
+
+class _FailingCamera(_FakeCamera):
+    def start(self) -> bool:
+        self.start_calls += 1
+        return False
 
 
 class _StuckThread:
@@ -120,4 +126,18 @@ def test_start_is_blocked_while_previous_worker_is_still_alive(monkeypatch) -> N
         assert controller._poller_thread is stuck
     finally:
         controller._poller_thread = None
+        controller.shutdown()
+
+
+def test_camera_start_error_exposes_operator_reason() -> None:
+    controller = ScannerController("scanner_1", _FakeIO(), _FailingCamera())
+    controller._mode = OperationMode.AUTO
+    try:
+        assert controller.start() is False
+        status = controller.get_status()
+        assert status["state"] == ScannerState.ERROR
+        assert status["state_reason"] == (
+            "Cámara sin señal: no se pudo iniciar la captura"
+        )
+    finally:
         controller.shutdown()

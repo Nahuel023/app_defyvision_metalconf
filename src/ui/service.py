@@ -707,6 +707,7 @@ class SystemTab(QWidget):
         # Per-scanner groups
         _FIELDS = [
             ("state",             "Estado"),
+            ("state_reason",      "Motivo del estado"),
             ("mode",              "Modo"),
             ("nok_streak",        "Racha NOK actual"),
             ("max_nok_streak",    "Racha NOK máx."),
@@ -730,6 +731,9 @@ class SystemTab(QWidget):
             for i, (key, label) in enumerate(_FIELDS):
                 row, col = divmod(i, 3)
                 w, lbl = self._kv(label, "-")
+                if key == "state_reason":
+                    lbl.setWordWrap(True)
+                    w.setMinimumWidth(220)
                 grid.addWidget(w, row, col)
                 widgets[key] = lbl
             vbox.addLayout(grid)
@@ -847,6 +851,7 @@ class SystemTab(QWidget):
             last = self._last_scanner_states.get(sid, {})
             changed = (
                 state                        != last.get("state") or
+                s.get("state_reason", "")   != last.get("state_reason") or
                 mode                         != last.get("mode") or
                 s["nok_streak"]              != last.get("nok_streak") or
                 s.get("max_nok_streak", 0)   != last.get("max_nok_streak") or
@@ -860,6 +865,7 @@ class SystemTab(QWidget):
 
             self._last_scanner_states[sid] = {
                 "state": state, "mode": mode,
+                "state_reason": s.get("state_reason", ""),
                 "nok_streak": s["nok_streak"],
                 "max_nok_streak": s.get("max_nok_streak", 0),
                 "total_inspections": s.get("total_inspections", 0),
@@ -871,6 +877,11 @@ class SystemTab(QWidget):
             wdg["state"].setText(state.value.upper())
             wdg["state"].setStyleSheet(
                 f"font-size:12px;font-weight:700;color:{_state_colors[state]};"
+            )
+            wdg["state_reason"].setText(str(s.get("state_reason", "") or "-"))
+            wdg["state_reason"].setStyleSheet(
+                f"font-size:11px;font-weight:700;color:"
+                f"{_WARN if s.get('state_reason') else _MUTED};"
             )
             wdg["mode"].setText(mode.value.upper())
             wdg["nok_streak"].setText(str(s["nok_streak"]))
@@ -6762,6 +6773,7 @@ class ScannerSimTab(QWidget):
         self._system = system
         self._state_lbls: dict[str, QLabel] = {}
         self._streak_lbls: dict[str, QLabel] = {}
+        self._reason_lbls: dict[str, QLabel] = {}
         self._build_ui()
 
     def _build_ui(self) -> None:
@@ -6831,6 +6843,17 @@ class ScannerSimTab(QWidget):
             info_row.addStretch()
             grp_lay.addLayout(info_row)
 
+            reason_lbl = QLabel("")
+            reason_lbl.setWordWrap(True)
+            reason_lbl.setStyleSheet(
+                f"color:{_WARN};font-size:11px;font-weight:700;"
+                f"background:#2b1608;border:1px solid #92400e;"
+                "border-radius:5px;padding:6px 10px;"
+            )
+            reason_lbl.hide()
+            self._reason_lbls[sid] = reason_lbl
+            grp_lay.addWidget(reason_lbl)
+
             # ── Botones de acción ─────────────────────────────────────
             btn_row = QHBoxLayout()
             btn_row.setSpacing(8)
@@ -6896,6 +6919,11 @@ class ScannerSimTab(QWidget):
             streak_lbl = self._streak_lbls.get(sid)
             if streak_lbl:
                 streak_lbl.setText(f"Racha NOK: {s['nok_streak']}")
+            reason_lbl = self._reason_lbls.get(sid)
+            reason = str(s.get("state_reason", "") or "").strip()
+            if reason_lbl:
+                reason_lbl.setText(reason)
+                reason_lbl.setVisible(bool(reason))
 
     def _grp_style(self) -> str:
         return (

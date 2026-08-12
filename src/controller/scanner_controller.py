@@ -69,6 +69,7 @@ class ScannerController:
         self._low_quality_stop_frames = max(
             0, int(tols.get("low_quality_stop_frames", 25))
         )
+        self._blur_score_min = float(tols.get("blur_score_min", 0.0))
         # Si el contador de NOK de la sesion queda "pegado" en un numero chico
         # (p.ej. 1 o 2 piezas NOK aisladas al principio) y la linea sigue
         # produciendo buenas, tras esta cantidad de frames OK seguidos se
@@ -88,6 +89,9 @@ class ScannerController:
 
         self._state      = ScannerState.IDLE
         self._mode       = OperationMode.AUTO if self._force_auto else OperationMode.MANUAL
+        # Motivo breve y accionable del estado anormal actual. Se conserva al
+        # pasar de ERROR/FAULT a STOPPED y solo se limpia con RESET o un nuevo RUN.
+        self._state_reason = ""
         self._mode_switch_raw: Optional[bool] = None  # ultima lectura cruda de la maneta (None=sin leer aun)
         self._nok_streak = 0
         self._lq_streak  = 0
@@ -233,11 +237,15 @@ class ScannerController:
             # estado ya cambiado y aborta arriba, en vez de pasar el guard
             # tambien y lanzar un segundo hilo inspector sobre esta instancia.
             self._state = ScannerState.RUNNING
+            self._state_reason = ""
 
         if mode == OperationMode.AUTO:
             if not self._camera.is_running:
                 if not self._camera.start():
-                    self._transition(ScannerState.ERROR)
+                    self._transition(
+                        ScannerState.ERROR,
+                        "Cámara sin señal: no se pudo iniciar la captura",
+                    )
                     return False
 
         with self._lock:
@@ -312,6 +320,8 @@ class ScannerController:
                 # parada por falla real. Si venia de RUNNING sin FAULT/ERROR, fue
                 # un DETENER voluntario del operador sin ningun problema detectado.
                 self._stopped_by_fault = (state in (ScannerState.FAULT, ScannerState.ERROR))
+                if not self._stopped_by_fault:
+                    self._state_reason = ""
 
             self._state = new_state
 
@@ -376,6 +386,7 @@ class ScannerController:
             self._camera_missing_events     = 0
             self._last_inspection_mono      = None
             self._stall_warned              = False
+            self._state_reason              = ""
 
         self._transition(ScannerState.IDLE)
         self._set_lights(blue=True)
@@ -403,6 +414,7 @@ class ScannerController:
             if self._state != ScannerState.IDLE:
                 return False
             self._mode                    = OperationMode.AUTO
+            self._state_reason            = ""
             self._nok_streak              = 0
             self._lq_streak               = 0
             self._frames_since_last_nok   = 0
@@ -451,6 +463,7 @@ class ScannerController:
             if self._state != ScannerState.RUNNING:
                 return False
             self._state = ScannerState.FAULT
+            self._state_reason = "Falla forzada desde Modo Servicio"
             self._fault_count += 1
 
         logger.warning(f"[{self._id}] FAULT forzado (simulación)")
@@ -637,6 +650,7 @@ class ScannerController:
         self._low_quality_stop_frames = max(
             0, int(tols.get("low_quality_stop_frames", 25))
         )
+        self._blur_score_min = float(tols.get("blur_score_min", 0.0))
         self._machine_stop_enabled = bool(tols.get("machine_stop_enabled", True))
         self._cont_pos_thr = float(
             tols.get("continuous_position_threshold", 8.0)
@@ -708,6 +722,7 @@ class ScannerController:
                 )
             return {
                 "state":                self._state,
+                "state_reason":         self._state_reason,
                 "mode":                 self._mode,
                 "mode_switch_raw":      self._mode_switch_raw,
                 "nok_streak":           self._nok_streak,
@@ -795,16 +810,21 @@ class ScannerController:
             time.sleep(0.1)
         if frame is None:
             logger.error(f"[{self._id}] selftest: no se obtuvo frame en {timeout_s}s")
+            self._set_state_reason("Autodiagnóstico fallido: cámara sin imagen")
             return False
         result = self._inspector.inspect(model, frame, frame_id="selftest",
                                          scanner_id=self._id)
         if result is None:
             logger.error(f"[{self._id}] selftest: inspector no retornó resultado")
+            self._set_state_reason("Autodiagnóstico fallido: el análisis no respondió")
             return False
         ratio = getattr(result, "detection_ratio", 1.0)
         if ratio < min_ratio:
             logger.error(
                 f"[{self._id}] selftest FALLO: detection_ratio={ratio:.0%} < {min_ratio:.0%}"
+            )
+            self._set_state_reason(
+                f"Autodiagnóstico: detección baja ({ratio:.0%}, mínimo {min_ratio:.0%})"
             )
             return False
         logger.info(f"[{self._id}] selftest OK: detection_ratio={ratio:.0%}")
@@ -942,6 +962,9 @@ class ScannerController:
                 pass
             with self._lock:
                 self._state = ScannerState.ERROR
+                self._state_reason = (
+                    f"Fallo interno del análisis ({type(exc).__name__})"
+                )
             try:
                 self._fire_state_changed()
             except Exception:
@@ -1049,7 +1072,10 @@ class ScannerController:
                     )
                     self._cut_solenoid_critical("perdida de camara")
                     self._set_lights(red=True)
-                    self._transition(ScannerState.ERROR)
+                    self._transition(
+                        ScannerState.ERROR,
+                        f"Cámara sin señal durante {missing_sec:.1f} s",
+                    )
                     return
                 self._stop_event.wait(timeout=0.033)
                 continue
@@ -1149,7 +1175,10 @@ class ScannerController:
         )
         self._cut_solenoid_critical("inspeccion detenida")
         self._set_lights(red=True)
-        self._transition(ScannerState.ERROR)
+        self._transition(
+            ScannerState.ERROR,
+            f"Sin análisis durante {stalled_s:.1f} s; revise movimiento o imagen congelada",
+        )
         return True
 
     def _handle_result(
@@ -1222,6 +1251,21 @@ class ScannerController:
                     # LOW_QUALITY no es OK ni NOK. Si se sostiene, el sistema
                     # esta produciendo sin poder inspeccionar y debe cortar.
                     self._state = ScannerState.ERROR
+                    _blur_score = float(getattr(result, "blur_score", 0.0))
+                    if (
+                        self._blur_score_min > 0.0
+                        and _blur_score > 0.0
+                        and _blur_score < self._blur_score_min
+                    ):
+                        self._state_reason = (
+                            f"Imagen borrosa: nitidez {_blur_score:.0f} "
+                            f"(mínimo {self._blur_score_min:.0f})"
+                        )
+                    else:
+                        self._state_reason = (
+                            f"Imagen inestable durante {self._lq_streak} frames; "
+                            "revise foco, vibración e iluminación"
+                        )
                     quality_stop_triggered = True
                 # Los contadores de ok/nok no se actualizan para frames de baja calidad
             else:
@@ -1297,6 +1341,7 @@ class ScannerController:
                         self._inspector.reset_machine_stop(model, self._id)
                 else:
                     self._state     = ScannerState.FAULT
+                    self._state_reason = f"{streak} imágenes NOK consecutivas"
                     fault_triggered = True
                     self._fault_count += 1
                     streak_start_mono = self._streak_start_mono
@@ -1337,6 +1382,7 @@ class ScannerController:
                 if self._state == ScannerState.RUNNING:
                     self._state   = ScannerState.STOPPED
                     self._stopped_by_fault = True
+                    self._state_reason = _ms_reason
                     _was_running  = True
             if _was_running:
                 self._cut_solenoid_critical("machine fault")
@@ -1617,9 +1663,22 @@ class ScannerController:
         missing = getattr(result.report, "missing", 0)
         return f"{missing} faltantes persistentes"
 
-    def _transition(self, new_state: ScannerState) -> None:
+    def _set_state_reason(self, reason: str) -> None:
+        """Actualiza el motivo visible sin cambiar el estado FSM."""
+        with self._lock:
+            self._state_reason = str(reason).strip()
+
+    def _transition(
+        self,
+        new_state: ScannerState,
+        reason: str | None = None,
+    ) -> None:
         with self._lock:
             self._state = new_state
+            if reason is not None:
+                self._state_reason = str(reason).strip()
+            elif new_state in (ScannerState.IDLE, ScannerState.RUNNING):
+                self._state_reason = ""
         self._fire_state_changed()
 
     def _fire_state_changed(self) -> None:

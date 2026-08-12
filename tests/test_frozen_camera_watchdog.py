@@ -118,6 +118,8 @@ def test_inspection_stall_escalates_to_error() -> None:
 
         assert controller._check_inspection_stall(0.0) is True
         assert controller.state == ScannerState.ERROR
+        assert "Sin análisis" in controller.get_status()["state_reason"]
+        assert "movimiento" in controller.get_status()["state_reason"]
         assert ("scanner_1.solenoid", False) in controller._io.writes
     finally:
         controller.shutdown()
@@ -147,12 +149,14 @@ def test_sustained_low_quality_stops_instead_of_running_blind() -> None:
         detection_ratio=1.0,
         alignment_ok=True,
         machine_stop=False,
+        blur_score=190.0,
         overlay=None,
         image=None,
         report=SimpleNamespace(missing=0),
     )
     try:
         controller._transition(ScannerState.RUNNING)
+        controller._blur_score_min = 200.0
         controller._handle_result(result)
         controller._handle_result(result)
         assert controller.state == ScannerState.RUNNING
@@ -161,7 +165,17 @@ def test_sustained_low_quality_stops_instead_of_running_blind() -> None:
 
         controller._handle_result(result)
         assert controller.state == ScannerState.ERROR
+        assert controller.get_status()["state_reason"] == (
+            "Imagen borrosa: nitidez 190 (mínimo 200)"
+        )
         assert controller._stop_event.is_set()
         assert ("scanner_1.solenoid", False) in controller._io.writes
+
+        # DETENER conserva el diagnóstico; RESET es quien lo limpia.
+        controller.stop()
+        assert controller.state == ScannerState.STOPPED
+        assert "Imagen borrosa" in controller.get_status()["state_reason"]
+        assert controller.reset() is True
+        assert controller.get_status()["state_reason"] == ""
     finally:
         controller.shutdown()

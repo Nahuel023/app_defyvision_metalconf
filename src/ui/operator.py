@@ -380,6 +380,18 @@ class ScannerPanel(QWidget):
         )
         root.addWidget(self.state_badge)
 
+        # Causa breve del estado anormal. Permanece visible al pasar a STOPPED
+        # hasta que el operario hace RESET, para que el diagnóstico no se pierda.
+        self._state_reason_lbl = QLabel("")
+        self._state_reason_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._state_reason_lbl.setWordWrap(True)
+        self._state_reason_lbl.setStyleSheet(
+            "background:#2b1608;color:#fcd34d;border:1px solid #92400e;"
+            "border-radius:5px;padding:6px 10px;font-size:12px;font-weight:700;"
+        )
+        self._state_reason_lbl.hide()
+        root.addWidget(self._state_reason_lbl)
+
         # ── Tres métricas operativas: OK / TIEMPO / NOK ───────────────
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(5)
@@ -571,6 +583,7 @@ class ScannerPanel(QWidget):
         camera_missing = bool(s.get("camera_missing", False))
         camera_missing_sec = float(s.get("camera_missing_sec", 0.0))
         stopped_by_fault = bool(s.get("stopped_by_fault", False))
+        state_reason = str(s.get("state_reason", "") or "").strip()
         # Watchdog de inspeccion detenida: el scanner corre pero no analiza nada
         # (imagen congelada / sin movimiento). Sin este aviso quedaba "EN MARCHA"
         # con 0 OK y 0 NOK indefinidamente.
@@ -629,7 +642,7 @@ class ScannerPanel(QWidget):
         # Glow de la camara segun estado: verde en marcha, rojo 30s al detenerse.
         if state == ScannerState.RUNNING:
             _glow_mode = "run"
-        elif state in (ScannerState.STOPPED, ScannerState.FAULT):
+        elif state in (ScannerState.STOPPED, ScannerState.FAULT, ScannerState.ERROR):
             _glow_mode = "stop"
         else:
             _glow_mode = "idle"
@@ -646,6 +659,20 @@ class ScannerPanel(QWidget):
                 "padding:10px 14px;font-size:16px;font-weight:700;letter-spacing:1px;"
             ),
         )
+
+        show_reason = bool(state_reason) and (
+            state in (ScannerState.ERROR, ScannerState.FAULT)
+            or (state == ScannerState.STOPPED and stopped_by_fault)
+        )
+        if show_reason:
+            self._state_reason_lbl.setText(state_reason)
+            self._state_reason_lbl.setToolTip(
+                "Revise esta causa antes de resetear. El detalle técnico está en logs."
+            )
+            self._state_reason_lbl.show()
+        else:
+            self._state_reason_lbl.clear()
+            self._state_reason_lbl.hide()
 
         mc = _MODE_COLOR[mode]
         self._mode_val[1].setText(mode.value.upper())
