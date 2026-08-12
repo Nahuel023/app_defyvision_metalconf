@@ -130,7 +130,9 @@ scanner_2:
       # produciendo sin imagen confiable es un fallo de inspeccion, no un OK.
       low_quality_stop_frames: 16
       inspection_stall_warn_s: 3.0
-      inspection_stall_timeout_s: 10.0
+      # La cinta puede demorar normalmente al iniciar despues de pulsar RUN.
+      # Esperar 30s completos sin analisis antes de pasar a ERROR.
+      inspection_stall_timeout_s: 30.0
       roi_recenter_enabled: false
       roi_precal_enabled: false
     modelo_B:
@@ -147,7 +149,8 @@ scanner_2:
       stop_min_frames: 3
       low_quality_stop_frames: 16
       inspection_stall_warn_s: 3.0
-      inspection_stall_timeout_s: 15.0
+      # Mismo tiempo de arranque permitido para todo scanner_2.
+      inspection_stall_timeout_s: 30.0
       threshold: 145
       use_channel: gray
       use_clahe: false

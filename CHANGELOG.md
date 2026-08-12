@@ -81,6 +81,25 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-12 - Tadeo + Codex
 
+#### Cambio 293 - Scanner 2 espera 30 segundos antes de ERROR sin analisis
+
+**Pedido:** la cinta del scanner 2 puede demorar normalmente en comenzar a
+moverse despues de RUN; evitar que Esterilla o Microperforado entren en ERROR
+antes de 30 segundos.
+
+**Cambios:**
+- `config/io_map.yaml`: `inspection_stall_timeout_s: 30.0` tanto para
+  `scanner_2/modelo_A` (Esterilla, antes 10s) como para `scanner_2/modelo_B`
+  (Microperforado, antes 15s).
+- El aviso preventivo sigue disponible desde los 3 segundos, pero el scanner no
+  corta ni pasa a ERROR por falta de analisis hasta cumplir 30 segundos.
+- `tests/test_config.py`: regresion que exige el mismo timeout de 30 segundos en
+  ambos materiales de scanner 2.
+
+**Validacion:** `75 passed`; `scripts/verify_config.py` correcto y carga efectiva
+confirmada en `30.0` para `scanner_2/modelo_A` y `scanner_2/modelo_B`. Build
+Cython pendiente.
+
 #### Cambio 292 - Nitidez editable por scanner y material desde Tolerancias
 
 **Pedido:** evitar la edicion manual de YAML y permitir ajustar la nitidez de
