@@ -42,7 +42,7 @@ from PyQt6.QtWidgets import (
 
 from src.controller.system import InspectionSystem
 from src.utils.config import load_tolerances, save_scanner_overrides
-from src.utils.model_names import to_display
+from src.utils.model_names import KNOWN_MODELS, to_display
 
 from src.utils.paths import app_root
 _ROOT = app_root()
@@ -66,6 +66,18 @@ _NOK    = "#f87171"
 # ----------------------------------------------------------------------
 # Solo incluir params cuyo rango restringido NO puede romper la detección.
 _PARAMS: list[dict[str, Any]] = [
+    dict(
+        key="blur_score_min",
+        label="Nitidez mínima",
+        desc=(
+            "Calidad mínima de imagen antes de detener por cámara borrosa. "
+            "MÁS BAJO = acepta más desenfoque. Recomendado: Esterilla 175–230; "
+            "Microperforado 200–300. No bajar de 175 sin validación."
+        ),
+        unit="puntos",
+        vtype="float",
+        vmin=100.0, vmax=1200.0, vstep=5.0, decimals=0,
+    ),
     dict(
         key="frame_missing_nok_threshold",
         label="Agujeros faltantes para NOK",
@@ -714,12 +726,17 @@ class _ScannerTolerancePanel(QWidget):
         self._id = scanner_id
         self._system = system
         self._spinboxes: dict[str, QSpinBox | QDoubleSpinBox] = {}
+        self._model_combo: QComboBox | None = None
         self._build_ui()
         self._load_values()
 
     # ------------------------------------------------------------------
 
     def _model(self) -> str:
+        if self._model_combo is not None:
+            selected = self._model_combo.currentData()
+            if selected:
+                return str(selected)
         return self._system.io.scanner_config(self._id).get("model", "")
 
     def _build_ui(self) -> None:
@@ -737,6 +754,47 @@ class _ScannerTolerancePanel(QWidget):
             f"letter-spacing:1px;background:transparent;"
         )
         root.addWidget(self._model_lbl)
+
+        # Selector de PERFIL A EDITAR. No cambia el material activo del scanner:
+        # permite ajustar Esterilla/Microperforado sin tocar el bloque equivocado.
+        model_row = QHBoxLayout()
+        model_row.setSpacing(10)
+        model_title = QLabel("Tipo de chapa a configurar:")
+        model_title.setStyleSheet(
+            f"color:{_MUTED};font-size:11px;font-weight:600;background:transparent;"
+        )
+        model_row.addWidget(model_title)
+
+        self._model_combo = QComboBox()
+        cfg = self._system.io.scanner_config(self._id)
+        allowed = cfg.get("allowed_models") or KNOWN_MODELS
+        for model_id in allowed:
+            self._model_combo.addItem(to_display(model_id), userData=model_id)
+        active_model = cfg.get("model", "")
+        active_index = self._model_combo.findData(active_model)
+        if active_index >= 0:
+            self._model_combo.setCurrentIndex(active_index)
+        self._model_combo.setMinimumHeight(38)
+        self._model_combo.setStyleSheet(
+            f"QComboBox {{ background:#0f172a;color:{_TEXT};"
+            f"border:2px solid {_ACCENT};border-radius:7px;padding:5px 10px;"
+            "font-size:13px;font-weight:800; }"
+            f"QComboBox QAbstractItemView {{ background:{_CARD};color:{_TEXT};"
+            f"selection-background-color:{_ACCENT};selection-color:#0f172a; }}"
+        )
+        model_row.addWidget(self._model_combo, stretch=1)
+        root.addLayout(model_row)
+
+        model_help = QLabel(
+            "Este selector solo elige qué calibración editar; no cambia la chapa en producción."
+        )
+        model_help.setWordWrap(True)
+        model_help.setStyleSheet(
+            f"color:{_ACCENT};font-size:10px;background:transparent;"
+        )
+        root.addWidget(model_help)
+
+        self._model_combo.currentIndexChanged.connect(self._load_values)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -841,7 +899,7 @@ class _ScannerTolerancePanel(QWidget):
 
     # ------------------------------------------------------------------
 
-    def _load_values(self) -> None:
+    def _load_values(self, _index: int | None = None) -> None:
         model = self._model()
         _num = self._id.split("_")[-1]
         display = to_display(model) if model else "—"
@@ -870,6 +928,20 @@ class _ScannerTolerancePanel(QWidget):
             sb = self._spinboxes[p["key"]]
             updates[p["key"]] = sb.value()
 
+        blur_min = float(updates.get("blur_score_min", 0.0))
+        if blur_min < 175.0:
+            resp = QMessageBox.warning(
+                self,
+                "Nitidez muy baja",
+                f"Nitidez mínima = {blur_min:.0f}\n\n"
+                "Este valor puede aceptar imágenes muy borrosas y generar "
+                "falsos agujeros faltantes.\n"
+                "¿Guardar de todas formas?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if resp != QMessageBox.StandardButton.Yes:
+                return
+
         # Confirmación si consecutive_nok_frames está en valor de calibración
         nok_frames = updates.get("consecutive_nok_frames", 0)
         if isinstance(nok_frames, (int, float)) and int(nok_frames) >= 500:
@@ -886,13 +958,16 @@ class _ScannerTolerancePanel(QWidget):
 
         try:
             save_scanner_overrides(self._id, updates, model=model)
-            # Fuerza recarga de tolerancias en el scanner activo
-            scanner = self._system.scanner(self._id)
-            scanner.set_model(model)
+            # Recargar en caliente solo si se editó el perfil actualmente activo.
+            # Editar el otro material nunca debe cambiar la producción de chapa.
+            active_model = self._system.io.scanner_config(self._id).get("model", "")
+            if model == active_model:
+                self._system.scanner(self._id).reload_cache()
             QMessageBox.information(
                 self,
                 "Guardado",
-                f"Tolerancias de {to_display(model)} guardadas correctamente.",
+                f"Tolerancias de {to_display(model)} guardadas correctamente "
+                f"para Scanner {self._id.split('_')[-1]}.",
             )
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{exc}")

@@ -81,6 +81,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-12 - Tadeo + Codex
 
+#### Cambio 292 - Nitidez editable por scanner y material desde Tolerancias
+
+**Pedido:** evitar la edicion manual de YAML y permitir ajustar la nitidez de
+scanner 2 eligiendo explicitamente Esterilla o Microperforado desde la pantalla
+del operador.
+
+**Cambios:**
+- `src/ui/tolerance_window.py`: cada panel de scanner incorpora el selector
+  `Tipo de chapa a configurar` con Esterilla/Microperforado. Es un selector de
+  calibracion: no cambia el material activo ni interrumpe la produccion.
+- Nuevo control `Nitidez minima` (`blur_score_min`, rango 100-1200, paso 5) con
+  explicacion operativa. Los valores menores a 175 requieren confirmacion por
+  riesgo de aceptar desenfoque y generar falsos faltantes.
+- Guardar escribe en `scanner_N.inspection_models.modelo_A/modelo_B`, por lo que
+  nunca vuelve a caer un ajuste de Esterilla dentro de Microperforado. Si el
+  perfil editado esta activo se recarga en caliente; si esta inactivo solo se
+  guarda para su proximo uso, sin llamar a `set_model()`.
+- `tests/test_tolerance_model_selector.py`: verifica exposicion/rango del control,
+  guardado sobre el material seleccionado, no cambio del modelo activo y recarga
+  correcta cuando se edita el material en uso.
+
+**Validacion:** `74 passed`; `py_compile` y `scripts/verify_config.py` correctos.
+Render Qt offscreen de la ventana completa revisado a `1200x900`: selector de
+material destacado y nitidez como primer ajuste visible en ambos scanners.
+Build Cython pendiente.
+
 #### Cambio 291 - Aviso obligatorio y estetico para limpiar lente por baja nitidez
 
 **Pedido:** cuando un scanner no puede continuar por falta de nitidez, mostrar al
