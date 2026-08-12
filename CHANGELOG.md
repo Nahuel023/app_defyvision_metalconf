@@ -105,7 +105,17 @@ del operador.
 **Validacion:** `74 passed`; `py_compile` y `scripts/verify_config.py` correctos.
 Render Qt offscreen de la ventana completa revisado a `1200x900`: selector de
 material destacado y nitidez como primer ajuste visible en ambos scanners.
-Build Cython pendiente.
+
+**Entrega V28 Cython para PC industrial (2026-08-12):**
+- ZIP: `dist/DEFYVISION_METALCONF_V28_CYTHON_2026-08-12.zip`.
+- Fuente empaquetada: commit `d54a6d230b86e704b4528da7a01c95e4de94c474`.
+- Tamano: `143303748` bytes.
+- SHA-256: `F941F530225BE79D75419F9EA290F185AF02CE1F52D3309F6820EA264CCE1536`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); un unico
+  `license.cp314-win_amd64.pyd`, ningun `license.py`, `_lsap` incluido y
+  configuracion empaquetada identica a la fuente.
+- Integridad ZIP correcta: `636` entradas, CRC sin errores y EXE/config/build-info
+  presentes. Queda pendiente la aceptacion fisica en planta.
 
 #### Cambio 291 - Aviso obligatorio y estetico para limpiar lente por baja nitidez
 
