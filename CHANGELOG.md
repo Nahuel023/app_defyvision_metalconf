@@ -81,6 +81,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-12 - Tadeo + Codex
 
+#### Cambio 291 - Aviso obligatorio y estetico para limpiar lente por baja nitidez
+
+**Pedido:** cuando un scanner no puede continuar por falta de nitidez, mostrar al
+operario una indicacion directa de limpiar el lente y conservarla hasta que pulse
+OK.
+
+**Cambios:**
+- `src/ui/operator.py`: nuevo `BlurCleaningDialog`, modal y siempre visible por
+  encima de la pantalla de produccion. Identifica scanner/modelo, explica que la
+  inspeccion se detuvo y destaca `LIMPIAR EL LENTE DE LA CAMARA`. Escape y cierre
+  de ventana quedan bloqueados; solo `OK · LENTE LIMPIO` reconoce el aviso.
+- El cartel se activa exclusivamente cuando `state_reason` comienza con
+  `Imagen borrosa`, no para errores de camara, PLC, inspeccion detenida o fallos
+  internos. Se muestra una sola vez por incidente y se rearma despues de RESET.
+- Si ambos scanners reportan nitidez al mismo tiempo, los avisos se encolan para
+  que el operario reconozca cada camara por separado.
+- `tests/test_operator_blur_alert.py`: regresiones de clasificacion de causa y de
+  permanencia del dialogo hasta la confirmacion explicita.
+
+**Validacion:** `71 passed`; `py_compile` y `scripts/verify_config.py` correctos.
+Render Qt offscreen revisado a `800x650`: jerarquia, contraste, textos y boton
+legibles. La prueba del dialogo confirma que Escape y cerrar no lo descartan y
+que el boton de confirmacion si lo hace. Nueva entrega EXE pendiente.
+
 #### Cambio 290 - Esterilla scanner_2 no cuenta capturas con la chapa quieta
 
 **Pedido:** en scanner 2 con Esterilla, el contador de inspecciones seguia

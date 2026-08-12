@@ -264,6 +264,7 @@ class ScannerPanel(QWidget):
 
     _sig_overlay    = pyqtSignal(object, int)
     _sig_stop_alert = pyqtSignal(object, str, str)  # (overlay, label, reason)
+    _sig_blur_alert = pyqtSignal(str, str)          # (scanner label, detalle tecnico)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
                  parent: QWidget | None = None) -> None:
@@ -279,6 +280,9 @@ class ScannerPanel(QWidget):
         self._last_shown_pixmap = None   # retiene último frame para no quedar en negro
         self._run_start_time: float | None = None
         self._last_mode_switch_raw: Optional[bool] = None  # para detectar cambios de maneta
+        # Evita reabrir el cartel cada 200 ms mientras persiste el mismo ERROR.
+        # Se rearma cuando RESET limpia la causa o aparece otro estado.
+        self._blur_alert_active = False
 
         # Auto-limpieza del boton RESET: tras una parada MANUAL/normal (no falla)
         # el scanner vuelve solo a IDLE a los 30s y el boton grande naranja
@@ -674,6 +678,19 @@ class ScannerPanel(QWidget):
             self._state_reason_lbl.clear()
             self._state_reason_lbl.hide()
 
+        blur_alert = show_reason and _is_blur_quality_reason(state_reason)
+        if blur_alert and not self._blur_alert_active:
+            self._blur_alert_active = True
+            from src.utils.model_names import to_display as _to_display
+            scanner_num = self._id.split("_")[-1]
+            model_name = self._system.io.scanner_config(self._id).get("model", "")
+            model_display = _to_display(model_name) if model_name else "—"
+            self._sig_blur_alert.emit(
+                f"SCANNER {scanner_num}  ·  {model_display}", state_reason
+            )
+        elif not blur_alert:
+            self._blur_alert_active = False
+
         mc = _MODE_COLOR[mode]
         self._mode_val[1].setText(mode.value.upper())
         self._mode_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{mc};")
@@ -1022,6 +1039,150 @@ def _stop_reason(result: InspectionResult) -> str:
     return f"{missing} agujero{'s' if missing != 1 else ''} faltante{'s' if missing != 1 else ''} persistente{'s' if missing != 1 else ''}"
 
 
+def _is_blur_quality_reason(reason: str) -> bool:
+    """True solo para el ERROR de nitidez que requiere limpiar la lente."""
+    return str(reason or "").strip().casefold().startswith("imagen borrosa")
+
+
+# ----------------------------------------------------------------------
+# Diálogo de nitidez — reconocimiento obligatorio del operario
+# ----------------------------------------------------------------------
+
+class BlurCleaningDialog(QDialog):
+    """Aviso modal que solo se cierra al confirmar que se limpio la lente."""
+
+    def __init__(
+        self,
+        scanner_label: str,
+        technical_detail: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._acknowledged = False
+        self.setObjectName("blurCleaningDialog")
+        self.setWindowTitle("CAMARA SIN NITIDEZ")
+        self.setModal(True)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        self.setMinimumSize(720, 600)
+        self.resize(800, 650)
+        self.setStyleSheet("background:#090f18;")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 28, 28, 28)
+        root.setSpacing(18)
+
+        card = QFrame()
+        card.setObjectName("blurCard")
+        card.setStyleSheet(
+            "QFrame#blurCard { background:#111827;border:2px solid #f59e0b;"
+            "border-radius:20px; }"
+        )
+        card_lay = QVBoxLayout(card)
+        card_lay.setContentsMargins(34, 28, 34, 28)
+        card_lay.setSpacing(16)
+
+        icon = QLabel("!")
+        icon.setFixedSize(86, 86)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(
+            "background:#f59e0b;color:#111827;border-radius:43px;"
+            "font-size:58px;font-weight:900;"
+        )
+        card_lay.addWidget(icon, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        title = QLabel("IMAGEN SIN NITIDEZ")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            "color:#fbbf24;background:transparent;font-size:30px;"
+            "font-weight:900;letter-spacing:2px;"
+        )
+        card_lay.addWidget(title)
+
+        scanner = QLabel(scanner_label)
+        scanner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scanner.setStyleSheet(
+            "color:#ffffff;background:#1f2937;border:1px solid #4b5563;"
+            "border-radius:10px;padding:10px 18px;font-size:21px;"
+            "font-weight:800;letter-spacing:1px;"
+        )
+        card_lay.addWidget(scanner)
+
+        action = QLabel("LIMPIAR EL LENTE DE LA CAMARA")
+        action.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action.setWordWrap(True)
+        action.setStyleSheet(
+            "color:#ffffff;background:#7c2d12;border:2px solid #fb923c;"
+            "border-radius:12px;padding:15px;font-size:25px;font-weight:900;"
+        )
+        card_lay.addWidget(action)
+
+        explanation = QLabel(
+            "La inspeccion fue detenida porque la camara no puede ver la chapa "
+            "con suficiente claridad. Limpie cuidadosamente el lente y luego "
+            "confirme para continuar."
+        )
+        explanation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        explanation.setWordWrap(True)
+        explanation.setStyleSheet(
+            "color:#e5e7eb;background:transparent;font-size:17px;"
+        )
+        card_lay.addWidget(explanation)
+
+        detail = QLabel(technical_detail)
+        detail.setObjectName("blurTechnicalDetail")
+        detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail.setWordWrap(True)
+        detail.setStyleSheet(
+            "color:#9ca3af;background:#0b1220;border-radius:8px;"
+            "padding:8px;font-size:13px;"
+        )
+        card_lay.addWidget(detail)
+
+        self._confirm_btn = QPushButton("OK  ·  LENTE LIMPIO")
+        self._confirm_btn.setObjectName("blurConfirmButton")
+        self._confirm_btn.setMinimumHeight(66)
+        self._confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._confirm_btn.setDefault(True)
+        self._confirm_btn.setStyleSheet(
+            "QPushButton { background:#f59e0b;color:#111827;border:none;"
+            "border-radius:12px;padding:12px 28px;font-size:22px;"
+            "font-weight:900;letter-spacing:1px; }"
+            "QPushButton:hover { background:#fbbf24; }"
+            "QPushButton:pressed { background:#d97706; }"
+        )
+        self._confirm_btn.clicked.connect(self._acknowledge)
+        card_lay.addWidget(self._confirm_btn)
+
+        root.addWidget(card)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._confirm_btn.setFocus()
+        if not getattr(self, "_did_fade", False):
+            self._did_fade = True
+            from src.ui.anim import fade_in
+            fade_in(self, ms=130)
+
+    def _acknowledge(self) -> None:
+        self._acknowledged = True
+        super().accept()
+
+    def reject(self) -> None:
+        """Escape no puede descartar una instruccion de limpieza pendiente."""
+        return
+
+    def closeEvent(self, event) -> None:
+        if self._acknowledged:
+            event.accept()
+        else:
+            event.ignore()
+
+
 # ----------------------------------------------------------------------
 # Diálogo de alerta de parada — ocupa toda la ventana
 # ----------------------------------------------------------------------
@@ -1186,6 +1347,8 @@ class OperatorWindow(QMainWindow):
         self._metrics_win    = None
         self._tolerance_win  = None
         self._stop_alert_dlg: Optional[MachineStopDialog] = None
+        self._blur_alert_dlg: Optional[BlurCleaningDialog] = None
+        self._pending_blur_alerts: list[tuple[str, str]] = []
         self._errors_win = None
         self.setWindowTitle("DEFYVISION")
         _ico = _ROOT / "assets" / "defyvision_logo.ico"
@@ -1233,6 +1396,7 @@ class OperatorWindow(QMainWindow):
         for sid in self._system.scanner_ids():
             panel = ScannerPanel(sid, self._system)
             panel._sig_stop_alert.connect(self._show_stop_alert)
+            panel._sig_blur_alert.connect(self._show_blur_alert)
             frame = QFrame()
             frame.setStyleSheet(
                 f"QFrame {{ background:{_PANEL};border-radius:8px;"
@@ -1428,6 +1592,29 @@ class OperatorWindow(QMainWindow):
         self._stop_alert_dlg = MachineStopDialog(overlay, label, reason, parent=self)
         self._stop_alert_dlg.exec()
         self._stop_alert_dlg = None
+
+    def _show_blur_alert(self, scanner_label: str, detail: str) -> None:
+        """Muestra y serializa avisos de limpieza si fallan ambos scanners."""
+        alert = (scanner_label, detail)
+        if self._blur_alert_dlg is not None and self._blur_alert_dlg.isVisible():
+            if alert not in self._pending_blur_alerts:
+                self._pending_blur_alerts.append(alert)
+            return
+
+        self._blur_alert_dlg = BlurCleaningDialog(
+            scanner_label, detail, parent=self
+        )
+        self._blur_alert_dlg.exec()
+        self._blur_alert_dlg = None
+
+        if self._pending_blur_alerts:
+            next_label, next_detail = self._pending_blur_alerts.pop(0)
+            QTimer.singleShot(
+                0,
+                lambda label=next_label, reason=next_detail: self._show_blur_alert(
+                    label, reason
+                ),
+            )
 
     def _open_metrics(self) -> None:
         from src.ui.metrics_window import MetricsWindow
