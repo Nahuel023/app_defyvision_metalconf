@@ -95,8 +95,17 @@ ambos scanners y ambos materiales.
   estado ERROR por `Sin analisis` se postergan hasta completar 60 segundos.
 
 **Validacion:** `75 passed`; `scripts/verify_config.py` correcto y carga efectiva
-confirmada en `60.0` para las cuatro combinaciones scanner/material. Build Cython
-pendiente.
+confirmada en `60.0` para las cuatro combinaciones scanner/material.
+
+**Entrega V30 Cython para PC industrial (2026-08-12):**
+- ZIP: `dist/DEFYVISION_METALCONF_V30_CYTHON_2026-08-12.zip`.
+- Fuente empaquetada: commit `e258866644827f81c04d55fdb99a42f0db4bbdea`.
+- Tamano: `143303707` bytes.
+- SHA-256: `25813F4549C2F59C7CD5DF9048FCB227F80437442DFAF5BA36E86915FC1F1094`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); Cython verificado con un
+  unico `license.cp314-win_amd64.pyd` y ningun `license.py`; `_lsap` incluido.
+- La configuracion empaquetada confirma 60s para ambos scanners/materiales. ZIP
+  con `636` entradas, CRC sin errores y archivos requeridos presentes.
 
 #### Cambio 293 - Scanner 2 espera 30 segundos antes de ERROR sin analisis
 
