@@ -26,6 +26,14 @@ startup_grace_frames: 100
 # agotar startup_grace_frames ANTES de que la chapa llegue, dejando la primera
 # lectura real sin proteccion.
 startup_grace_seconds: 30.0
+# Watchdog de atasco mecanico: no decide durante el primer minuto de RUN y,
+# una vez armado, corta el scanner puntual tras 22s sin avance real de chapa.
+machine_jam_enabled: true
+machine_jam_arm_s: 60.0
+machine_jam_timeout_s: 22.0
+# Ruta legacy reemplazada por el aviso especifico MAQUINA TRABADA.
+inspection_stall_warn_s: 0.0
+inspection_stall_timeout_s: 0.0
 frame_rate_hz: 25.0
 max_response_sec: 1.6
 edge_margin_px: 15.0

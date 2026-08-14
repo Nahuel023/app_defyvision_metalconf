@@ -155,6 +155,10 @@ def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace
     """La gracia de encuadre nunca puede ocultar tres decisiones NOK reales."""
     io = _FakeIO(scanner_id=scanner_id, model=model)
     controller = ScannerController(scanner_id, io, _FakeCamera())
+    delivered_results = []
+    controller.on_result = lambda result, streak: delivered_results.append(
+        (result, streak)
+    )
     try:
         controller._state = ScannerState.RUNNING
         controller._startup_grace_remaining = 100
@@ -171,6 +175,8 @@ def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace
         assert status["state"] == ScannerState.FAULT
         assert status["nok_streak"] == 3
         assert status["state_reason"] == "3 imágenes NOK consecutivas"
+        assert delivered_results[-1][0].machine_stop is True
+        assert delivered_results[-1][1] == 3
         assert (f"{scanner_id}.solenoid", False) in io.writes
         assert io.batches[-1] == [
             (f"{scanner_id}.light_blue", False),

@@ -75,7 +75,7 @@ _COLOR = {
 _STATE_LABEL = {
     ScannerState.IDLE:    "EN ESPERA",
     ScannerState.RUNNING: "INSPECCIONANDO",
-    ScannerState.FAULT:   "FALLA DETECTADA",
+    ScannerState.FAULT:   "MACHINE FAULT",
     ScannerState.STOPPED: "DETENIDO",
     ScannerState.ERROR:   "ERROR",
 }
@@ -265,6 +265,7 @@ class ScannerPanel(QWidget):
     _sig_overlay    = pyqtSignal(object, int)
     _sig_stop_alert = pyqtSignal(object, str, str)  # (overlay, label, reason)
     _sig_blur_alert = pyqtSignal(str, str)          # (scanner label, detalle tecnico)
+    _sig_jam_alert  = pyqtSignal(str, str)          # (scanner label, detalle tecnico)
 
     def __init__(self, scanner_id: str, system: InspectionSystem,
                  parent: QWidget | None = None) -> None:
@@ -283,6 +284,7 @@ class ScannerPanel(QWidget):
         # Evita reabrir el cartel cada 200 ms mientras persiste el mismo ERROR.
         # Se rearma cuando RESET limpia la causa o aparece otro estado.
         self._blur_alert_active = False
+        self._jam_alert_active = False
 
         # Auto-limpieza del boton RESET: tras una parada MANUAL/normal (no falla)
         # el scanner vuelve solo a IDLE a los 30s y el boton grande naranja
@@ -691,6 +693,19 @@ class ScannerPanel(QWidget):
         elif not blur_alert:
             self._blur_alert_active = False
 
+        jam_alert = show_reason and _is_machine_jam_reason(state_reason)
+        if jam_alert and not self._jam_alert_active:
+            self._jam_alert_active = True
+            from src.utils.model_names import to_display as _to_display
+            scanner_num = self._id.split("_")[-1]
+            model_name = self._system.io.scanner_config(self._id).get("model", "")
+            model_display = _to_display(model_name) if model_name else "—"
+            self._sig_jam_alert.emit(
+                f"SCANNER {scanner_num}  ·  {model_display}", state_reason
+            )
+        elif not jam_alert:
+            self._jam_alert_active = False
+
         mc = _MODE_COLOR[mode]
         self._mode_val[1].setText(mode.value.upper())
         self._mode_val[1].setStyleSheet(f"font-size:15px;font-weight:700;color:{mc};")
@@ -1036,12 +1051,19 @@ def _stop_reason(result: InspectionResult) -> str:
     if getattr(result, "pattern_alignment_warn", False):
         return "Patrón desalineado"
     missing = getattr(result.report, "missing", 0)
+    if missing <= 0:
+        return "Racha de imágenes NOK"
     return f"{missing} agujero{'s' if missing != 1 else ''} faltante{'s' if missing != 1 else ''} persistente{'s' if missing != 1 else ''}"
 
 
 def _is_blur_quality_reason(reason: str) -> bool:
     """True solo para el ERROR de nitidez que requiere limpiar la lente."""
     return str(reason or "").strip().casefold().startswith("imagen borrosa")
+
+
+def _is_machine_jam_reason(reason: str) -> bool:
+    """True solo para la parada mecanica por material sin avance."""
+    return str(reason or "").strip().casefold().startswith("máquina trabada")
 
 
 # ----------------------------------------------------------------------
@@ -1184,6 +1206,142 @@ class BlurCleaningDialog(QDialog):
 
 
 # ----------------------------------------------------------------------
+# Dialogo de maquina trabada — reconocimiento obligatorio del operario
+# ----------------------------------------------------------------------
+
+class MachineJamDialog(QDialog):
+    """Aviso modal por falta de avance mecanico de un scanner puntual."""
+
+    def __init__(
+        self,
+        scanner_label: str,
+        technical_detail: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._acknowledged = False
+        self.setObjectName("machineJamDialog")
+        self.setWindowTitle("MAQUINA TRABADA")
+        self.setModal(True)
+        self.setWindowFlags(
+            Qt.WindowType.Dialog
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.CustomizeWindowHint
+            | Qt.WindowType.WindowTitleHint
+        )
+        self.setMinimumSize(760, 610)
+        self.resize(840, 680)
+        self.setStyleSheet("background:#09090b;")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 28, 28, 28)
+
+        card = QFrame()
+        card.setObjectName("jamCard")
+        card.setStyleSheet(
+            "QFrame#jamCard { background:#18181b;border:3px solid #ef4444;"
+            "border-radius:20px; }"
+        )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(36, 30, 36, 30)
+        lay.setSpacing(17)
+
+        icon = QLabel("!")
+        icon.setFixedSize(92, 92)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(
+            "background:#dc2626;color:#ffffff;border-radius:46px;"
+            "font-size:62px;font-weight:900;"
+        )
+        lay.addWidget(icon, alignment=Qt.AlignmentFlag.AlignHCenter)
+
+        title = QLabel("MAQUINA TRABADA")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet(
+            "color:#fca5a5;background:transparent;font-size:38px;"
+            "font-weight:900;letter-spacing:3px;"
+        )
+        lay.addWidget(title)
+
+        scanner = QLabel(scanner_label)
+        scanner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        scanner.setStyleSheet(
+            "color:#ffffff;background:#27272a;border:2px solid #71717a;"
+            "border-radius:10px;padding:12px 18px;font-size:23px;"
+            "font-weight:900;letter-spacing:1px;"
+        )
+        lay.addWidget(scanner)
+
+        action = QLabel("REVISAR Y LIBERAR EL MATERIAL ANTES DE REINICIAR")
+        action.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        action.setWordWrap(True)
+        action.setStyleSheet(
+            "color:#ffffff;background:#7f1d1d;border:2px solid #f87171;"
+            "border-radius:12px;padding:16px;font-size:23px;font-weight:900;"
+        )
+        lay.addWidget(action)
+
+        explanation = QLabel(
+            "Este scanner fue detenido porque la imagen no mostro avance de la "
+            "chapa durante 22 segundos. El otro scanner funciona de manera "
+            "independiente y no fue detenido por esta alarma."
+        )
+        explanation.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        explanation.setWordWrap(True)
+        explanation.setStyleSheet(
+            "color:#e4e4e7;background:transparent;font-size:17px;"
+        )
+        lay.addWidget(explanation)
+
+        detail = QLabel(technical_detail)
+        detail.setObjectName("jamTechnicalDetail")
+        detail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        detail.setWordWrap(True)
+        detail.setStyleSheet(
+            "color:#d4d4d8;background:#09090b;border-radius:8px;"
+            "padding:9px;font-size:13px;"
+        )
+        lay.addWidget(detail)
+
+        self._confirm_btn = QPushButton("ENTENDIDO  ·  REVISAR MAQUINA")
+        self._confirm_btn.setObjectName("jamConfirmButton")
+        self._confirm_btn.setMinimumHeight(68)
+        self._confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._confirm_btn.setDefault(True)
+        self._confirm_btn.setStyleSheet(
+            "QPushButton { background:#dc2626;color:#ffffff;border:none;"
+            "border-radius:12px;padding:12px 28px;font-size:21px;"
+            "font-weight:900;letter-spacing:1px; }"
+            "QPushButton:hover { background:#ef4444; }"
+            "QPushButton:pressed { background:#b91c1c; }"
+        )
+        self._confirm_btn.clicked.connect(self._acknowledge)
+        lay.addWidget(self._confirm_btn)
+        root.addWidget(card)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._confirm_btn.setFocus()
+        if not getattr(self, "_did_fade", False):
+            self._did_fade = True
+            from src.ui.anim import fade_in
+            fade_in(self, ms=110)
+
+    def _acknowledge(self) -> None:
+        self._acknowledged = True
+        super().accept()
+
+    def reject(self) -> None:
+        return
+
+    def closeEvent(self, event) -> None:
+        if self._acknowledged:
+            event.accept()
+        else:
+            event.ignore()
+
+
+# ----------------------------------------------------------------------
 # Diálogo de alerta de parada — ocupa toda la ventana
 # ----------------------------------------------------------------------
 
@@ -1201,7 +1359,7 @@ class MachineStopDialog(QDialog):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("DETENCIÓN DE MÁQUINA")
+        self.setWindowTitle("MACHINE FAULT")
         self.setModal(True)
         self.setWindowFlags(
             Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint
@@ -1237,7 +1395,7 @@ class MachineStopDialog(QDialog):
         top_lay.setContentsMargins(36, 22, 36, 22)
         top_lay.setSpacing(10)
 
-        alarm_lbl = QLabel("DETENCION DE MAQUINA")
+        alarm_lbl = QLabel("MACHINE FAULT")
         alarm_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         alarm_lbl.setStyleSheet(
             "color:#fff1f2;font-size:24px;font-weight:800;"
@@ -1349,6 +1507,8 @@ class OperatorWindow(QMainWindow):
         self._stop_alert_dlg: Optional[MachineStopDialog] = None
         self._blur_alert_dlg: Optional[BlurCleaningDialog] = None
         self._pending_blur_alerts: list[tuple[str, str]] = []
+        self._jam_alert_dlg: Optional[MachineJamDialog] = None
+        self._pending_jam_alerts: list[tuple[str, str]] = []
         self._errors_win = None
         self.setWindowTitle("DEFYVISION")
         _ico = _ROOT / "assets" / "defyvision_logo.ico"
@@ -1397,6 +1557,7 @@ class OperatorWindow(QMainWindow):
             panel = ScannerPanel(sid, self._system)
             panel._sig_stop_alert.connect(self._show_stop_alert)
             panel._sig_blur_alert.connect(self._show_blur_alert)
+            panel._sig_jam_alert.connect(self._show_jam_alert)
             frame = QFrame()
             frame.setStyleSheet(
                 f"QFrame {{ background:{_PANEL};border-radius:8px;"
@@ -1612,6 +1773,29 @@ class OperatorWindow(QMainWindow):
             QTimer.singleShot(
                 0,
                 lambda label=next_label, reason=next_detail: self._show_blur_alert(
+                    label, reason
+                ),
+            )
+
+    def _show_jam_alert(self, scanner_label: str, detail: str) -> None:
+        """Muestra y serializa atascos si ambos scanners paran a la vez."""
+        alert = (scanner_label, detail)
+        if self._jam_alert_dlg is not None and self._jam_alert_dlg.isVisible():
+            if alert not in self._pending_jam_alerts:
+                self._pending_jam_alerts.append(alert)
+            return
+
+        self._jam_alert_dlg = MachineJamDialog(
+            scanner_label, detail, parent=self
+        )
+        self._jam_alert_dlg.exec()
+        self._jam_alert_dlg = None
+
+        if self._pending_jam_alerts:
+            next_label, next_detail = self._pending_jam_alerts.pop(0)
+            QTimer.singleShot(
+                0,
+                lambda label=next_label, reason=next_detail: self._show_jam_alert(
                     label, reason
                 ),
             )

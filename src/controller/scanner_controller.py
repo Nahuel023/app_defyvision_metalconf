@@ -144,6 +144,18 @@ class ScannerController:
         self._last_inspection_mono: Optional[float] = None
         self._stall_warned: bool = False
 
+        # Watchdog de MAQUINA TRABADA. Es estrictamente por instancia: cada
+        # scanner conserva sus propios relojes y corta solo su solenoide.
+        self._jam_enabled: bool = bool(tols.get("machine_jam_enabled", True))
+        self._jam_arm_s: float = max(
+            0.0, float(tols.get("machine_jam_arm_s", 60.0))
+        )
+        self._jam_timeout_s: float = max(
+            0.0, float(tols.get("machine_jam_timeout_s", 22.0))
+        )
+        self._jam_run_start_mono: Optional[float] = None
+        self._last_movement_mono: Optional[float] = None
+
         # Buffer circular de frames OK en disco (best-effort, prioridad baja)
         self._ok_buf_enabled  = bool(tols.get("ok_buffer_enabled", True))
         self._ok_buf_max      = max(10, int(tols.get("ok_buffer_count", 200)))
@@ -273,6 +285,8 @@ class ScannerController:
             self._camera_missing_events   = 0
             self._last_inspection_mono    = None
             self._stall_warned            = False
+            self._jam_run_start_mono      = None
+            self._last_movement_mono      = None
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -386,6 +400,8 @@ class ScannerController:
             self._camera_missing_events     = 0
             self._last_inspection_mono      = None
             self._stall_warned              = False
+            self._jam_run_start_mono        = None
+            self._last_movement_mono        = None
             self._state_reason              = ""
 
         self._transition(ScannerState.IDLE)
@@ -439,6 +455,8 @@ class ScannerController:
             self._camera_missing_events   = 0
             self._last_inspection_mono    = None
             self._stall_warned            = False
+            self._jam_run_start_mono      = None
+            self._last_movement_mono      = None
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -661,6 +679,13 @@ class ScannerController:
         self._stall_timeout_s = float(
             tols.get("inspection_stall_timeout_s", 120.0)
         )
+        self._jam_enabled = bool(tols.get("machine_jam_enabled", True))
+        self._jam_arm_s = max(
+            0.0, float(tols.get("machine_jam_arm_s", 60.0))
+        )
+        self._jam_timeout_s = max(
+            0.0, float(tols.get("machine_jam_timeout_s", 22.0))
+        )
 
     # ------------------------------------------------------------------
     # Propiedades de estado (thread-safe)
@@ -709,6 +734,23 @@ class ScannerController:
             ):
                 stall_sec = max(0.0, time.monotonic() - self._last_inspection_mono)
 
+            jam_armed = False
+            jam_no_movement_sec = 0.0
+            if (
+                self._state == ScannerState.RUNNING
+                and self._mode == OperationMode.AUTO
+                and self._jam_run_start_mono is not None
+            ):
+                now_mono = time.monotonic()
+                arm_at = self._jam_run_start_mono + self._jam_arm_s
+                jam_armed = now_mono >= arm_at
+                if jam_armed:
+                    baseline = max(
+                        arm_at,
+                        self._last_movement_mono or self._jam_run_start_mono,
+                    )
+                    jam_no_movement_sec = max(0.0, now_mono - baseline)
+
             inspection_uptime_pct = 0.0
             camera_missing_sec = 0.0
             if self._session_start is not None:
@@ -749,6 +791,10 @@ class ScannerController:
                 "inspection_stall_sec":  stall_sec,
                 "inspection_stall_warn_s": self._stall_warn_s,
                 "inspection_stall_timeout_s": self._stall_timeout_s,
+                "machine_jam_armed":  jam_armed,
+                "machine_jam_no_movement_sec": jam_no_movement_sec,
+                "machine_jam_arm_s": self._jam_arm_s,
+                "machine_jam_timeout_s": self._jam_timeout_s,
             }
 
     # ------------------------------------------------------------------
@@ -1010,8 +1056,11 @@ class ScannerController:
         # Referencia del watchdog de inspeccion detenida: se ancla aca (no en
         # start()) para no contar el selftest ni la pre-calibracion como parada.
         with self._lock:
-            self._last_inspection_mono = time.monotonic()
+            _watchdog_start = time.monotonic()
+            self._last_inspection_mono = _watchdog_start
             self._stall_warned = False
+            self._jam_run_start_mono = _watchdog_start
+            self._last_movement_mono = _watchdog_start
         if self._startup_grace_remaining > 0 or self._startup_grace_seconds > 0.0:
             logger.info(
                 "[%s] startup grace: %d frames y/o %.1fs sin machine_stop ni fault",
@@ -1084,6 +1133,8 @@ class ScannerController:
             # fresca el loop podia analizar/contar varias veces la misma captura.
             # Tambien mantenemos activo el watchdog mientras esperamos una nueva.
             if camera_seq is not None and camera_seq == last_camera_seq:
+                if self._check_machine_jam(session.last_position_diff):
+                    return
                 if self._check_inspection_stall(session.last_position_diff):
                     return
                 self._stop_event.wait(timeout=0.005)
@@ -1118,6 +1169,8 @@ class ScannerController:
             if res is None:
                 # Llegan frames pero ninguno se analiza: si esto se sostiene, el
                 # scanner estaria "en marcha" sin inspeccionar nada.
+                if self._check_machine_jam(session.last_position_diff):
+                    return
                 if self._check_inspection_stall(session.last_position_diff):
                     return
                 self._stop_event.wait(timeout=0.005)
@@ -1127,8 +1180,56 @@ class ScannerController:
                 self._last_inspection_mono = time.monotonic()
                 self._stall_warned = False
 
+            self._note_material_movement(session.last_position_diff, forced=forced)
             self._handle_result(res, model, session=session)
             self._stop_event.wait(timeout=0.005)
+
+    def _note_material_movement(self, position_diff: float, *, forced: bool) -> None:
+        """Registra avance visual real; una inspeccion forzada no rearma el reloj."""
+        if forced or position_diff < self._cont_pos_thr:
+            return
+        with self._lock:
+            if self._state == ScannerState.RUNNING:
+                self._last_movement_mono = time.monotonic()
+
+    def _check_machine_jam(self, position_diff: float) -> bool:
+        """Corta este scanner tras el armado y 22s continuos sin avance real."""
+        if not self._jam_enabled or self._jam_timeout_s <= 0.0:
+            return False
+
+        now = time.monotonic()
+        with self._lock:
+            if self._state != ScannerState.RUNNING or self._jam_run_start_mono is None:
+                return False
+            arm_at = self._jam_run_start_mono + self._jam_arm_s
+            if now < arm_at:
+                return False
+            baseline = max(
+                arm_at,
+                self._last_movement_mono or self._jam_run_start_mono,
+            )
+            stopped_s = max(0.0, now - baseline)
+            if stopped_s < self._jam_timeout_s:
+                return False
+            self._state = ScannerState.ERROR
+            self._state_reason = (
+                f"Máquina trabada: material sin avanzar durante {stopped_s:.1f} s"
+            )
+
+        logger.error(
+            "[%s] MAQUINA TRABADA — %.1fs sin avance (movimiento=%.2f, umbral=%.2f)",
+            self._id, stopped_s, position_diff, self._cont_pos_thr,
+        )
+        self._cut_solenoid_critical("maquina trabada")
+        self._set_lights(red=True)
+        self._stop_event.set()
+        self._fire_state_changed()
+        if self._recorder is not None:
+            try:
+                self._recorder.flush_event("machine_jam", self._state_reason)
+            except Exception as exc:
+                logger.error("[%s] EventRecorder jam flush error: %s", self._id, exc)
+        return True
 
     def _check_inspection_stall(self, position_diff: float) -> bool:
         """Vigila que las inspecciones sigan ocurriendo mientras el scanner corre.
@@ -1415,6 +1516,10 @@ class ScannerController:
             # Detiene el hilo inspector para que no siga generando resultados en pantalla.
             # El operario debe presionar DETENER → RESET → INICIAR para reanudar.
             self._stop_event.set()
+            # La racha NOK es una parada de maquina real, no un ERROR informativo.
+            # Marcar el resultado disparador hace que la UI abra la pantalla
+            # completa historica (patron desalineado o NOK/faltantes).
+            result = dataclasses.replace(result, machine_stop=True)
         elif streak >= warn_at:
             self._set_lights(green=True, yellow=True)   # poll_loop toma el blink
         else:
@@ -1423,7 +1528,7 @@ class ScannerController:
         # Si machine_stop fue suprimido (grace o disabled), limpiar la bandera del
         # resultado antes de enviarlo a la UI para no mostrar "DETENCION DE MAQUINA"
         # en el overlay cuando la parada no se aplica realmente.
-        if _ms_suppressed:
+        if _ms_suppressed and not fault_triggered:
             result = dataclasses.replace(result, machine_stop=False)
 
         if self.on_result:

@@ -81,6 +81,56 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-14 - Tadeo + Codex
 
+#### Cambio 296 - Watchdog de maquina trabada y pantalla MACHINE FAULT para racha NOK
+
+**Pedido:** la cinta puede quedar mecanicamente trabada en cualquier momento y
+seguir haciendo fuerza. No se debe decidir nada durante el primer minuto de RUN;
+despues, si el material no avanza durante 22 segundos, debe detenerse y avisar
+`MAQUINA TRABADA`. Scanner 1 y scanner 2 funcionan y se detienen por separado.
+Ademas, al completar la racha NOK configurada debe aparecer el MACHINE FAULT y
+la pantalla completa historica de patron desalineado/NOK, no solamente un ERROR.
+
+**Hallazgos:** el watchdog anterior era generico: esperaba 60 segundos sin
+analisis desde el arranque, no tenia un minuto de armado separado, no distinguia
+atasco mecanico y solo mostraba `Sin analisis`. La racha NOK ya cortaba fisicamente
+el solenoide, pero entregaba a la UI un resultado sin `machine_stop`; por eso no
+se abria la pantalla completa aunque la maquina hubiese quedado en FAULT.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`: nuevo reloj de atasco por instancia.
+  Se arma a los 60s del run loop y desde ese punto exige 22s completos sin avance
+  visual. Cada movimiento real reinicia solamente el reloj de su scanner; una
+  inspeccion forzada no simula avance. Al disparar pasa a ERROR, corta con
+  `write_critical`, enciende rojo, detiene el hilo y registra el evento
+  `machine_jam`.
+- `config/tolerancias.yaml`, `config/io_map.yaml` y `src/utils/config.py`:
+  `machine_jam_enabled=true`, `machine_jam_arm_s=60` y
+  `machine_jam_timeout_s=22` para scanner 1/2 por Esterilla/Microperforado. Se
+  desactiva la escalada legacy `inspection_stall_*` para que no corte a los 60s
+  antes de completar el nuevo intervalo 60+22.
+- `src/ui/operator.py`: nueva ventana modal y persistente `MAQUINA TRABADA`, con
+  scanner/material identificados e instruccion de liberar el material antes de
+  reiniciar. Si ambos scanners se traban, los avisos se encolan. La ventana no
+  se cierra con Escape ni con la X sin reconocimiento explicito.
+- La racha NOK que alcanza el umbral ahora marca su resultado disparador como
+  `machine_stop`; conserva el corte obligatorio y abre la pantalla completa
+  `MACHINE FAULT`, mostrando `Patron desalineado`, faltantes persistentes o
+  `Racha de imagenes NOK` segun la causa.
+- Regresiones en `tests/test_frozen_camera_watchdog.py`,
+  `tests/test_operator_jam_alert.py`, `tests/test_scanner_controller.py` y
+  `tests/test_config.py` para tiempos limite, aislamiento entre scanners,
+  inspeccion forzada, persistencia del dialogo y apertura de MACHINE FAULT.
+
+**Validacion:** `84 passed`; `py_compile`, `git diff --check` y
+`scripts/verify_config.py` correctos. Construccion segura de
+`InspectionSystem(disable_plc_outputs=True)` correcta con ambos controladores en
+`jam=60+22` y racha NOK 3. Render Qt offscreen de la nueva ventana revisado en
+`840x680`; estructura, contraste y separacion de bloques correctos. El backend
+offscreen local reemplazo los glifos de texto por cuadros, por lo que la tipografia
+final debe confirmarse en el render Windows del EXE; la prueba funcional de textos,
+boton y permanencia si paso. No se agregaron accesos nuevos a constantes externas
+en el camino de importacion.
+
 #### Cambio 295 - Parada uniforme y efectiva al tercer NOK en ambos scanners y materiales
 
 **Pedido:** revisar el flujo completo de parada porque en la prueba de planta se

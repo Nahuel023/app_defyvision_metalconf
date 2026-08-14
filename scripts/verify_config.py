@@ -19,7 +19,11 @@ for scanner_id in ("scanner_1", "scanner_2"):
         cfg = load_tolerances(model, scanner_id=scanner_id)
         assert int(cfg["consecutive_nok_frames"]) == 3
         assert int(cfg["stop_min_frames"]) == 3
+        assert cfg["machine_jam_enabled"] is True
+        assert float(cfg["machine_jam_arm_s"]) == 60.0
+        assert float(cfg["machine_jam_timeout_s"]) == 22.0
         print(
             f"{scanner_id}/{model}  parada NOK = "
-            f"{cfg['consecutive_nok_frames']} / piso {cfg['stop_min_frames']}"
+            f"{cfg['consecutive_nok_frames']} / piso {cfg['stop_min_frames']}  "
+            f"atasco={cfg['machine_jam_arm_s']}+{cfg['machine_jam_timeout_s']}s"
         )

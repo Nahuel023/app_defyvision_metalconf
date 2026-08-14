@@ -16,7 +16,11 @@ scanner_1:
   inspection:
     # La cinta puede demorar normalmente al iniciar despues de pulsar RUN.
     # Aplica a Esterilla y Microperforado de scanner_1.
-    inspection_stall_timeout_s: 60.0
+    machine_jam_enabled: true
+    machine_jam_arm_s: 60.0
+    machine_jam_timeout_s: 22.0
+    inspection_stall_warn_s: 0.0
+    inspection_stall_timeout_s: 0.0
   inspection_models:
     modelo_A:
       # Regla uniforme para Esterilla: tres NOK consecutivos detienen scanner_1.
@@ -122,6 +126,13 @@ scanner_2:
   model: "modelo_B"
   allowed_models: ["modelo_A", "modelo_B"]   # Esterilla y Microperforado
   force_auto_mode: true   # TEMPORAL: forzar AUTO mientras X2 no llega al PLC
+  inspection:
+    # Watchdog de atasco propio de scanner_2; no afecta ni detiene scanner_1.
+    machine_jam_enabled: true
+    machine_jam_arm_s: 60.0
+    machine_jam_timeout_s: 22.0
+    inspection_stall_warn_s: 0.0
+    inspection_stall_timeout_s: 0.0
   inspection_models:
     modelo_A:
       # ESTERILLA scanner_2, calibrada con 501 frames OK del 31-07-2026.
@@ -139,10 +150,8 @@ scanner_2:
       # LOW_QUALITY aislado no decide. Una racha sostenida si corta: seguir
       # produciendo sin imagen confiable es un fallo de inspeccion, no un OK.
       low_quality_stop_frames: 16
-      inspection_stall_warn_s: 3.0
-      # La cinta puede demorar normalmente al iniciar despues de pulsar RUN.
-      # Esperar 60s completos sin analisis antes de pasar a ERROR.
-      inspection_stall_timeout_s: 60.0
+      inspection_stall_warn_s: 0.0
+      inspection_stall_timeout_s: 0.0
       roi_recenter_enabled: false
       roi_precal_enabled: false
     modelo_B:
@@ -159,9 +168,8 @@ scanner_2:
       consecutive_nok_frames: 3
       stop_min_frames: 3
       low_quality_stop_frames: 16
-      inspection_stall_warn_s: 3.0
-      # Mismo tiempo de arranque permitido para ambos scanners/materiales.
-      inspection_stall_timeout_s: 60.0
+      inspection_stall_warn_s: 0.0
+      inspection_stall_timeout_s: 0.0
       threshold: 145
       use_channel: gray
       use_clahe: false
