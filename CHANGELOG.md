@@ -131,6 +131,19 @@ final debe confirmarse en el render Windows del EXE; la prueba funcional de text
 boton y permanencia si paso. No se agregaron accesos nuevos a constantes externas
 en el camino de importacion.
 
+**Entrega V32 Cython para PC industrial (2026-08-14):**
+- ZIP: `dist/DEFYVISION_METALCONF_V32_CYTHON_2026-08-14.zip`.
+- Fuente empaquetada: commit `17a057d5c64c331d7a9d74beef06021d36fffd8b`.
+- Tamano: `143294122` bytes.
+- SHA-256: `01F846FF044614A49E489DB342A13F4B2CB47B52AE691C8AEC3D5E5DF3BCDD68`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+  Unico `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- Configuracion efectiva dentro del paquete confirmada en `jam=60+22`,
+  `consecutive_nok=3` y stall legacy apagado para scanner 1/2 por ambos
+  materiales.
+- Integridad ZIP correcta: `635` entradas, CRC sin errores y archivos requeridos
+  presentes.
+
 #### Cambio 295 - Parada uniforme y efectiva al tercer NOK en ambos scanners y materiales
 
 **Pedido:** revisar el flujo completo de parada porque en la prueba de planta se
