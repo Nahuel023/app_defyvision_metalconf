@@ -112,6 +112,18 @@ reproduccion anterior al fix terminaba en `FAULT`, racha 3 y **cero escrituras**
 `InspectionSystem(disable_plc_outputs=True)` correcta con scanner 1 y scanner 2.
 No se agregaron accesos nuevos a librerias externas en el camino de arranque.
 
+**Entrega V33 Cython para PC industrial (2026-08-14):**
+- ZIP: `dist/DEFYVISION_METALCONF_V33_CYTHON_2026-08-14.zip`.
+- Fuente empaquetada: commit `6a2e811e8028fe0d4b2759b0d5a2df3e0f1bdc85`.
+- Tamano: `143293215` bytes.
+- SHA-256: `3A51EB259EF794404D3F17E4C29561B2A7F5ED78B8A57CAE1F873EE41F6767C7`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+  Unico `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- Integridad ZIP correcta: `635` entradas y CRC sin errores.
+- Configuracion empaquetada confirmada en tres NOK, tres frames de machine stop,
+  tres de desalineacion y piso duro 3 para ambos scanners/modelos (los valores
+  heredados se resuelven desde `tolerancias.yaml`).
+
 #### Cambio 296 - Watchdog de maquina trabada y pantalla MACHINE FAULT para racha NOK
 
 **Pedido:** la cinta puede quedar mecanicamente trabada en cualquier momento y
