@@ -1431,7 +1431,17 @@ class ScannerController:
             # de transitorios de encuadre. Una clasificacion NOK ya es una decision
             # visual completa y su racha de seguridad nunca debe quedar anulada:
             # tres NOK reales tienen que cortar incluso al comienzo de la sesion.
-            if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
+            # Si el mismo frame activa machine_stop y completa la racha NOK,
+            # machine_stop tiene prioridad como unica decision terminal. Antes
+            # ambas rutas se armaban a la vez: esta rama cambiaba RUNNING->FAULT
+            # y la rama machine_stop posterior ya no cortaba el solenoide porque
+            # esperaba encontrar RUNNING. El retorno temprano dejaba la maquina
+            # energizada pese a haber declarado FAULT.
+            if (
+                not machine_stop_triggered
+                and streak >= consecutive_nok
+                and self._state == ScannerState.RUNNING
+            ):
                 self._state     = ScannerState.FAULT
                 self._state_reason = f"{streak} imágenes NOK consecutivas"
                 fault_triggered = True
@@ -1469,18 +1479,23 @@ class ScannerController:
 
             # Detener el scanner sin join (se llama desde el inspector thread;
             # join causaría deadlock). Los threads ven _stop_event y salen solos.
-            _was_running = False
+            _state_changed = False
             with self._lock:
-                if self._state == ScannerState.RUNNING:
+                if self._state in (ScannerState.RUNNING, ScannerState.FAULT):
                     self._state   = ScannerState.STOPPED
                     self._stopped_by_fault = True
                     self._state_reason = _ms_reason
-                    _was_running  = True
-            if _was_running:
-                self._cut_solenoid_critical("machine fault")
-                # backlight permanece encendido siempre
-                self._set_lights(red=True)   # rojo fijo = intervención requerida
-                self._stop_event.set()
+                    _state_changed = True
+
+            # Invariante de seguridad: una decision terminal SIEMPRE intenta
+            # desenergizar la salida, independientemente del estado FSM que haya
+            # quedado establecido por otra ruta concurrente. Es una operacion
+            # idempotente; repetir solenoid=OFF es seguro.
+            self._cut_solenoid_critical("machine fault")
+            # backlight permanece encendido siempre
+            self._set_lights(red=True)   # rojo fijo = intervención requerida
+            self._stop_event.set()
+            if _state_changed:
                 self._fire_state_changed()
 
             if self._recorder is not None:

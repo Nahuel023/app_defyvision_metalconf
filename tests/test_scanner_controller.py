@@ -186,3 +186,50 @@ def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace
         ]
     finally:
         controller.shutdown()
+
+
+@pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
+@pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
+def test_simultaneous_third_nok_and_machine_stop_always_cuts_solenoid(
+    scanner_id: str, model: str
+) -> None:
+    """Dos detectores coincidentes no pueden anular la parada fisica.
+
+    Reproduce la falla de produccion: los primeros dos resultados acumulan la
+    racha NOK y el tercero tambien llega con machine_stop=True. La salida OFF
+    debe escribirse para todos los scanners/patrones y el hilo debe detenerse.
+    """
+    io = _FakeIO(scanner_id=scanner_id, model=model)
+    controller = ScannerController(scanner_id, io, _FakeCamera())
+    controller._recorder = None
+    delivered_results = []
+    controller.on_result = lambda result, streak: delivered_results.append(
+        (result, streak)
+    )
+    try:
+        controller._state = ScannerState.RUNNING
+        controller._startup_grace_remaining = 0
+        controller._startup_grace_seconds = 0.0
+
+        controller.inject_result(False, count=2)
+        assert controller.state == ScannerState.RUNNING
+        assert controller.nok_streak == 2
+
+        writes_before = len(io.writes)
+        controller.inject_machine_stop("TERCER NOK SIMULTANEO")
+        terminal_writes = io.writes[writes_before:]
+
+        assert controller.state == ScannerState.STOPPED
+        assert controller.nok_streak == 3
+        assert controller._stop_event.is_set()
+        assert (f"{scanner_id}.solenoid", False) in terminal_writes
+        assert delivered_results[-1][0].machine_stop is True
+        assert delivered_results[-1][1] == 3
+        assert io.batches[-1] == [
+            (f"{scanner_id}.light_blue", False),
+            (f"{scanner_id}.light_green", False),
+            (f"{scanner_id}.light_yellow", False),
+            (f"{scanner_id}.light_red", True),
+        ]
+    finally:
+        controller.shutdown()

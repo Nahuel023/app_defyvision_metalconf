@@ -81,6 +81,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-14 - Tadeo + Codex
 
+#### Cambio 297 - CRITICO: MACHINE STOP y tercer NOK simultaneos siempre cortan el solenoide
+
+**Pedido:** en produccion aparecieron secuencias NOK suficientes para detener la
+maquina, pero en algunos casos no se ejecutaba la parada. Debe detener siempre,
+en ambos scanners y para Esterilla/Microperforado.
+
+**Causa raiz reproducida:** si el tercer NOK tambien llegaba con
+`machine_stop=True`, `_handle_result()` armaba dos decisiones terminales en el
+mismo frame. La racha NOK cambiaba primero `RUNNING -> FAULT`; luego la rama de
+machine stop encontraba que el estado ya no era `RUNNING`, omitia
+`_cut_solenoid_critical()` y hacia `return` antes de ejecutar la rama FAULT. La
+reproduccion anterior al fix terminaba en `FAULT`, racha 3 y **cero escrituras**
+`solenoid=False` para scanner 1 y scanner 2.
+
+**Cambios:**
+- `src/controller/scanner_controller.py`: machine stop tiene prioridad cuando
+  coincide con el umbral NOK, evitando dos transiciones terminales para el mismo
+  resultado.
+- La rama machine stop ahora mantiene una invariante fail-safe: siempre llama a
+  `_cut_solenoid_critical("machine fault")`, enciende rojo y levanta
+  `_stop_event`, aunque otra ruta ya hubiera cambiado el estado FSM. Repetir
+  `solenoid=False` es deliberadamente idempotente y seguro.
+- `tests/test_scanner_controller.py`: regresion parametrizada para scanner 1/2 y
+  modelo A/B. Inyecta dos NOK y un tercer NOK con machine stop simultaneo; exige
+  estado detenido, racha 3, hilo detenido, rojo y escritura fisica OFF.
+
+**Validacion:** `88 passed`; prueba especifica `12 passed`, `py_compile`,
+`git diff --check` y `scripts/verify_config.py` correctos. Construccion segura de
+`InspectionSystem(disable_plc_outputs=True)` correcta con scanner 1 y scanner 2.
+No se agregaron accesos nuevos a librerias externas en el camino de arranque.
+
 #### Cambio 296 - Watchdog de maquina trabada y pantalla MACHINE FAULT para racha NOK
 
 **Pedido:** la cinta puede quedar mecanicamente trabada en cualquier momento y
