@@ -149,10 +149,10 @@ def test_camera_start_error_exposes_operator_reason() -> None:
 
 @pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
 @pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
-def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace(
+def test_configured_nok_streak_stops_every_scanner_and_model_during_startup_grace(
     scanner_id: str, model: str
 ) -> None:
-    """La gracia de encuadre nunca puede ocultar tres decisiones NOK reales."""
+    """La gracia de encuadre nunca puede ocultar la racha NOK configurada."""
     io = _FakeIO(scanner_id=scanner_id, model=model)
     controller = ScannerController(scanner_id, io, _FakeCamera())
     delivered_results = []
@@ -164,19 +164,20 @@ def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace
         controller._startup_grace_remaining = 100
         controller._startup_grace_seconds = 30.0
         controller._run_loop_start_mono = time.monotonic()
+        threshold = controller._consecutive_nok
 
-        controller.inject_result(False, count=2)
+        controller.inject_result(False, count=threshold - 1)
         assert controller.state == ScannerState.RUNNING
-        assert controller.get_status()["nok_streak"] == 2
+        assert controller.get_status()["nok_streak"] == threshold - 1
         assert (f"{scanner_id}.solenoid", False) not in io.writes
 
         controller.inject_result(False, count=1)
         status = controller.get_status()
         assert status["state"] == ScannerState.FAULT
-        assert status["nok_streak"] == 3
-        assert status["state_reason"] == "3 imágenes NOK consecutivas"
+        assert status["nok_streak"] == threshold
+        assert status["state_reason"] == f"{threshold} imágenes NOK consecutivas"
         assert delivered_results[-1][0].machine_stop is True
-        assert delivered_results[-1][1] == 3
+        assert delivered_results[-1][1] == threshold
         assert (f"{scanner_id}.solenoid", False) in io.writes
         assert io.batches[-1] == [
             (f"{scanner_id}.light_blue", False),
@@ -190,14 +191,14 @@ def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace
 
 @pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
 @pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
-def test_simultaneous_third_nok_and_machine_stop_always_cuts_solenoid(
+def test_simultaneous_final_nok_and_machine_stop_always_cuts_solenoid(
     scanner_id: str, model: str
 ) -> None:
     """Dos detectores coincidentes no pueden anular la parada fisica.
 
-    Reproduce la falla de produccion: los primeros dos resultados acumulan la
-    racha NOK y el tercero tambien llega con machine_stop=True. La salida OFF
-    debe escribirse para todos los scanners/patrones y el hilo debe detenerse.
+    Reproduce la falla de produccion: los primeros resultados acumulan la racha
+    NOK configurada y el ultimo tambien llega con machine_stop=True. La salida
+    OFF debe escribirse para todos los scanners/patrones y el hilo detenerse.
     """
     io = _FakeIO(scanner_id=scanner_id, model=model)
     controller = ScannerController(scanner_id, io, _FakeCamera())
@@ -210,21 +211,22 @@ def test_simultaneous_third_nok_and_machine_stop_always_cuts_solenoid(
         controller._state = ScannerState.RUNNING
         controller._startup_grace_remaining = 0
         controller._startup_grace_seconds = 0.0
+        threshold = controller._consecutive_nok
 
-        controller.inject_result(False, count=2)
+        controller.inject_result(False, count=threshold - 1)
         assert controller.state == ScannerState.RUNNING
-        assert controller.nok_streak == 2
+        assert controller.nok_streak == threshold - 1
 
         writes_before = len(io.writes)
-        controller.inject_machine_stop("TERCER NOK SIMULTANEO")
+        controller.inject_machine_stop("NOK FINAL SIMULTANEO")
         terminal_writes = io.writes[writes_before:]
 
         assert controller.state == ScannerState.STOPPED
-        assert controller.nok_streak == 3
+        assert controller.nok_streak == threshold
         assert controller._stop_event.is_set()
         assert (f"{scanner_id}.solenoid", False) in terminal_writes
         assert delivered_results[-1][0].machine_stop is True
-        assert delivered_results[-1][1] == 3
+        assert delivered_results[-1][1] == threshold
         assert io.batches[-1] == [
             (f"{scanner_id}.light_blue", False),
             (f"{scanner_id}.light_green", False),

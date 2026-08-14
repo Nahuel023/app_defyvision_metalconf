@@ -44,7 +44,7 @@ scanner_1:
       pattern_slope_delta_max_deg: 1.0
       # scanner_1 exige 3 frames consecutivos para cualquier parada
       # (racha NOK / faltantes / desalineacion). Ver stop_min_frames abajo (piso duro).
-      pattern_align_stop_frames: 3
+      pattern_align_stop_frames: 5
       pattern_align_severe_abs_max_px: 0.0
       # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
       # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
@@ -52,15 +52,15 @@ scanner_1:
       pattern_align_min_missing: 1
       # Con paridad corregida, 12px absorbe la curvatura real medida (<=8px) sin
       # permitir que una columna vecina tape un agujero faltante.
-      tol_xy_px: 12.0
+      tol_xy_px: 14.0
       grid_allow_row_parity_flip: true
       grid_extend_rows_before: 3
       grid_extend_rows_after: 3
       grid_compare_margin_x_px: 12.0
       grid_compare_margin_y_px: 20.0
-      compare_left_ignore_px: 12.0
+      compare_left_ignore_px: 17.0
       compare_right_ignore_px: 12.0
-      compare_top_ignore_px: 20.0
+      compare_top_ignore_px: 70.0
       # La Sony incrusta fecha/hora sobre y~445..479 y tapa parcialmente la ultima
       # fila; esa zona no contiene evidencia visual confiable para una decision.
       compare_bottom_ignore_px: 36.0
@@ -73,10 +73,10 @@ scanner_1:
       # cruzado el gate global de NOK.
       machine_stop_min_missing: 4
       machine_stop_require_frame_nok: false
-      machine_stop_missing_frames: 3
+      machine_stop_missing_frames: 5
       # PISO DURO uniforme: ninguna parada por racha NOK, faltantes persistentes
       # ni desalineacion dispara antes de 3 frames consecutivos.
-      consecutive_nok_frames: 3
+      consecutive_nok_frames: 5
       stop_min_frames: 3
       # ROI recenter en modo MOVE (Cambio 235): a diferencia del modo resize (que
       # causaba el desync de Cambio 185/189 al ir agrandando w), move desplaza la
@@ -111,6 +111,8 @@ scanner_1:
       roi_recenter_cooldown_frames: 8
       roi_recenter_cooldown_max_frames: 8
       roi_recenter_cooldown_mult: 1.0
+      blur_score_min: 200.0
+      frame_missing_nok_threshold: 8
   inputs:
     mode_switch:  0   # X0  — maneta (0=MANUAL, 1=AUTO)
   outputs:
@@ -218,7 +220,7 @@ scanner_2:
       pattern_align_abs_max_px: 10.0
       # Cambio 279 (23-07-2026): scanner_2 tambien exige como minimo 3 frames
       # consecutivos; un frame aislado nunca detiene la maquina.
-      pattern_align_stop_frames: 3
+      pattern_align_stop_frames: 4
       pattern_global_offset_max_px: 0.0
       # Calibracion 03-07-2026: el baseline bueno de scanner_2 en microperforado
       # ya vive cerca de 0.7-1.1deg de delta patron/chapa. Con 0.6deg se marcaban
@@ -262,7 +264,7 @@ scanner_2:
       # Hasta 3 near-miss aislados pueden aparecer por ondulacion/blur sin ser un
       # defecto. Desde 4 faltantes el frame es NOK; aun con 1 solo faltante, la
       # persistencia por columna sigue activa y detiene tras 3 frames consecutivos.
-      frame_missing_nok_threshold: 3
+      frame_missing_nok_threshold: 4
       # ROI ampliado: mantener el patron amplio, pero excluir del matching la franja
       # derecha mas inestable para no penalizar el borde residual.
       pattern_edge_margin_right_px: 15.0
@@ -283,6 +285,9 @@ scanner_2:
       # tome la columna siguiente como borde y dibuje zigzag falso en el overlay.
       pattern_edge_boundary_tol_px: 5.0
       chapa_edge_inner_px: 40
+      machine_stop_missing_frames: 4
+      compare_top_ignore_px: 46.0
+      compare_bottom_ignore_px: 42.0
   inputs:
     mode_switch:  2   # X2  — maneta (0=MANUAL, 1=AUTO)
   outputs:

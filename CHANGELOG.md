@@ -81,6 +81,30 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ### Sesion 2026-08-14 - Tadeo + Codex
 
+#### Cambio 298 - Configuracion afinada en planta adoptada como oficial (sin build)
+
+**Pedido:** copiar al proyecto la carpeta de configuracion afinada por Tadeo y
+usar esos valores de ahora en adelante, sin generar un nuevo build.
+
+**Cambios:**
+- Se comparo `C:\Tadeo\METALCONF\config\config` contra `config/`. Todos los
+  archivos eran identicos salvo `io_map.yaml`; se copio ese archivo byte por
+  byte y se verifico igualdad SHA-256 entre origen y destino.
+- Ajustes adoptados para scanner 1 / Microperforado: alineacion, machine stop y
+  racha NOK en 5 frames; `tol_xy_px=14`, margen izquierdo 17, margen superior
+  70, nitidez 200 y gate de faltantes por frame 8.
+- Ajustes adoptados para scanner 2 / Microperforado: alineacion y machine stop
+  en 4 frames, racha NOK general en 3, gate de faltantes 4 y bandas ignoradas
+  superior/inferior de 46/42 px.
+- `tests/test_config.py`, `tests/test_scanner_controller.py` y
+  `scripts/verify_config.py` ahora validan los umbrales oficiales por cada
+  scanner/modelo, incluido el caso simultaneo NOK + machine stop.
+
+**Validacion:** configuracion destino identica al origen (`EXACT_MATCH=True`),
+`scripts/verify_config.py` correcto, `88 passed` y `git diff --check` correcto.
+La carpeta recibida no contenia `data/patterns`, por lo que no se modificaron
+los archivos `roi.json` ni `holes.json`. No se genero EXE, ZIP ni build.
+
 #### Cambio 297 - CRITICO: MACHINE STOP y tercer NOK simultaneos siempre cortan el solenoide
 
 **Pedido:** en produccion aparecieron secuencias NOK suficientes para detener la

@@ -106,7 +106,7 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
 
     assert cfg["grid_allow_row_parity_flip"] is True
     assert cfg["grid_parity_selection_tol_px"] < cfg["grid_dy"] / 2.0
-    assert cfg["frame_missing_nok_threshold"] == 3
+    assert cfg["frame_missing_nok_threshold"] == 4
     assert cfg["machine_stop_min_missing"] == 1
     assert cfg["machine_stop_require_frame_nok"] is False
     # ROI FIJO: el auto-recentrado quedo desactivado en ambos scanners para que la
@@ -149,14 +149,21 @@ def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
         assert cfg["pattern_align_severe_abs_max_px"] == 0.0
 
 
-def test_every_production_pattern_uses_safe_stop_defaults() -> None:
-    for scanner_id in ("scanner_1", "scanner_2"):
-        for model in ("modelo_A", "modelo_B"):
-            cfg = load_tolerances(model=model, scanner_id=scanner_id)
-            assert cfg["pattern_align_stop_frames"] == 3
-            assert cfg["machine_stop_missing_frames"] == 3
-            assert cfg["stop_min_frames"] == 3
-            assert cfg["consecutive_nok_frames"] == 3
+def test_every_production_pattern_uses_tuned_stop_thresholds() -> None:
+    # Ajustes oficiales copiados de produccion el 14-08-2026.
+    # Tupla: (pattern_align, machine_stop_missing, consecutive_nok).
+    expected = {
+        ("scanner_1", "modelo_A"): (3, 3, 3),
+        ("scanner_1", "modelo_B"): (5, 5, 5),
+        ("scanner_2", "modelo_A"): (3, 3, 3),
+        ("scanner_2", "modelo_B"): (4, 4, 3),
+    }
+    for (scanner_id, model), thresholds in expected.items():
+        cfg = load_tolerances(model=model, scanner_id=scanner_id)
+        assert cfg["pattern_align_stop_frames"] == thresholds[0]
+        assert cfg["machine_stop_missing_frames"] == thresholds[1]
+        assert cfg["consecutive_nok_frames"] == thresholds[2]
+        assert cfg["stop_min_frames"] == 3
 
 
 def test_tolerance_window_cannot_reenable_single_frame_alignment_stop() -> None:
