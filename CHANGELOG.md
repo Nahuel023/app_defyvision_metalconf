@@ -119,6 +119,19 @@ cargan umbral 3 sin escribir al PLC. Los cuatro perfiles informan
 `consecutive_nok_frames=3`, `stop_min_frames=3`,
 `machine_stop_missing_frames=3` y `pattern_align_stop_frames=3`.
 
+**Entrega V31 Cython para PC industrial (2026-08-14):**
+- ZIP: `dist/DEFYVISION_METALCONF_V31_CYTHON_2026-08-14.zip`.
+- Fuente empaquetada: commit `5845e160f16f742beb714c4877853ee1dfbe6d52`.
+- Tamano: `143289881` bytes.
+- SHA-256: `F75EB1479D937B892A9C5AABC6A93388537DA1B71F241198F8C3021480305B78`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+  Cython verificado con un unico `license.cp314-win_amd64.pyd`, ningun
+  `license.py` y `_lsap` incluido para Hungarian.
+- Configuracion efectiva del paquete confirmada en 3 para racha NOK, piso duro,
+  faltantes y desalineacion en scanner 1/2 por Esterilla/Microperforado.
+- Integridad ZIP correcta: `635` entradas, CRC sin errores y EXE/config/patrones
+  presentes.
+
 ---
 
 ### Sesion 2026-08-12 - Tadeo + Codex
