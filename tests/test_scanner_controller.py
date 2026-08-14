@@ -1,13 +1,17 @@
+import time
+
+import pytest
+
 from src.controller.scanner_controller import ScannerController
 from src.utils.state import OperationMode, ScannerState
 
 
 class _FakeIO:
-    def __init__(self) -> None:
+    def __init__(self, scanner_id: str = "scanner_1", model: str = "modelo_A") -> None:
         self.plc_config = {"poll_interval_ms": 50}
         self._scanner_cfg = {
-            "scanner_1": {
-                "model": "modelo_A",
+            scanner_id: {
+                "model": model,
                 "inspection": {},
             }
         }
@@ -139,5 +143,40 @@ def test_camera_start_error_exposes_operator_reason() -> None:
         assert status["state_reason"] == (
             "Cámara sin señal: no se pudo iniciar la captura"
         )
+    finally:
+        controller.shutdown()
+
+
+@pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
+@pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
+def test_three_consecutive_nok_stop_every_scanner_and_model_during_startup_grace(
+    scanner_id: str, model: str
+) -> None:
+    """La gracia de encuadre nunca puede ocultar tres decisiones NOK reales."""
+    io = _FakeIO(scanner_id=scanner_id, model=model)
+    controller = ScannerController(scanner_id, io, _FakeCamera())
+    try:
+        controller._state = ScannerState.RUNNING
+        controller._startup_grace_remaining = 100
+        controller._startup_grace_seconds = 30.0
+        controller._run_loop_start_mono = time.monotonic()
+
+        controller.inject_result(False, count=2)
+        assert controller.state == ScannerState.RUNNING
+        assert controller.get_status()["nok_streak"] == 2
+        assert (f"{scanner_id}.solenoid", False) not in io.writes
+
+        controller.inject_result(False, count=1)
+        status = controller.get_status()
+        assert status["state"] == ScannerState.FAULT
+        assert status["nok_streak"] == 3
+        assert status["state_reason"] == "3 imágenes NOK consecutivas"
+        assert (f"{scanner_id}.solenoid", False) in io.writes
+        assert io.batches[-1] == [
+            (f"{scanner_id}.light_blue", False),
+            (f"{scanner_id}.light_green", False),
+            (f"{scanner_id}.light_yellow", False),
+            (f"{scanner_id}.light_red", True),
+        ]
     finally:
         controller.shutdown()

@@ -7,10 +7,9 @@ tol_xy_px: 22.0
 aspect_ratio_max: 2.0
 align_match_tol_px: 150.0
 min_match_count: 6
-# Respaldo generico desactivado: no mezclar 5 causas NOK distintas en un FAULT.
-# Las paradas productivas siguen activas por persistencia especifica.
-consecutive_nok_frames: 9999
-# Frames tras INICIAR sin evaluar machine_stop/FAULT: le da tiempo a camara/luz/
+# Regla comun de seguridad: tres resultados NOK consecutivos detienen el scanner.
+consecutive_nok_frames: 3
+# Frames tras INICIAR sin evaluar machine_stop geometrico: le da tiempo a camara/luz/
 # vibracion a estabilizarse despues de un reinicio. Default de codigo (30, ~1-3s)
 # resulto insuficiente: una chapa nueva y buena disparaba machine_stop apenas
 # reiniciado el scanner (falso positivo transitorio, no defecto real).
@@ -120,7 +119,7 @@ models:
     # sin convertir todo el lote en LOW_QUALITY (el bug de 800 dejaba 0 OK/0 NOK).
     blur_score_min: 255.0
     frame_missing_nok_threshold: 5
-    consecutive_nok_frames: 9999
+    consecutive_nok_frames: 3
     continuous_position_threshold: 3.0
     machine_stop_enabled: true
     machine_stop_missing_frames: 3
@@ -161,7 +160,7 @@ models:
     grid_max_missing: 60
     bbox_filter_margin_px: 45.0
     quality_ratio_min: 0.0
-    consecutive_nok_frames: 9999
+    consecutive_nok_frames: 3
     roi_min_width: 255              # candado: el ROI de modelo_B nunca baja de 255px. Ambos patrones
                                     # (scanner_1 y scanner_2) estan construidos a image_size w=255, asi
                                     # que el ancho queda fijo y consistente con el patron.

@@ -1326,25 +1326,16 @@ class ScannerController:
                 else:
                     machine_stop_triggered = True
                     self._machine_stop_count += 1
+            # La gracia inicial protege exclusivamente los detectores geometricos
+            # de transitorios de encuadre. Una clasificacion NOK ya es una decision
+            # visual completa y su racha de seguridad nunca debe quedar anulada:
+            # tres NOK reales tienen que cortar incluso al comienzo de la sesion.
             if streak >= consecutive_nok and self._state == ScannerState.RUNNING:
-                if in_grace:
-                    logger.debug("[%s] fault suprimido por grace period (streak=%d)", self._id, streak)
-                    self._nok_streak = 0  # reset streak para no acumular durante grace
-                    self._streak_start_mono = None
-                    # Resetear tambien el detector de machine_stop: sin esto, el
-                    # historial acumulado durante grace persiste y puede disparar
-                    # machine_stop al primer frame post-grace que coincida con la
-                    # misma zona aunque la pieza sea correcta.
-                    if session is not None:
-                        session.reset_stop_state()
-                    else:
-                        self._inspector.reset_machine_stop(model, self._id)
-                else:
-                    self._state     = ScannerState.FAULT
-                    self._state_reason = f"{streak} imágenes NOK consecutivas"
-                    fault_triggered = True
-                    self._fault_count += 1
-                    streak_start_mono = self._streak_start_mono
+                self._state     = ScannerState.FAULT
+                self._state_reason = f"{streak} imágenes NOK consecutivas"
+                fault_triggered = True
+                self._fault_count += 1
+                streak_start_mono = self._streak_start_mono
 
         if quality_stop_triggered:
             logger.error(

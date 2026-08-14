@@ -18,6 +18,12 @@ scanner_1:
     # Aplica a Esterilla y Microperforado de scanner_1.
     inspection_stall_timeout_s: 60.0
   inspection_models:
+    modelo_A:
+      # Regla uniforme para Esterilla: tres NOK consecutivos detienen scanner_1.
+      consecutive_nok_frames: 3
+      machine_stop_missing_frames: 3
+      pattern_align_stop_frames: 3
+      stop_min_frames: 3
     modelo_B:
       # Calibracion 21-07-2026 con zoom digital 150%: el microperforado ocupa una
       # grilla alternada de 5/6 agujeros por fila dentro de la ROI. Construir y
@@ -32,9 +38,9 @@ scanner_1:
       pattern_align_enabled: true
       pattern_global_offset_max_px: 8.0
       pattern_slope_delta_max_deg: 1.0
-      # scanner_1 exige como minimo 4 frames consecutivos para cualquier parada
+      # scanner_1 exige 3 frames consecutivos para cualquier parada
       # (racha NOK / faltantes / desalineacion). Ver stop_min_frames abajo (piso duro).
-      pattern_align_stop_frames: 4
+      pattern_align_stop_frames: 3
       pattern_align_severe_abs_max_px: 0.0
       # Mismo gate que scanner_2: exige al menos 1 faltante para entrar al check de
       # zigzag/severo, filtrando frames de borde de chapa (std/zigzag alto pero
@@ -63,11 +69,11 @@ scanner_1:
       # cruzado el gate global de NOK.
       machine_stop_min_missing: 4
       machine_stop_require_frame_nok: false
-      machine_stop_missing_frames: 4   # scanner_1: faltantes persistentes exigen 4 frames
-      # PISO DURO por scanner (solo scanner_1): ninguna parada — racha NOK (FAULT),
-      # faltantes persistentes NI desalineacion — dispara antes de 4 frames consecutivos.
-      # Enforced en codigo (no se puede bajar por config). scanner_2 NO lo define → sigue igual.
-      stop_min_frames: 4
+      machine_stop_missing_frames: 3
+      # PISO DURO uniforme: ninguna parada por racha NOK, faltantes persistentes
+      # ni desalineacion dispara antes de 3 frames consecutivos.
+      consecutive_nok_frames: 3
+      stop_min_frames: 3
       # ROI recenter en modo MOVE (Cambio 235): a diferencia del modo resize (que
       # causaba el desync de Cambio 185/189 al ir agrandando w), move desplaza la
       # ventana en x sin tocar w, asi el frame post-ROI sigue calzando siempre con
@@ -125,7 +131,7 @@ scanner_2:
       continuous_position_threshold: 3.0
       # Mismas reglas temporales seguras que Microperforado scanner_2: ninguna
       # parada por faltantes/desalineacion puede disparar con un solo frame.
-      consecutive_nok_frames: 9999
+      consecutive_nok_frames: 3
       machine_stop_missing_frames: 3
       pattern_align_stop_frames: 3
       pattern_align_severe_abs_max_px: 0.0
@@ -150,6 +156,7 @@ scanner_2:
       # - reducir chapa_edge_inner_px estabiliza la toma de borde de chapa.
       # Blindaje comun de scanner_2: nunca producir indefinidamente sin una
       # decision visual, y nunca parar por una unica evidencia geometrica.
+      consecutive_nok_frames: 3
       stop_min_frames: 3
       low_quality_stop_frames: 16
       inspection_stall_warn_s: 3.0

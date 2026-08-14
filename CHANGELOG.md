@@ -79,6 +79,48 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-14 - Tadeo + Codex
+
+#### Cambio 295 - Parada uniforme y efectiva al tercer NOK en ambos scanners y materiales
+
+**Pedido:** revisar el flujo completo de parada porque en la prueba de planta se
+configuraron 3 NOK desde Tolerancias, pasaron tres NOK reales y la linea no se
+detuvo. La regla requerida es 3 NOK consecutivos para scanner 1 y scanner 2,
+tanto Esterilla como Microperforado.
+
+**Causa raiz:** habia tres bloqueos acumulados. Los cuatro perfiles efectivos
+cargaban `consecutive_nok_frames=9999`, Microperforado de scanner 1 imponia ademas
+`stop_min_frames=4`, y la gracia inicial de 100 inspecciones/30 segundos anulaba
+y reiniciaba la racha NOK al alcanzar el umbral. Por eso una prueba de tres NOK
+al comienzo de RUN no podia detener aun cuando el control visual mostrara NOK.
+
+**Cambios:**
+- `config/tolerancias.yaml`, `config/io_map.yaml` y `src/utils/config.py`: regla
+  efectiva uniforme de 3 para racha NOK, faltantes persistentes, desalineacion y
+  piso duro en las cuatro combinaciones scanner/material.
+- `src/controller/scanner_controller.py`: la gracia inicial queda limitada a los
+  detectores geometricos de encuadre; ya no suprime una decision completa de
+  tres NOK consecutivos. El tercer NOK pasa a `FAULT`, corta el solenoide con
+  `write_critical` (5 reintentos y verificacion), apaga verde/amarillo y enciende
+  rojo para el scanner correspondiente.
+- `src/ui/tolerance_window.py`: el control ahora se llama
+  `NOK consecutivos para detener`, explica su efecto real y usa rango seguro
+  `3..20`; se elimina la recomendacion anterior de dejarlo en 9999.
+- `tests/test_scanner_controller.py` y `tests/test_config.py`: regresion cruzada
+  para scanner 1/2 por Esterilla/Microperforado. Confirma que dos NOK mantienen
+  RUN, el tercero detiene incluso dentro de la gracia inicial, corta el solenoide
+  semantico correcto y deja la luz roja. `scripts/verify_config.py` valida los
+  cuatro perfiles efectivos.
+
+**Validacion:** `79 passed`; `py_compile`, `git diff --check` y
+`scripts/verify_config.py` correctos. Construccion del camino productivo con
+`InspectionSystem(disable_plc_outputs=True)` correcta: ambos controladores activos
+cargan umbral 3 sin escribir al PLC. Los cuatro perfiles informan
+`consecutive_nok_frames=3`, `stop_min_frames=3`,
+`machine_stop_missing_frames=3` y `pattern_align_stop_frames=3`.
+
+---
+
 ### Sesion 2026-08-12 - Tadeo + Codex
 
 #### Cambio 294 - Ambos scanners amplian a 60 segundos la espera antes de ERROR

@@ -114,15 +114,14 @@ _PARAMS: list[dict[str, Any]] = [
     ),
     dict(
         key="consecutive_nok_frames",
-        label="FAULT general de respaldo",
+        label="NOK consecutivos para detener",
         desc=(
-            "Respaldo que mezcla cualquier causa NOK consecutiva. En producción debe "
-            "permanecer en 9999 para evitar falsas fallas; las paradas reales usan "
-            "los controles específicos de faltantes y patrón desalineado."
+            "Cantidad de imágenes NOK consecutivas necesarias para detener este "
+            "scanner con la chapa seleccionada. El valor productivo requerido es 3."
         ),
         unit="frames",
         vtype="int",
-        vmin=2, vmax=9999, vstep=1,
+        vmin=3, vmax=20, vstep=1,
     ),
     dict(
         key="pattern_align_severe_abs_max_px",
@@ -936,20 +935,6 @@ class _ScannerTolerancePanel(QWidget):
                 f"Nitidez mínima = {blur_min:.0f}\n\n"
                 "Este valor puede aceptar imágenes muy borrosas y generar "
                 "falsos agujeros faltantes.\n"
-                "¿Guardar de todas formas?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if resp != QMessageBox.StandardButton.Yes:
-                return
-
-        # Confirmación si consecutive_nok_frames está en valor de calibración
-        nok_frames = updates.get("consecutive_nok_frames", 0)
-        if isinstance(nok_frames, (int, float)) and int(nok_frames) >= 500:
-            resp = QMessageBox.question(
-                self,
-                "FAULT desactivado",
-                f"consecutive_nok_frames = {int(nok_frames)}\n\n"
-                "Con este valor el FAULT automático está prácticamente desactivado.\n"
                 "¿Guardar de todas formas?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )

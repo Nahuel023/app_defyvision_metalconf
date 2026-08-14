@@ -18,10 +18,10 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "aspect_ratio_max": 2.5,
     "align_match_tol_px": 80.0,
     "min_match_count": 8,
-    # El FAULT generico por cualquier racha NOK queda desactivado en produccion.
-    # Las paradas reales usan detectores especificos y persistentes (faltante o
-    # desalineacion), evitando que causas NOK distintas se mezclen en una falsa falla.
-    "consecutive_nok_frames": 9999,
+    # Regla productiva comun: tres resultados NOK consecutivos detienen el scanner.
+    # Los detectores especificos de faltantes/desalineacion siguen aportando una
+    # segunda via de seguridad, pero nunca desactivan esta racha general.
+    "consecutive_nok_frames": 3,
     "frame_rate_hz": 5.0,
     "max_response_sec": 1.0,
     "edge_margin_px": 15.0,
