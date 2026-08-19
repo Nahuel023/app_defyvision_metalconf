@@ -79,6 +79,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-19 (reset NOK inmediato) - Tadeo + Codex
+
+#### Cambio 302 - Un frame OK limpia inmediatamente los NOK activos
+
+**Pedido:** dejar de exigir varios frames OK para limpiar los frames NOK; el
+primer resultado OK debe resetearlos y el NOK siguiente debe comenzar otra vez
+desde uno.
+
+**Hallazgo:** la racha de seguridad `_nok_streak` ya se cortaba con un solo OK,
+pero la tarjeta NOK del operario mostraba `_nok_count`, un contador que esperaba
+`200` OK consecutivos antes de volver a cero (comportamiento del Cambio 242).
+
+**Cambios:**
+- `src/controller/scanner_controller.py`: cualquier resultado `OK` de calidad
+  valida pone inmediatamente en cero `_nok_streak`, su reloj y `_nok_count`. Se
+  retiro el contador intermedio de frames OK y el umbral configurable de 200.
+  Los frames `LOW_QUALITY` siguen siendo inconclusos: no suman ni borran una
+  racha; las paradas y evidencias historicas tampoco se borran.
+- `src/utils/config.py`: retirado el default obsoleto
+  `nok_count_reset_frames=200`, para que una configuracion antigua no pueda
+  restaurar accidentalmente la espera.
+- `tests/test_scanner_controller.py`: regresion parametrizada para ambos
+  scanners y ambos modelos. La secuencia `NOK, NOK, OK, NOK` exige racha/contador
+  `2 -> 0 -> 1`.
+
+**Validacion:** suite completa `99 passed`; pruebas dirigidas `30 passed`,
+`py_compile`, `scripts/verify_config.py`, importacion del CLI y
+`git diff --check` correctos.
+
+---
+
 ### Sesion 2026-08-19 (proteccion de ROI) - Tadeo + Codex
 
 #### Cambio 301 - Retiro del ajuste manual de ROI para el operario

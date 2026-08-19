@@ -95,6 +95,35 @@ def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
         controller.shutdown()
 
 
+@pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
+@pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
+def test_first_ok_frame_resets_all_active_nok_counters(
+    scanner_id: str, model: str
+) -> None:
+    """Un OK corta de inmediato tanto la racha como el contador visible NOK."""
+    controller = ScannerController(
+        scanner_id, _FakeIO(scanner_id=scanner_id, model=model), _FakeCamera()
+    )
+    try:
+        controller._state = ScannerState.RUNNING
+        controller.inject_result(False, count=2)
+        assert controller.get_status()["nok_streak"] == 2
+        assert controller.get_status()["nok_count"] == 2
+
+        controller.inject_result(True, count=1)
+        status = controller.get_status()
+        assert status["nok_streak"] == 0
+        assert status["nok_count"] == 0
+
+        # El NOK siguiente inicia una racha completamente nueva desde uno.
+        controller.inject_result(False, count=1)
+        status = controller.get_status()
+        assert status["nok_streak"] == 1
+        assert status["nok_count"] == 1
+    finally:
+        controller.shutdown()
+
+
 def test_start_enters_running_even_if_solenoid_is_blocked(monkeypatch) -> None:
     """El IOMap bloquea el solenoide en modo seguro, pero start() arranca igual:
     la escritura se intenta y su rechazo no impide la sesión de inspección."""

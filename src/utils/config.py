@@ -58,7 +58,6 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     # Fail-safe: una camara que solo entrega LOW_QUALITY tampoco esta inspeccionando.
     # Tras esta racha se corta la maquina y se pasa a ERROR. 0 = deshabilitado.
     "low_quality_stop_frames": 25,
-    "nok_count_reset_frames": 200,    # frames OK seguidos antes de resetear a 0 el contador NOK de la sesion
     "extra_min_dist_factor": 0.0,     # 0 = todos los extras se muestran; >0 = umbral en múltiplos de tol_xy_px
     "machine_stop_enabled": False,
     "machine_stop_missing_frames": 5,
