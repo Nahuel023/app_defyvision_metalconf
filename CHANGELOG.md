@@ -138,6 +138,18 @@ columna `(ci=6)` aparecia ausente en aproximadamente 70% de los frames evaluados
 sus perfiles. La capacidad ya es generica; la activacion deliberadamente es por
 scanner/modelo para no trasladar geometria entre opticas.
 
+**Entrega V34 Cython para PC industrial (2026-08-19):**
+- ZIP: `dist/DEFYVISION_METALCONF_V34_CYTHON_2026-08-19.zip`.
+- Fuente empaquetada: commit `c11ed6ce6c6416f9f025f9480447c31cf6d6f57e`.
+- Tamano: `146957942` bytes.
+- SHA-256: `9C44277069121D45DD235ADA8A97223397A7E96F0535D34CB4214CBDDB6CF8E1`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+  Unico `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- Integridad ZIP correcta: `635` entradas, CRC sin errores y todos los archivos
+  requeridos presentes.
+- Configuracion empaquetada verificada con `roi_hole_anchor_enabled=true` y los
+  parametros calibrados de ROI automatico en `scanner_1/modelo_B`.
+
 ---
 
 ### Sesion 2026-08-14 - Tadeo + Codex
