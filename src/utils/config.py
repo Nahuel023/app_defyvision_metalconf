@@ -133,6 +133,17 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_autocorrect_max_width_delta_px": 0.0,
     "roi_detect_margin_px": 0,
     "roi_detect_min_contrast": 30.0,
+    # ROI por agujeros extremos del patron: se calcula en cada frame y conserva
+    # el ancho original de holes.json (incluidos sus margenes de seguridad).
+    "roi_hole_anchor_enabled": False,
+    "roi_hole_anchor_edge_quantile": 0.05,
+    "roi_hole_anchor_cluster_extra_px": 20.0,
+    "roi_hole_anchor_min_holes": 12,
+    "roi_hole_anchor_min_pattern_ratio": 0.25,
+    "roi_hole_anchor_max_span_delta_px": 12.0,
+    "roi_hole_anchor_max_shift_px": 120.0,
+    "roi_hole_anchor_radius_min_factor": 0.55,
+    "roi_hole_anchor_radius_max_factor": 1.70,
     "roi_recenter_enabled": False,
     "roi_recenter_warmup_frames": 20,
     "roi_recenter_trigger_delta_px": 6.0,

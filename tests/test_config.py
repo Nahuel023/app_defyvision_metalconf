@@ -131,6 +131,20 @@ def test_scanner2_microperforado_profile_keeps_safe_live_tracking() -> None:
     assert esterilla["continuous_position_threshold"] == 3.0
 
 
+def test_scanner1_microperforado_uses_per_frame_hole_anchored_roi() -> None:
+    cfg = load_tolerances(model="modelo_B", scanner_id="scanner_1")
+
+    assert cfg["roi_hole_anchor_enabled"] is True
+    assert cfg["roi_hole_anchor_edge_quantile"] == 0.05
+    assert cfg["roi_hole_anchor_cluster_extra_px"] == 20.0
+    assert cfg["roi_hole_anchor_min_holes"] == 40
+    assert cfg["roi_hole_anchor_max_span_delta_px"] == 12.0
+    # Los mecanismos historicos que persisten roi.json siguen apagados: el ROI
+    # nuevo se resuelve en memoria, de forma independiente para cada frame.
+    assert cfg["roi_recenter_enabled"] is False
+    assert cfg["roi_slow_ema_enabled"] is False
+
+
 def test_all_scanners_and_materials_use_independent_60s_22s_jam_watchdog() -> None:
     for scanner_id in ("scanner_1", "scanner_2"):
         for model in ("modelo_A", "modelo_B"):

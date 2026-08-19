@@ -10,7 +10,17 @@ import numpy as np
 from src.io.load_images import load_bgr_image
 from src.io.save_results import save_image
 from src.patterns.pattern_io import load_pattern, find_pattern_path, Pattern, infer_scanner_id
-from src.patterns.roi import apply_roi, load_roi, save_roi, ROI, RuntimeROIInfo, resolve_runtime_roi, load_roi_drift_state, save_roi_drift_state
+from src.patterns.roi import (
+    ROI,
+    RuntimeROIInfo,
+    apply_roi,
+    estimate_roi_from_pattern_holes,
+    load_roi,
+    load_roi_drift_state,
+    resolve_runtime_roi,
+    save_roi,
+    save_roi_drift_state,
+)
 from src.pipeline.align_edge import EdgeAlignResult, align_image_by_right_edge
 from src.pipeline.annotate import draw_compare_overlay, draw_centering_overlay, draw_machine_stop_badge, draw_status_indicator, draw_tilt_indicator, draw_blur_indicator, draw_roi_indicator, draw_roi_health_indicator
 from src.pipeline.machine_stop import MachineStopDetector
@@ -361,6 +371,33 @@ def _inspect_bgr(
     )
     roi_detect_margin_px = int(tolerances.get("roi_detect_margin_px", 0))
     roi_detect_min_contrast = float(tolerances.get("roi_detect_min_contrast", 30.0))
+    roi_hole_anchor_enabled = bool(
+        tolerances.get("roi_hole_anchor_enabled", False)
+    )
+    roi_hole_anchor_edge_quantile = float(
+        tolerances.get("roi_hole_anchor_edge_quantile", 0.05)
+    )
+    roi_hole_anchor_cluster_extra_px = float(
+        tolerances.get("roi_hole_anchor_cluster_extra_px", 20.0)
+    )
+    roi_hole_anchor_min_holes = int(
+        tolerances.get("roi_hole_anchor_min_holes", 12)
+    )
+    roi_hole_anchor_min_pattern_ratio = float(
+        tolerances.get("roi_hole_anchor_min_pattern_ratio", 0.25)
+    )
+    roi_hole_anchor_max_span_delta_px = float(
+        tolerances.get("roi_hole_anchor_max_span_delta_px", 12.0)
+    )
+    roi_hole_anchor_max_shift_px = float(
+        tolerances.get("roi_hole_anchor_max_shift_px", 120.0)
+    )
+    roi_hole_anchor_radius_min_factor = float(
+        tolerances.get("roi_hole_anchor_radius_min_factor", 0.55)
+    )
+    roi_hole_anchor_radius_max_factor = float(
+        tolerances.get("roi_hole_anchor_radius_max_factor", 1.70)
+    )
     roi_recenter_enabled = bool(tolerances.get("roi_recenter_enabled", False))
     roi_recenter_warmup_frames = int(tolerances.get("roi_recenter_warmup_frames", 20))
     roi_recenter_trigger_delta_px = float(tolerances.get("roi_recenter_trigger_delta_px", 6.0))
@@ -387,6 +424,20 @@ def _inspect_bgr(
     roi_slow_ema_save_every     = int(tolerances.get("roi_slow_ema_save_every", 300))
     roi_slow_ema_warmup_frames  = int(tolerances.get("roi_slow_ema_warmup_frames", 300))
 
+    preprocess_kw = dict(
+        threshold=threshold, use_channel=use_channel, polarity=polarity,
+        use_clahe=use_clahe, clahe_clip=clahe_clip, clahe_tile=clahe_tile,
+        use_otsu=use_otsu,
+        use_adaptive=use_adaptive, adaptive_block_size=adaptive_block_size, adaptive_c=adaptive_c,
+        blur_ksize=blur_ksize, open_ksize=open_ksize, close_ksize=close_ksize,
+    )
+    detect_kw = dict(
+        min_area=min_area, max_area=max_area,
+        circularity_min=circularity_min,
+        aspect_ratio_max=aspect_ratio_max,
+        edge_margin_px=edge_margin_px,
+    )
+
     edge_align_enabled = bool(tolerances.get("edge_align_enabled", True))
     if edge_align_enabled:
         img_aligned, align_res = align_image_by_right_edge(img_full, ema_state=ema_state)
@@ -396,6 +447,7 @@ def _inspect_bgr(
 
     roi_info: RuntimeROIInfo | None = None
     if roi is not None:
+        anchor_roi = saved_roi or roi
         roi, roi_info = resolve_runtime_roi(
             img_aligned,
             roi,
@@ -406,6 +458,100 @@ def _inspect_bgr(
             margin_px=roi_detect_margin_px,
             min_contrast=roi_detect_min_contrast,
         )
+
+        if roi_hole_anchor_enabled and pattern.points:
+            hole_anchor_state = pre.setdefault("roi_hole_anchor_state", {})
+            try:
+                full_detect_kw = dict(detect_kw)
+                full_detect_kw["edge_margin_px"] = 0.0
+                full_mask = preprocess_for_holes(img_aligned, **preprocess_kw)
+                full_holes = detect_holes_from_mask(full_mask, **full_detect_kw)
+
+                # Los radios del patron eliminan polvo/reflejos y los circulos de
+                # la fecha Sony. Se usa un rango por cuantiles para conservar
+                # patrones con dos tamanos de agujero (Esterilla).
+                anchor_holes = full_holes
+                pattern_radii = np.asarray(pattern.radii or [], dtype=np.float64)
+                pattern_radii = pattern_radii[
+                    np.isfinite(pattern_radii) & (pattern_radii > 0.0)
+                ]
+                if pattern_radii.size:
+                    radius_lo = float(np.quantile(pattern_radii, 0.05)) * max(
+                        0.0, roi_hole_anchor_radius_min_factor
+                    )
+                    radius_hi = float(np.quantile(pattern_radii, 0.95)) * max(
+                        roi_hole_anchor_radius_min_factor,
+                        roi_hole_anchor_radius_max_factor,
+                    )
+                    anchor_holes = [
+                        hole for hole in full_holes
+                        if radius_lo <= float(hole.r) <= radius_hi
+                    ]
+
+                reference_roi = hole_anchor_state.get("last_roi") or anchor_roi
+                estimate = estimate_roi_from_pattern_holes(
+                    [hole.x for hole in anchor_holes],
+                    [point[0] for point in pattern.points],
+                    reference_roi,
+                    frame_w=img_aligned.shape[1],
+                    frame_h=img_aligned.shape[0],
+                    edge_quantile=roi_hole_anchor_edge_quantile,
+                    cluster_extra_px=roi_hole_anchor_cluster_extra_px,
+                    min_holes=roi_hole_anchor_min_holes,
+                    min_pattern_ratio=roi_hole_anchor_min_pattern_ratio,
+                    max_span_delta_px=roi_hole_anchor_max_span_delta_px,
+                    max_shift_px=roi_hole_anchor_max_shift_px,
+                )
+                if estimate is not None:
+                    roi = estimate.roi
+                    hole_anchor_state["last_roi"] = roi
+                    hole_anchor_state["failure_streak"] = 0
+                    pre["roi"] = roi
+                    roi_info = RuntimeROIInfo(
+                        frame_w=img_aligned.shape[1],
+                        frame_h=img_aligned.shape[0],
+                        saved_roi=anchor_roi,
+                        effective_roi=roi,
+                        detected_roi=roi,
+                        shift_x=float(roi.x - anchor_roi.x),
+                        width_delta_px=0.0,
+                        auto_corrected=roi.x != anchor_roi.x,
+                        warning=(
+                            "ROI auto agujeros "
+                            f"x={roi.x} n={estimate.cluster_count} "
+                            f"bordes={estimate.left_shift_px:.1f}/{estimate.right_shift_px:.1f}"
+                        ),
+                    )
+                else:
+                    hole_anchor_state["failure_streak"] = int(
+                        hole_anchor_state.get("failure_streak", 0)
+                    ) + 1
+                    last_roi = hole_anchor_state.get("last_roi")
+                    if isinstance(last_roi, ROI):
+                        roi = last_roi
+                    roi_info = RuntimeROIInfo(
+                        frame_w=img_aligned.shape[1],
+                        frame_h=img_aligned.shape[0],
+                        saved_roi=anchor_roi,
+                        effective_roi=roi,
+                        detected_roi=None,
+                        shift_x=float(roi.x - anchor_roi.x),
+                        width_delta_px=0.0,
+                        auto_corrected=False,
+                        warning=(
+                            "ROI auto agujeros sin confianza; "
+                            f"conservada x={roi.x} "
+                            f"(racha={hole_anchor_state['failure_streak']})"
+                        ),
+                    )
+            except Exception as exc:
+                # El ROI automatico es una mejora fail-safe: si un frame raro o
+                # una configuracion invalida falla, la inspeccion continua con la
+                # ROI ya validada en vez de tumbar el scanner.
+                logger.warning(
+                    "[%s/%s] ROI auto por agujeros no disponible: %s",
+                    scanner_id, model, exc,
+                )
         try:
             img = apply_roi(img_aligned, roi)
         except ValueError as exc:
@@ -431,20 +577,6 @@ def _inspect_bgr(
                 f"Recalibrá con: "
                 f"build-pattern --model {model} --scanner {scanner_id or '<scanner_id>'} --img <ref.jpg>"
             )
-
-    preprocess_kw = dict(
-        threshold=threshold, use_channel=use_channel, polarity=polarity,
-        use_clahe=use_clahe, clahe_clip=clahe_clip, clahe_tile=clahe_tile,
-        use_otsu=use_otsu,
-        use_adaptive=use_adaptive, adaptive_block_size=adaptive_block_size, adaptive_c=adaptive_c,
-        blur_ksize=blur_ksize, open_ksize=open_ksize, close_ksize=close_ksize,
-    )
-    detect_kw = dict(
-        min_area=min_area, max_area=max_area,
-        circularity_min=circularity_min,
-        aspect_ratio_max=aspect_ratio_max,
-        edge_margin_px=edge_margin_px,
-    )
 
     mask  = preprocess_for_holes(img, **preprocess_kw)
     holes = detect_holes_from_mask(mask, **detect_kw)
@@ -1120,7 +1252,7 @@ def _inspect_bgr(
         report,
         model=model,
         scanner_id=scanner_id,
-        enabled=roi_recenter_enabled,
+        enabled=roi_recenter_enabled and not roi_hole_anchor_enabled,
         warmup_frames=roi_recenter_warmup_frames,
         trigger_delta_px=roi_recenter_trigger_delta_px,
         edge_missing_min=roi_recenter_edge_missing_min,
@@ -1142,7 +1274,7 @@ def _inspect_bgr(
         roi_info,
         model,
         scanner_id,
-        enabled=roi_slow_ema_enabled,
+        enabled=roi_slow_ema_enabled and not roi_hole_anchor_enabled,
         alpha=roi_slow_ema_alpha,
         threshold_px=roi_slow_ema_threshold_px,
         confirm_frames=roi_slow_ema_confirm_frames,

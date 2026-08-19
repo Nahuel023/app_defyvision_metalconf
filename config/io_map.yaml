@@ -67,6 +67,16 @@ scanner_1:
       # El lote OK queda en cero faltantes; cualquier agujero ausente se marca NOK
       # y debe persistir por la regla temporal antes de detener produccion.
       grid_max_missing: 0
+      # ROI automatico por frame: ubica la ventana desde los agujeros extremos
+      # izquierdo/derecho del patron y conserva w=255 (margen ~34px por lado).
+      # Calibrado con los 200 OK del 19-08-2026: origen observado x=203..208.
+      roi_hole_anchor_enabled: true
+      roi_hole_anchor_edge_quantile: 0.05
+      roi_hole_anchor_cluster_extra_px: 20.0
+      roi_hole_anchor_min_holes: 40
+      roi_hole_anchor_min_pattern_ratio: 0.25
+      roi_hole_anchor_max_span_delta_px: 12.0
+      roi_hole_anchor_max_shift_px: 120.0
       # En scanner_1 el ruido normal deja faltantes sueltos repartidos, pero el defecto
       # editado arma una misma columna con 4-6 agujeros ausentes durante varios frames.
       # Usamos esa firma para machine_stop sin depender de que el frame entero ya haya

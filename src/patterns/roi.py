@@ -38,6 +38,136 @@ class RuntimeROIInfo:
     warning: str = ""
 
 
+@dataclass(frozen=True)
+class PatternHoleROIResult:
+    """Resultado de ubicar una ROI con los agujeros laterales del patron.
+
+    ``left_shift_px`` y ``right_shift_px`` son dos mediciones independientes
+    del origen X. Su diferencia permite rechazar nubes de puntos que no tienen
+    el mismo ancho que el patron (ruido, timestamp o reflejos).
+    """
+
+    roi: ROI
+    candidate_count: int
+    cluster_count: int
+    left_shift_px: float
+    right_shift_px: float
+    span_delta_px: float
+
+
+def estimate_roi_from_pattern_holes(
+    detected_x: list[float] | np.ndarray,
+    pattern_x: list[float] | np.ndarray,
+    reference_roi: ROI,
+    *,
+    frame_w: int,
+    frame_h: int,
+    edge_quantile: float = 0.05,
+    cluster_extra_px: float = 20.0,
+    min_holes: int = 12,
+    min_pattern_ratio: float = 0.25,
+    max_span_delta_px: float = 12.0,
+    max_shift_px: float = 120.0,
+) -> Optional[PatternHoleROIResult]:
+    """Estima el origen X de la ROI desde los agujeros izquierdo y derecho.
+
+    Primero conserva el intervalo horizontal mas denso cuyo ancho coincide con
+    el patron. Esto evita que puntos aislados del backlight o del timestamp
+    estiren artificialmente los extremos. Luego compara cuantiles laterales de
+    la nube detectada y del patron. La ROI mantiene exactamente el ancho con el
+    que fue construido ``holes.json``; ese ancho ya incluye los margenes de
+    seguridad laterales y evita desincronizar las coordenadas del matching.
+
+    Devuelve ``None`` ante evidencia insuficiente o geometria incompatible. El
+    caller puede entonces conservar la ultima ROI valida, sin saltos peligrosos.
+    """
+    if frame_w <= 0 or frame_h <= 0 or reference_roi.w > frame_w:
+        return None
+    if not 0.0 < edge_quantile < 0.25:
+        return None
+
+    detected = np.asarray(detected_x, dtype=np.float64).reshape(-1)
+    pattern = np.asarray(pattern_x, dtype=np.float64).reshape(-1)
+    detected = np.sort(detected[np.isfinite(detected)])
+    pattern = np.sort(pattern[np.isfinite(pattern)])
+    if detected.size < 2 or pattern.size < 2:
+        return None
+
+    pattern_span = float(pattern[-1] - pattern[0])
+    if pattern_span <= 1.0:
+        return None
+
+    # Ventana apenas mayor que la distancia entre los agujeros extremos. El
+    # desempate favorece la nube mas cercana a la ultima posicion conocida,
+    # pero la cantidad de agujeros siempre tiene prioridad.
+    cluster_width = pattern_span + max(0.0, float(cluster_extra_px))
+    expected_center = float(reference_roi.x) + float(np.median(pattern))
+    best_start = 0
+    best_end = 0
+    best_score = (-1, float("-inf"))
+    end = 0
+    for start in range(int(detected.size)):
+        if end < start:
+            end = start
+        while end < detected.size and detected[end] - detected[start] <= cluster_width:
+            end += 1
+        count = end - start
+        if count <= 0:
+            continue
+        center = float(np.median(detected[start:end]))
+        score = (count, -abs(center - expected_center))
+        if score > best_score:
+            best_score = score
+            best_start, best_end = start, end
+
+    cluster = detected[best_start:best_end]
+    required = max(
+        2,
+        int(min_holes),
+        int(np.ceil(max(0.0, float(min_pattern_ratio)) * pattern.size)),
+    )
+    if cluster.size < required:
+        return None
+
+    det_left, det_right = np.quantile(
+        cluster, [edge_quantile, 1.0 - edge_quantile]
+    )
+    pat_left, pat_right = np.quantile(
+        pattern, [edge_quantile, 1.0 - edge_quantile]
+    )
+    left_shift = float(det_left - pat_left)
+    right_shift = float(det_right - pat_right)
+    span_delta = abs(right_shift - left_shift)
+    if max_span_delta_px > 0.0 and span_delta > max_span_delta_px:
+        return None
+
+    target_x_float = (left_shift + right_shift) / 2.0
+    if max_shift_px > 0.0 and abs(target_x_float - reference_roi.x) > max_shift_px:
+        return None
+
+    target_x = int(round(target_x_float))
+    max_x = frame_w - reference_roi.w
+    clamped_x = max(0, min(target_x, max_x))
+    # Si para entrar al frame hubiera que alterar materialmente el origen, las
+    # coordenadas relativas ya no coincidirian con el patron.
+    if abs(clamped_x - target_x_float) > max(1.0, max_span_delta_px):
+        return None
+
+    roi_y = max(0, min(int(reference_roi.y), frame_h - 1))
+    roi_h = min(int(reference_roi.h), frame_h - roi_y)
+    if roi_h <= 0:
+        return None
+
+    return PatternHoleROIResult(
+        roi=ROI(x=clamped_x, y=roi_y, w=reference_roi.w, h=roi_h),
+        candidate_count=int(detected.size),
+        cluster_count=int(cluster.size),
+        left_shift_px=left_shift,
+        right_shift_px=right_shift,
+        span_delta_px=span_delta,
+    )
+
+
 def roi_min_width_for(model: str | None, scanner_id: str | None) -> int:
     """Ancho mínimo de ROI (px) configurado para este modelo/scanner.
 

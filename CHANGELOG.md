@@ -79,6 +79,67 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-19 - Tadeo + Codex
+
+#### Cambio 299 - ROI automatico por agujeros extremos en scanner 1 Microperforado
+
+**Pedido:** dejar de depender de una posicion X fija del ROI. El area de analisis
+debe ubicarse automaticamente en cada frame a partir de los agujeros laterales
+izquierdo/derecho del patron, con ancho seguro, porque un corrimiento horizontal
+de pocos pixeles estaba perdiendo una columna completa y generando fallas falsas.
+Se aportaron 200 frames OK de
+`19-08-2026-MICROPERFORADO_1_SCANNER_1` para iniciar la calibracion por scanner.
+
+**Hallazgo:** el ROI historico de `scanner_1/modelo_B` estaba fijo en
+`x=213, w=255`, mientras que los agujeros extremos del nuevo lote ubicaban el origen
+correcto entre `x=203..208`. Con el ROI fijo, el pipeline normal daba solamente
+`5/54 raw OK`, `49/54 raw NOK`, hasta 14 missing y 25 machine stop falsos; la
+columna `(ci=6)` aparecia ausente en aproximadamente 70% de los frames evaluados.
+
+**Cambios:**
+- `src/patterns/roi.py`: nuevo estimador robusto por extremos. Selecciona la nube
+  horizontal densa compatible con el ancho del patron, descarta reflejos/puntos
+  aislados y calcula dos origenes independientes desde los cuantiles izquierdo y
+  derecho. Si no coinciden dentro de tolerancia, rechaza el frame para el
+  recentrado en vez de mover el ROI hacia ruido.
+- `src/inspection.py`: deteccion del ROI en cada frame antes del recorte. Filtra
+  candidatos por los radios calibrados del patron, conserva el ultimo ROI valido
+  como fallback y nunca persiste movimientos automaticos en `roi.json`. El ancho
+  permanece en `255 px`, exactamente el `image_size` del patron, con unos `34 px`
+  de margen a cada lado de los agujeros extremos; asi no se desincronizan las
+  coordenadas de matching. Los recentrados historicos/EMA quedan inhibidos cuando
+  esta estrategia esta activa para evitar dos controladores compitiendo.
+- `config/tolerancias.yaml` y `src/utils/config.py`: defaults fail-safe y parametros
+  configurables del anclaje por agujeros. Queda apagado por defecto y se activa
+  solamente tras validar frames propios de cada scanner/modelo.
+- `config/io_map.yaml`: activado para `scanner_1/modelo_B` con minimo 40 agujeros,
+  margen de agrupacion de 20 px, discrepancia maxima entre bordes de 12 px y rango
+  de busqueda de 120 px. `scanner_1/modelo_A` y ambos modelos de scanner 2 siguen
+  apagados hasta recibir/validar sus lotes OK propios.
+- `tests/test_roi_hole_anchor.py` y `tests/test_config.py`: regresiones de ruido
+  lateral, evidencia insuficiente, ancho incompatible, configuracion por perfil y
+  seguimiento horizontal desde `x=175` hasta `x=235` sin cambiar el ancho.
+
+**Validacion:**
+- Pipeline normal con movimiento sobre el lote aportado: `54/54 raw OK`, `0 NOK`,
+  `0 machine stop` (antes `5/54 OK`, `49 NOK`, `25 machine stop`).
+- Analisis forzado de las 200 imagenes: `200/200 OK`, `0 missing`, `0 machine
+  stop`; ROI detectado con confianza en los 200 frames, rango `x=203..208`.
+- Traslacion sintetica del mismo frame entre `-30..+30 px`: 11/11 OK, cero
+  missing; el ROI acompano exactamente de `x=175` a `x=235`.
+- Defecto sintetico borrando un agujero central: permanece `NOK missing=1` en los
+  cinco frames y machine stop aparece al quinto, confirmando que el ROI automatico
+  no oculta un defecto real.
+- Suite completa: `93 passed`; `scripts/verify_config.py`, importacion del CLI y
+  `git diff --check` correctos.
+
+**Proxima fase:** repetir la misma calibracion con carpetas OK propias de
+`scanner_1/modelo_A`, `scanner_2/modelo_A` y `scanner_2/modelo_B` antes de activar
+sus perfiles. La capacidad ya es generica; la activacion deliberadamente es por
+scanner/modelo para no trasladar geometria entre opticas.
+
+---
+
 ### Sesion 2026-08-14 - Tadeo + Codex
 
 #### Cambio 298 - Configuracion afinada en planta adoptada como oficial (sin build)
