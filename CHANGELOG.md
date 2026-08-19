@@ -139,6 +139,18 @@ Se aportaron dos lotes OK propios de esa optica:
 - Suite completa: `94 passed`; `scripts/verify_config.py`, `py_compile` y
   `git diff --check` correctos.
 
+**Entrega V35 Cython para PC industrial (2026-08-19):**
+- ZIP: `dist/DEFYVISION_METALCONF_V35_CYTHON_2026-08-19.zip`.
+- Fuente empaquetada: commit `771cb0e37123fdef20f523a439d7f66d1e9ed5b3`.
+- Tamano: `146958215` bytes.
+- SHA-256: `7802D4C362D86DE01BF6C193F308DDA55961DA1D874A7908A7895A5FD838DD15`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+  Unico `license.cp314-win_amd64.pyd`, ningun `license.py` y `_lsap` incluido.
+- Integridad ZIP correcta: `635` entradas, CRC sin errores y patrones requeridos
+  de scanner 1/2 presentes.
+- Configuracion empaquetada confirmada con ROI automatico y firma lateral en
+  `scanner_1/modelo_B`, `scanner_2/modelo_A` y `scanner_2/modelo_B`.
+
 ---
 
 ### Sesion 2026-08-19 - Tadeo + Codex
