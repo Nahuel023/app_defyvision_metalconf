@@ -79,6 +79,37 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-19 (proteccion de ROI) - Tadeo + Codex
+
+#### Cambio 301 - Retiro del ajuste manual de ROI para el operario
+
+**Pedido:** eliminar la ventana de ajuste manual para evitar que el operario
+pueda desplazar o guardar una ROI incorrecta ahora que su posicion se resuelve
+automaticamente en produccion.
+
+**Cambios:**
+- `src/ui/operator.py`: se retiro de la cabecera el boton `Area de analisis` y
+  su ruta de apertura. El unico acceso del operario a esa ventana queda limitado
+  a las tolerancias seguras.
+- `src/ui/tolerance_window.py`: la ventana ya no crea el panel `_RoiPanel`, no
+  muestra la pestana manual ni inicia la camara para calibrar. Una llamada vieja
+  a `show_page(1)` queda neutralizada y solo conserva las tolerancias.
+- La calibracion tecnica de ROI permanece exclusivamente dentro de `Servicio`,
+  detras del login, para mantenimiento autorizado; el ROI automatico del
+  pipeline no fue modificado.
+- `tests/test_tolerance_model_selector.py`: regresion de interfaz que comprueba
+  que no existen los botones `Area de analisis`/`GUARDAR AREA`, que el panel no
+  se instancia y que la antigua pagina 1 no puede reactivarlo.
+
+**Validacion:** suite completa `95 passed`; `py_compile`,
+`scripts/verify_config.py`, importacion del CLI, inicio/apagado de
+`InspectionSystem` sin salidas PLC y `git diff --check` correctos.
+
+**Build:** no se genero una version nueva por indicacion expresa de Tadeo. El
+cambio queda listo para el proximo build solicitado.
+
+---
+
 ### Sesion 2026-08-19 (scanner 2) - Tadeo + Codex
 
 #### Cambio 300 - ROI automatico en Microperforado y Esterilla de scanner 2

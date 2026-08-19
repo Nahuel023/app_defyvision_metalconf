@@ -959,7 +959,7 @@ class _ScannerTolerancePanel(QWidget):
 
 
 # ----------------------------------------------------------------------
-# Ventana principal con dos pestañas: Tolerancias | Ajuste de ROI
+# Ventana de ajustes seguros para el operario (solo tolerancias)
 # ----------------------------------------------------------------------
 
 class ToleranceWindow(QMainWindow):
@@ -968,6 +968,8 @@ class ToleranceWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self._system = system
+        # Compatibilidad defensiva para código/tests antiguos: el panel manual no
+        # se crea ni se agrega al árbol de widgets del operario.
         self._roi_panel: _RoiPanel | None = None
         self._stack: QStackedWidget | None = None
         self.setWindowTitle("Ajustes — DEFYVISION")
@@ -988,16 +990,12 @@ class ToleranceWindow(QMainWindow):
         root.setContentsMargins(14, 14, 14, 14)
         root.setSpacing(10)
 
-        # ── Barra de encabezado: título + tabs ────────────────────────
+        # ── Barra de encabezado ──────────────────────────────────────
         root.addWidget(self._build_header())
 
-        # ── Stacked widget ────────────────────────────────────────────
-        self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background:transparent;")
-        self._stack.addWidget(self._build_params_page())   # índice 0
-        self._roi_panel = _RoiPanel(self._system)
-        self._stack.addWidget(self._roi_panel)              # índice 1
-        root.addWidget(self._stack, stretch=1)
+        # El ROI automático reemplazó al ajuste manual. No instanciar _RoiPanel
+        # evita que pueda abrirse por un acceso indirecto o una llamada antigua.
+        root.addWidget(self._build_params_page(), stretch=1)
 
     def _build_header(self) -> QWidget:
         bar = QWidget()
@@ -1016,30 +1014,6 @@ class ToleranceWindow(QMainWindow):
         )
         lay.addWidget(title)
         lay.addStretch()
-
-        def _tab(label: str, idx: int, active_color: str) -> QPushButton:
-            btn = QPushButton(label)
-            btn.setFixedHeight(34)
-            btn.setMinimumWidth(160)
-            btn.setCheckable(True)
-            btn.setStyleSheet(
-                f"QPushButton {{ background:transparent; color:{_MUTED};"
-                f"border:1px solid {_BORDER}; border-radius:7px;"
-                f"font-size:12px; font-weight:700; padding:0 16px; }}"
-                f"QPushButton:checked {{ background:{active_color};"
-                f"color:#ffffff; border-color:{active_color}; }}"
-                f"QPushButton:hover:!checked {{ background:{active_color}22;"
-                f"border-color:{active_color}; color:{_TEXT}; }}"
-            )
-            btn.clicked.connect(lambda: self._switch_tab(idx))
-            return btn
-
-        self._tab_tol = _tab("Tolerancias",       0, "#0d9488")
-        self._tab_roi = _tab("Área de análisis",  1, "#7c3aed")
-        self._tab_tol.setChecked(True)
-
-        lay.addWidget(self._tab_tol)
-        lay.addWidget(self._tab_roi)
         return bar
 
     def _build_params_page(self) -> QWidget:
@@ -1090,23 +1064,12 @@ class ToleranceWindow(QMainWindow):
         root.addWidget(reload_btn)
         return page
 
-    # ── Navegación de pestañas ────────────────────────────────────────
-
     def show_page(self, idx: int) -> None:
-        """Selecciona la pagina al abrir la ventana desde el operador
-        (0 = Tolerancias, 1 = Area de analisis)."""
-        self._switch_tab(idx)
+        """Compatibilidad: cualquier página solicitada muestra tolerancias.
 
-    def _switch_tab(self, idx: int) -> None:
-        prev = self._stack.currentIndex() if self._stack else 0
-        self._stack.setCurrentIndex(idx)
-        self._tab_tol.setChecked(idx == 0)
-        self._tab_roi.setChecked(idx == 1)
-        # Gestionar cámara en vivo
-        if idx == 1 and prev != 1 and self._roi_panel is not None:
-            self._roi_panel.start_live()
-        elif idx != 1 and prev == 1 and self._roi_panel is not None:
-            self._roi_panel.stop_live()
+        La antigua página 1 (ROI manual) fue retirada del modo operario.
+        """
+        _ = idx
 
     # ── Eventos de ventana ────────────────────────────────────────────
 
@@ -1117,15 +1080,5 @@ class ToleranceWindow(QMainWindow):
             if isinstance(panel, _ScannerTolerancePanel):
                 panel._load_values()
 
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        # Solo arrancar live si la pestaña ROI está activa al abrir
-        if (self._roi_panel is not None
-                and self._stack is not None
-                and self._stack.currentIndex() == 1):
-            self._roi_panel.start_live()
-
     def closeEvent(self, event) -> None:
-        if self._roi_panel is not None:
-            self._roi_panel.stop_live()
         super().closeEvent(event)

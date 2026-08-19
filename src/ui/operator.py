@@ -1673,15 +1673,15 @@ class OperatorWindow(QMainWindow):
         errors_btn    = _hbtn("Grabación",        "#e11d48", self._open_errors)      # rojo (rec)
         service_btn   = _hbtn("Servicio",         "#475569", self._open_service)     # gris
         tolerance_btn = _hbtn("Tolerancias",      "#0d9488", self._open_tolerances)  # teal
-        area_btn      = _hbtn("Área de análisis", "#7c3aed", self._open_area)        # violeta
 
-        # Dos filas: navegacion arriba, ajustes abajo (entra comodo y legible).
+        # Dos filas: navegacion arriba y el unico ajuste permitido al operario
+        # abajo. La calibracion manual de ROI queda exclusivamente en Servicio,
+        # protegido por login, porque el ROI productivo ahora es automatico.
         row1 = QHBoxLayout(); row1.setSpacing(5)
         for b in (metrics_btn, errors_btn, service_btn):
             row1.addWidget(b)
         row2 = QHBoxLayout(); row2.setSpacing(5)
-        for b in (tolerance_btn, area_btn):
-            row2.addWidget(b)
+        row2.addWidget(tolerance_btn)
         ctrl_lay.addLayout(row1)
         ctrl_lay.addLayout(row2)
 
@@ -1811,17 +1811,10 @@ class OperatorWindow(QMainWindow):
         self._metrics_win.activateWindow()
 
     def _open_tolerances(self) -> None:
-        self._open_ajustes(page=0)
-
-    def _open_area(self) -> None:
-        """Abre la ventana de ajustes directamente en 'Área de análisis'."""
-        self._open_ajustes(page=1)
-
-    def _open_ajustes(self, page: int) -> None:
+        """Abre los ajustes seguros; el ROI manual no se expone al operario."""
         from src.ui.tolerance_window import ToleranceWindow
         if self._tolerance_win is None or not self._tolerance_win.isVisible():
             self._tolerance_win = ToleranceWindow(self._system)
-        self._tolerance_win.show_page(page)
         self._tolerance_win.showMaximized()
         from src.ui.anim import fade_in
         fade_in(self._tolerance_win)
