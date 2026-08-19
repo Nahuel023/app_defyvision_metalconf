@@ -108,6 +108,20 @@ pero la tarjeta NOK del operario mostraba `_nok_count`, un contador que esperaba
 `py_compile`, `scripts/verify_config.py`, importacion del CLI y
 `git diff --check` correctos.
 
+**Entrega V36 Cython para PC industrial (2026-08-19):**
+- Incluye este reset NOK inmediato y el retiro del ajuste manual de ROI del
+  operario realizado en el Cambio 301.
+- ZIP: `dist/DEFYVISION_METALCONF_V36_CYTHON_2026-08-19.zip`.
+- Fuente empaquetada: commit `cb072a8a17da8b00a8d1258f45dcff0d33eb9fd6`.
+- Tamano: `146956819` bytes.
+- SHA-256: `B00886EDD3506B4AEA174EEC0929C4B4B98897A2904F4EC511637D513FAAF744`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`), sin conexion a PLC/camaras.
+- Integridad ZIP correcta: `635` entradas y CRC sin errores; unico
+  `license.cp314-win_amd64.pyd`, ningun `license.py`, `_lsap` y patrones
+  requeridos presentes.
+- Configuracion empaquetada confirmada con ROI automatico en
+  `scanner_1/modelo_B`, `scanner_2/modelo_A` y `scanner_2/modelo_B`.
+
 ---
 
 ### Sesion 2026-08-19 (proteccion de ROI) - Tadeo + Codex
