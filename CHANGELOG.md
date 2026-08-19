@@ -122,6 +122,19 @@ pero la tarjeta NOK del operario mostraba `_nok_count`, un contador que esperaba
 - Configuracion empaquetada confirmada con ROI automatico en
   `scanner_1/modelo_B`, `scanner_2/modelo_A` y `scanner_2/modelo_B`.
 
+**Rebuild V37 Cython para PC industrial (2026-08-19):**
+- Regenerado por pedido de Tadeo desde el estado auditado, sin cambios de codigo
+  posteriores a V36.
+- ZIP: `dist/DEFYVISION_METALCONF_V37_CYTHON_2026-08-19.zip`.
+- Fuente empaquetada: commit `1ba2f67b3898c4e378a488a431f43ac9176aba52`.
+- Tamano: `146955758` bytes.
+- SHA-256: `F112B050756C4D455CD915E516B488F085FECE64134F9E9DDA3C5E7134FA6943`.
+- Smoke test congelado correcto (`BUILD_SMOKE_OK`); `635` entradas, CRC sin
+  errores, Cython/Hungarian/patrones/configuracion verificados.
+- Limitacion conocida sin modificar: `scanner_1/modelo_A` (Esterilla) sigue
+  bloqueado por ROI `235x480` contra patron fallback `275x480`; requiere lote OK
+  propio de scanner 1 para recalibrar antes de habilitar ese perfil.
+
 ---
 
 ### Sesion 2026-08-19 (proteccion de ROI) - Tadeo + Codex
