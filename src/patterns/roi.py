@@ -68,6 +68,8 @@ def estimate_roi_from_pattern_holes(
     min_pattern_ratio: float = 0.25,
     max_span_delta_px: float = 12.0,
     max_shift_px: float = 120.0,
+    expected_edge_delta_px: float = 0.0,
+    max_edge_delta_deviation_px: float = 0.0,
 ) -> Optional[PatternHoleROIResult]:
     """Estima el origen X de la ROI desde los agujeros izquierdo y derecho.
 
@@ -139,6 +141,17 @@ def estimate_roi_from_pattern_holes(
     right_shift = float(det_right - pat_right)
     span_delta = abs(right_shift - left_shift)
     if max_span_delta_px > 0.0 and span_delta > max_span_delta_px:
+        return None
+    # Cada optica/patron tiene una pequena asimetria estable entre la medicion
+    # izquierda y derecha. Una columna extrema ausente invierte o altera esa
+    # firma aun cuando el ancho absoluto todavia parezca aceptable. Rechazarla
+    # impide que el ROI se mueva para "tapar" un defecto de borde.
+    signed_edge_delta = right_shift - left_shift
+    if (
+        max_edge_delta_deviation_px > 0.0
+        and abs(signed_edge_delta - expected_edge_delta_px)
+        > max_edge_delta_deviation_px
+    ):
         return None
 
     target_x_float = (left_shift + right_shift) / 2.0

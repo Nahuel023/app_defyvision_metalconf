@@ -142,6 +142,8 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     "roi_hole_anchor_min_pattern_ratio": 0.25,
     "roi_hole_anchor_max_span_delta_px": 12.0,
     "roi_hole_anchor_max_shift_px": 120.0,
+    "roi_hole_anchor_expected_edge_delta_px": 0.0,
+    "roi_hole_anchor_max_edge_delta_deviation_px": 0.0,
     "roi_hole_anchor_radius_min_factor": 0.55,
     "roi_hole_anchor_radius_max_factor": 1.70,
     "roi_recenter_enabled": False,

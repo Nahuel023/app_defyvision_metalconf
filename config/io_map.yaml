@@ -77,6 +77,10 @@ scanner_1:
       roi_hole_anchor_min_pattern_ratio: 0.25
       roi_hole_anchor_max_span_delta_px: 12.0
       roi_hole_anchor_max_shift_px: 120.0
+      # Firma lateral normal del lote OK. Si cambia, puede faltar una columna
+      # extrema: conservar la ultima ROI valida para no ocultar el defecto.
+      roi_hole_anchor_expected_edge_delta_px: -3.3
+      roi_hole_anchor_max_edge_delta_deviation_px: 5.0
       # En scanner_1 el ruido normal deja faltantes sueltos repartidos, pero el defecto
       # editado arma una misma columna con 4-6 agujeros ausentes durante varios frames.
       # Usamos esa firma para machine_stop sin depender de que el frame entero ya haya
@@ -166,6 +170,17 @@ scanner_2:
       inspection_stall_timeout_s: 0.0
       roi_recenter_enabled: false
       roi_precal_enabled: false
+      # ROI automatico calibrado con 501 frames OK del 31-07-2026.
+      # w=415 conserva los amplios margenes propios del patron de Esterilla.
+      roi_hole_anchor_enabled: true
+      roi_hole_anchor_edge_quantile: 0.05
+      roi_hole_anchor_cluster_extra_px: 20.0
+      roi_hole_anchor_min_holes: 30
+      roi_hole_anchor_min_pattern_ratio: 0.25
+      roi_hole_anchor_max_span_delta_px: 12.0
+      roi_hole_anchor_max_shift_px: 120.0
+      roi_hole_anchor_expected_edge_delta_px: 0.8
+      roi_hole_anchor_max_edge_delta_deviation_px: 5.0
     modelo_B:
       # Overrides especificos para microperforado en scanner_2.
       # No afectan scanner_1; se mezclan arriba de tolerancias.yaml solo cuando
@@ -197,6 +212,17 @@ scanner_2:
       # "corregir" solo). Solo actua si la deriva se sostiene durante varios frames;
       # deriva gradual y persistente, no un salto puntual.
       roi_recenter_enabled: false   # FIJO: el ROI NO se auto-mueve ni se re-guarda; la posicion queda exactamente como se calibro (evita el corrimiento lateral al reiniciar)
+      # ROI automatico calibrado con 499 frames OK del 24-07-2026.
+      # La firma +8.1px entre bordes evita recentrar si desaparece una columna.
+      roi_hole_anchor_enabled: true
+      roi_hole_anchor_edge_quantile: 0.05
+      roi_hole_anchor_cluster_extra_px: 20.0
+      roi_hole_anchor_min_holes: 40
+      roi_hole_anchor_min_pattern_ratio: 0.25
+      roi_hole_anchor_max_span_delta_px: 14.0
+      roi_hole_anchor_max_shift_px: 120.0
+      roi_hole_anchor_expected_edge_delta_px: 8.1
+      roi_hole_anchor_max_edge_delta_deviation_px: 5.0
       roi_recenter_mode: move
       # Seguir la deriva antes de que el recorte llegue a perder agujeros. El
       # baseline se aprende solo despues del movimiento real de RUN.

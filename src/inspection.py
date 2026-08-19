@@ -392,6 +392,12 @@ def _inspect_bgr(
     roi_hole_anchor_max_shift_px = float(
         tolerances.get("roi_hole_anchor_max_shift_px", 120.0)
     )
+    roi_hole_anchor_expected_edge_delta_px = float(
+        tolerances.get("roi_hole_anchor_expected_edge_delta_px", 0.0)
+    )
+    roi_hole_anchor_max_edge_delta_deviation_px = float(
+        tolerances.get("roi_hole_anchor_max_edge_delta_deviation_px", 0.0)
+    )
     roi_hole_anchor_radius_min_factor = float(
         tolerances.get("roi_hole_anchor_radius_min_factor", 0.55)
     )
@@ -501,6 +507,10 @@ def _inspect_bgr(
                     min_pattern_ratio=roi_hole_anchor_min_pattern_ratio,
                     max_span_delta_px=roi_hole_anchor_max_span_delta_px,
                     max_shift_px=roi_hole_anchor_max_shift_px,
+                    expected_edge_delta_px=roi_hole_anchor_expected_edge_delta_px,
+                    max_edge_delta_deviation_px=(
+                        roi_hole_anchor_max_edge_delta_deviation_px
+                    ),
                 )
                 if estimate is not None:
                     roi = estimate.roi

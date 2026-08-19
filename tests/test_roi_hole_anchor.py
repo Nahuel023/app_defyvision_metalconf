@@ -87,12 +87,49 @@ def test_hole_anchor_follows_small_and_large_horizontal_movements() -> None:
         assert result.roi.w == reference.w
 
 
-def test_hole_anchor_is_enabled_only_for_validated_scanner1_microperforado() -> None:
+def test_edge_signature_rejects_a_missing_extreme_column() -> None:
+    pattern_x = _pattern_columns()
+    reference = ROI(x=213, y=0, w=255, h=480)
+    right_column_missing = pattern_x[pattern_x < pattern_x.max()] + 205.0
+
+    without_signature = estimate_roi_from_pattern_holes(
+        right_column_missing,
+        pattern_x,
+        reference,
+        frame_w=640,
+        frame_h=480,
+        min_holes=40,
+        max_span_delta_px=30.0,
+    )
+    with_signature = estimate_roi_from_pattern_holes(
+        right_column_missing,
+        pattern_x,
+        reference,
+        frame_w=640,
+        frame_h=480,
+        min_holes=40,
+        max_span_delta_px=30.0,
+        expected_edge_delta_px=0.0,
+        max_edge_delta_deviation_px=5.0,
+    )
+
+    assert without_signature is not None
+    assert with_signature is None
+
+
+def test_hole_anchor_is_enabled_for_all_validated_profiles() -> None:
     scanner1_micro = load_tolerances("modelo_B", "scanner_1")
     scanner1_esterilla = load_tolerances("modelo_A", "scanner_1")
     scanner2_micro = load_tolerances("modelo_B", "scanner_2")
+    scanner2_esterilla = load_tolerances("modelo_A", "scanner_2")
 
     assert scanner1_micro["roi_hole_anchor_enabled"] is True
     assert scanner1_micro["roi_hole_anchor_min_holes"] == 40
+    assert scanner1_micro["roi_hole_anchor_expected_edge_delta_px"] == -3.3
     assert scanner1_esterilla["roi_hole_anchor_enabled"] is False
-    assert scanner2_micro["roi_hole_anchor_enabled"] is False
+    assert scanner2_micro["roi_hole_anchor_enabled"] is True
+    assert scanner2_micro["roi_hole_anchor_min_holes"] == 40
+    assert scanner2_micro["roi_hole_anchor_expected_edge_delta_px"] == 8.1
+    assert scanner2_esterilla["roi_hole_anchor_enabled"] is True
+    assert scanner2_esterilla["roi_hole_anchor_min_holes"] == 30
+    assert scanner2_esterilla["roi_hole_anchor_expected_edge_delta_px"] == 0.8

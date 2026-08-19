@@ -79,6 +79,68 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-19 (scanner 2) - Tadeo + Codex
+
+#### Cambio 300 - ROI automatico en Microperforado y Esterilla de scanner 2
+
+**Pedido:** despues del buen resultado en scanner 1 Microperforado, aplicar el
+mismo ROI automatico por agujeros extremos a los dos materiales de scanner 2.
+Se aportaron dos lotes OK propios de esa optica:
+- `24-07-2026-MICROPERFORADO_2_SCANNER_2`: 499 frames, 640x480.
+- `31-07-2026-ESTERILLA_1_SCANNER_2`: 501 frames, 640x480.
+
+**Hallazgos:**
+- Microperforado ubica el origen automatico en `x=210..216` con ROI de 255 px;
+  la firma lateral normal (shift derecho menos izquierdo) queda centrada en
+  `+8.1 px`.
+- Esterilla ubica el origen en `x=110..116` con ROI de 415 px; sus dos tamanos
+  de agujero quedan incluidos por el filtro de radios y la firma lateral normal
+  queda en `+0.8 px`.
+- Un chequeo sintetico revelo una defensa necesaria: al desaparecer una columna
+  extrema, el ancho absoluto podia seguir pareciendo valido y el ROI podia
+  intentar compensarlo. La diferencia firmada entre ambos bordes cambia de forma
+  clara en ese caso y permite rechazar el movimiento.
+
+**Cambios:**
+- `src/patterns/roi.py`: el estimador acepta ahora la firma lateral esperada y
+  una desviacion maxima. Si la relacion izquierda/derecha no coincide con el
+  lote OK, devuelve sin confianza para conservar la ultima ROI valida. Esto evita
+  que un recentrado automatico oculte una columna extrema faltante.
+- `src/inspection.py`, `src/utils/config.py` y `config/tolerancias.yaml`: wiring y
+  defaults fail-safe para `roi_hole_anchor_expected_edge_delta_px` y
+  `roi_hole_anchor_max_edge_delta_deviation_px`; cero mantiene compatibilidad y
+  deja la compuerta apagada en perfiles no calibrados.
+- `config/io_map.yaml`:
+  - `scanner_2/modelo_B`: ROI automatico activado con minimo 40 agujeros,
+    discrepancia absoluta maxima 14 px, firma `+8.1 +/- 5 px` y ancho 255 px.
+  - `scanner_2/modelo_A`: activado con minimo 30 agujeros, discrepancia maxima
+    12 px, firma `+0.8 +/- 5 px` y ancho 415 px.
+  - `scanner_1/modelo_B`: se agrega la firma calibrada `-3.3 +/- 5 px`, medida
+    sobre sus 200 OK, sin cambiar el resto de su configuracion.
+- `tests/test_roi_hole_anchor.py` y `tests/test_config.py`: regresion que elimina
+  una columna extrema y exige rechazo por firma, mas validacion independiente de
+  los tres perfiles activos.
+
+**Validacion:**
+- Scanner 2 Microperforado, todos los frames forzados: `499/499 OK`, cero NOK,
+  cero machine stop, ROI `x=210..216`; pipeline productivo con movimiento:
+  `395/395 raw OK` y `395/395 temporal OK`.
+- Scanner 2 Esterilla, todos los frames forzados: `497/501 raw OK`; los cuatro
+  NOK son exactamente los frames desenfocados preexistentes 0075/0076/0343/0344,
+  iguales con ROI fijo y automatico. Pipeline productivo: `352/354 raw OK`, los
+  dos NOK quedan aislados, `354/354 temporal OK` y cero machine stop.
+- Traslacion sintetica `-30..+30 px`: 11/11 OK y cero missing en cada material;
+  el ROI acompana de `x=185..245` en Microperforado y `x=83..143` en Esterilla.
+- Defectos sinteticos: columna interior borrada en Microperforado produce 9
+  missing y machine stop al cuarto frame; columna extrema borrada en Esterilla
+  hace fallback a `x=113` y mantiene `NOK` con 7 missing.
+- Regresion scanner 1 Microperforado: `200/200 OK`, cero missing/fallback/machine
+  stop y ROI `x=203..208` despues de activar su firma lateral.
+- Suite completa: `94 passed`; `scripts/verify_config.py`, `py_compile` y
+  `git diff --check` correctos.
+
+---
+
 ### Sesion 2026-08-19 - Tadeo + Codex
 
 #### Cambio 299 - ROI automatico por agujeros extremos en scanner 1 Microperforado
