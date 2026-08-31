@@ -79,6 +79,41 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-31 (instancia unica) - Tadeo + Codex
+
+#### Cambio 304 - Bloqueo riguroso de ejecuciones simultaneas
+
+**Pedido:** impedir que los operarios abran varias veces `metalconf.exe`, ya
+que varias sesiones acumuladas durante horas compiten por camaras/PLC y pueden
+desestabilizar o bloquear el sistema.
+
+**Cambios:**
+- Nuevo `src/utils/single_instance.py`: usa el mutex global nativo de Windows
+  `Global\\DEFYVISION_METALCONF_HARDWARE_SESSION_V1`. La adquisicion es atomica
+  entre procesos, permanece activa durante toda la sesion y Windows la libera
+  automaticamente incluso ante cierre abrupto o crash; no depende de archivos
+  centinela que puedan quedar obsoletos.
+- `src/main.py`: el bloqueo ocurre antes de construir `InspectionSystem`, abrir
+  camaras o conectar el PLC. Cubre `run`, `service` y `define-roi`, de modo que
+  tampoco se puede abrir servicio/calibracion mientras produccion usa el
+  hardware. Una segunda ejecucion muestra un aviso nativo siempre visible y
+  termina limpiamente sin tocar hardware. Si Windows no permite verificar el
+  mutex, el arranque falla cerrado por seguridad en lugar de admitir una posible
+  sesion duplicada.
+- `metalconf.spec`: inclusion explicita del nuevo modulo en el artefacto
+  PyInstaller.
+- `tests/test_single_instance.py`: regresiones para exclusion mutua, liberacion
+  del mutex, bloqueo antes del comando de hardware y fallo cerrado.
+
+**Validacion:** mutex global probado directamente en Windows: primera
+adquisicion `True`, segunda simultanea `False` y nueva adquisicion `True` tras
+liberar la primera. Prueba adicional con dos procesos Python separados:
+`FIRST_ACQUIRED=True` y `SECOND_ACQUIRED=False`. `py_compile`, importacion de
+`src.main`, `scripts/verify_config.py` y suite completa `103 passed` correctos.
+No se genero un nuevo EXE/ZIP; el cambio queda listo para la proxima entrega.
+
+---
+
 ### Sesion 2026-08-31 (configuracion real de fabrica) - Tadeo + Codex
 
 #### Cambio 303 - Configuracion de produccion adoptada como fuente oficial

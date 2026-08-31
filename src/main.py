@@ -2,7 +2,15 @@ import argparse
 import logging
 from pathlib import Path
 
+from src.utils.single_instance import (
+    SingleInstanceGuard,
+    show_already_running_notice,
+    show_guard_failure_notice,
+)
+
 logger = logging.getLogger(__name__)
+
+_HARDWARE_COMMANDS = frozenset(("run", "service", "define-roi"))
 
 
 def _show_fatal_dialog(title: str, exc: BaseException) -> None:
@@ -981,6 +989,19 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    instance_guard: SingleInstanceGuard | None = None
+    if args.command in _HARDWARE_COMMANDS:
+        instance_guard = SingleInstanceGuard()
+        try:
+            if not instance_guard.acquire():
+                show_already_running_notice()
+                return 0
+        except Exception as exc:
+            # Fail-closed: si el control de instancia unica falla, no se permite
+            # que una ejecucion potencialmente duplicada alcance PLC/camaras.
+            show_guard_failure_notice(exc)
+            return 1
+
     # Ultima red de seguridad: cualquier excepcion no controlada de un
     # subcomando se registra en disco y (en modos graficos) se muestra en un
     # dialogo, en vez de escupir un traceback crudo. Los comandos run/service
@@ -1000,6 +1021,9 @@ def main() -> int:
             pass
         _show_fatal_dialog("Error inesperado", exc)
         return 1
+    finally:
+        if instance_guard is not None:
+            instance_guard.close()
 
 
 if __name__ == "__main__":

@@ -38,6 +38,7 @@ a = Analysis(
         'src.utils.license',
         'src.utils.logger',
         'src.utils.paths',
+        'src.utils.single_instance',
         'src.utils.state',
         'src.utils.model_names',
         'src.utils.camera_config',
