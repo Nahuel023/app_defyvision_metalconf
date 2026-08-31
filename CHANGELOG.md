@@ -79,6 +79,35 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-31 (entrega Cython V38) - Tadeo + Codex
+
+#### Cambio 306 - EXE de produccion con configuracion real y evidencia terminal
+
+**Pedido:** generar el ejecutable Cython actualizado para instalarlo en la
+computadora de produccion.
+
+**Entrega:**
+- `dist/DEFYVISION_METALCONF_V38_CYTHON_2026-08-31.zip` generado desde el commit
+  fuente `8b7cc76790968f8899ba1abfb5554556967f3da7`.
+- El paquete incluye el bloqueo global de instancia unica, la configuracion
+  real copiada de fabrica y el nuevo historial que conserva el frame causante
+  de cada parada/error.
+- `src.utils.license` esta compilado con Cython como
+  `license.cp314-win_amd64.pyd`; no se distribuye `license.py`.
+- SHA-256 del ZIP:
+  `7B56265DC12F460ED3795D312FAD462D6B9F9FC342513D4F1E1D45CBC76EB891`.
+  Tamano: `146971247` bytes (aprox. 140.16 MiB), 635 entradas.
+
+**Validacion:** build oficial `scripts/build_exe.ps1` correcto; smoke test del
+EXE congelado correcto sin conectar PLC/camaras; `src.utils.single_instance`
+verificado dentro del archivo PyInstaller; `scipy.optimize._lsap` presente;
+configuracion `io_map.yaml` del ZIP identica a la fuente
+(`A5CCFC9460730103DA5D35C990D2DF2DB669AA963ED3D535056F533C6BD19B16`);
+patrones y ROI de ambos scanners presentes; lectura CRC completa del ZIP sin
+errores; suite completa `109 passed`.
+
+---
+
 ### Sesion 2026-08-31 (evidencia terminal confiable) - Tadeo + Codex
 
 #### Cambio 305 - Cada parada conserva y abre el frame que tomo la decision
