@@ -1,9 +1,26 @@
 import time
 
+import numpy as np
 import pytest
 
 from src.controller.scanner_controller import ScannerController
+import src.controller.scanner_controller as scanner_controller_module
 from src.utils.state import OperationMode, ScannerState
+
+
+@pytest.fixture(autouse=True)
+def _disable_real_event_writes(monkeypatch):
+    """Los tests inyectan su recorder; nunca deben escribir en data/events real."""
+    original = scanner_controller_module.load_tolerances
+
+    def load_without_events(*args, **kwargs):
+        cfg = original(*args, **kwargs)
+        cfg["events_enabled"] = False
+        return cfg
+
+    monkeypatch.setattr(
+        scanner_controller_module, "load_tolerances", load_without_events
+    )
 
 
 class _FakeIO:
@@ -69,6 +86,20 @@ class _StuckThread:
 
     def join(self, timeout=None) -> None:
         self.join_calls += 1
+
+
+class _EvidenceRecorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict]] = []
+
+    def flush_event(self, event_type: str, reason: str, **kwargs) -> None:
+        self.events.append((event_type, reason, kwargs))
+
+    def get_post_event_dir(self):
+        return None
+
+    def close(self) -> None:
+        return None
 
 
 def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
@@ -262,5 +293,55 @@ def test_simultaneous_final_nok_and_machine_stop_always_cuts_solenoid(
             (f"{scanner_id}.light_yellow", False),
             (f"{scanner_id}.light_red", True),
         ]
+    finally:
+        controller.shutdown()
+
+
+def test_machine_stop_passes_exact_terminal_overlay_to_event_recorder() -> None:
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    recorder = _EvidenceRecorder()
+    controller._recorder = recorder
+    try:
+        controller._state = ScannerState.RUNNING
+        controller._startup_grace_remaining = 0
+        controller._startup_grace_seconds = 0.0
+
+        controller.inject_machine_stop("DEFECTO DE PRUEBA")
+
+        assert len(recorder.events) == 1
+        event_type, reason, evidence = recorder.events[0]
+        assert event_type == "machine_stop"
+        assert reason == "15 faltantes persistentes"
+        assert evidence["trigger_role"] == "visual_trigger"
+        assert evidence["trigger_overlay"] is not None
+        assert evidence["metadata"]["missing"] == 15
+        assert evidence["metadata"]["visual_cause"] is True
+    finally:
+        controller.shutdown()
+
+
+def test_nonvisual_error_records_last_frame_as_labeled_context() -> None:
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    recorder = _EvidenceRecorder()
+    controller._recorder = recorder
+    context = np.full((120, 160, 3), 80, dtype=np.uint8)
+    controller._last_evidence_frame = context.copy()
+    controller._last_evidence_frame_mono = time.monotonic()
+    try:
+        controller._record_terminal_event(
+            "camera_loss",
+            "Cámara sin señal durante 3.0 s",
+            visual_cause=False,
+            metadata={"missing_seconds": 3.0},
+        )
+
+        assert len(recorder.events) == 1
+        _, _, evidence = recorder.events[0]
+        assert evidence["trigger_role"] == "last_known_context"
+        assert np.array_equal(evidence["trigger_frame"], context)
+        overlay = evidence["trigger_overlay"]
+        assert overlay is not None
+        assert tuple(int(v) for v in overlay[10, 10]) == (0, 0, 170)
+        assert evidence["metadata"]["visual_cause"] is False
     finally:
         controller.shutdown()

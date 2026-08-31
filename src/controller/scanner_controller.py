@@ -90,6 +90,11 @@ class ScannerController:
         self._nok_streak = 0
         self._lq_streak  = 0
         self._last_result: Optional[InspectionResult] = None
+        # Ultimo frame fresco conservado exclusivamente para evidencias de
+        # errores no visuales (camara perdida, atasco, stall o crash). Nunca se
+        # presenta como causa visual: el manifest lo rotula como contexto.
+        self._last_evidence_frame: Optional[np.ndarray] = None
+        self._last_evidence_frame_mono: float = 0.0
         self._streak_start_mono: Optional[float] = None  # time.monotonic() del 1er NOK de la racha activa
 
         # Métricas de sesión (resetean en start())
@@ -243,13 +248,19 @@ class ScannerController:
             # tambien y lanzar un segundo hilo inspector sobre esta instancia.
             self._state = ScannerState.RUNNING
             self._state_reason = ""
+            self._last_evidence_frame = None
+            self._last_evidence_frame_mono = 0.0
 
         if mode == OperationMode.AUTO:
             if not self._camera.is_running:
                 if not self._camera.start():
+                    reason = "Cámara sin señal: no se pudo iniciar la captura"
                     self._transition(
                         ScannerState.ERROR,
-                        "Cámara sin señal: no se pudo iniciar la captura",
+                        reason,
+                    )
+                    self._record_terminal_event(
+                        "camera_start_error", reason, visual_cause=False
                     )
                     return False
 
@@ -279,6 +290,8 @@ class ScannerController:
             self._stall_warned            = False
             self._jam_run_start_mono      = None
             self._last_movement_mono      = None
+            self._last_evidence_frame     = None
+            self._last_evidence_frame_mono = 0.0
             self._stop_event.clear()
             self._force_inspect.clear()
 
@@ -393,6 +406,8 @@ class ScannerController:
             self._stall_warned              = False
             self._jam_run_start_mono        = None
             self._last_movement_mono        = None
+            self._last_evidence_frame       = None
+            self._last_evidence_frame_mono  = 0.0
             self._state_reason              = ""
 
         self._transition(ScannerState.IDLE)
@@ -479,6 +494,12 @@ class ScannerController:
         # backlight permanece encendido siempre
         self._set_lights(red=True)   # poll_loop toma el blink
         self._fire_state_changed()
+        self._record_terminal_event(
+            "forced_fault",
+            "Falla forzada desde Modo Servicio",
+            visual_cause=False,
+            metadata={"simulation": True},
+        )
         return True
 
     def inject_machine_stop(self, reason: str = "SIMULACION") -> None:
@@ -845,22 +866,49 @@ class ScannerController:
                 break
             time.sleep(0.1)
         if frame is None:
+            reason = "Autodiagnóstico fallido: cámara sin imagen"
             logger.error(f"[{self._id}] selftest: no se obtuvo frame en {timeout_s}s")
-            self._set_state_reason("Autodiagnóstico fallido: cámara sin imagen")
+            self._set_state_reason(reason)
+            self._record_terminal_event(
+                "startup_selftest_error",
+                reason,
+                visual_cause=False,
+                metadata={"timeout_seconds": timeout_s, "state": "error"},
+            )
             return False
+        with self._lock:
+            self._last_evidence_frame = frame.copy()
+            self._last_evidence_frame_mono = time.monotonic()
         result = self._inspector.inspect(model, frame, frame_id="selftest",
                                          scanner_id=self._id)
         if result is None:
+            reason = "Autodiagnóstico fallido: el análisis no respondió"
             logger.error(f"[{self._id}] selftest: inspector no retornó resultado")
-            self._set_state_reason("Autodiagnóstico fallido: el análisis no respondió")
+            self._set_state_reason(reason)
+            self._record_terminal_event(
+                "startup_selftest_error",
+                reason,
+                visual_cause=False,
+                metadata={"state": "error"},
+            )
             return False
+        with self._lock:
+            self._last_result = result
         ratio = getattr(result, "detection_ratio", 1.0)
         if ratio < min_ratio:
+            reason = (
+                f"Autodiagnóstico: detección baja ({ratio:.0%}, mínimo {min_ratio:.0%})"
+            )
             logger.error(
                 f"[{self._id}] selftest FALLO: detection_ratio={ratio:.0%} < {min_ratio:.0%}"
             )
-            self._set_state_reason(
-                f"Autodiagnóstico: detección baja ({ratio:.0%}, mínimo {min_ratio:.0%})"
+            self._set_state_reason(reason)
+            self._record_terminal_event(
+                "startup_selftest_error",
+                reason,
+                result=result,
+                visual_cause=True,
+                metadata={"minimum_detection_ratio": min_ratio, "state": "error"},
             )
             return False
         logger.info(f"[{self._id}] selftest OK: detection_ratio={ratio:.0%}")
@@ -1001,6 +1049,16 @@ class ScannerController:
                 self._state_reason = (
                     f"Fallo interno del análisis ({type(exc).__name__})"
                 )
+                _crash_reason = self._state_reason
+            self._record_terminal_event(
+                "inspection_crash",
+                _crash_reason,
+                visual_cause=False,
+                metadata={
+                    "exception_type": type(exc).__name__,
+                    "exception_message": str(exc),
+                },
+            )
             try:
                 self._fire_state_changed()
             except Exception:
@@ -1105,6 +1163,7 @@ class ScannerController:
                     if missing_sec >= self._camera_missing_timeout_s:
                         escalate = (self._state == ScannerState.RUNNING)
                 if escalate:
+                    reason = f"Cámara sin señal durante {missing_sec:.1f} s"
                     logger.error(
                         f"[{self._id}] ERROR por perdida de camara - "
                         f"sin frames durante {missing_sec:.1f}s"
@@ -1113,7 +1172,13 @@ class ScannerController:
                     self._set_lights(red=True)
                     self._transition(
                         ScannerState.ERROR,
-                        f"Cámara sin señal durante {missing_sec:.1f} s",
+                        reason,
+                    )
+                    self._record_terminal_event(
+                        "camera_loss",
+                        reason,
+                        visual_cause=False,
+                        metadata={"missing_seconds": missing_sec},
                     )
                     return
                 self._stop_event.wait(timeout=0.033)
@@ -1140,6 +1205,8 @@ class ScannerController:
                     logger.info(f"[{self._id}] camara reconectada - vuelve inspeccion")
                 self._camera_missing_since = None
                 self._camera_missing_warned = False
+                self._last_evidence_frame = frame.copy()
+                self._last_evidence_frame_mono = time.monotonic()
 
             if self._recorder is not None:
                 self._recorder.add_frame(frame)
@@ -1214,11 +1281,16 @@ class ScannerController:
         self._set_lights(red=True)
         self._stop_event.set()
         self._fire_state_changed()
-        if self._recorder is not None:
-            try:
-                self._recorder.flush_event("machine_jam", self._state_reason)
-            except Exception as exc:
-                logger.error("[%s] EventRecorder jam flush error: %s", self._id, exc)
+        self._record_terminal_event(
+            "machine_jam",
+            self._state_reason,
+            visual_cause=False,
+            metadata={
+                "no_movement_seconds": stopped_s,
+                "position_difference": position_diff,
+                "movement_threshold": self._cont_pos_thr,
+            },
+        )
         return True
 
     def _check_inspection_stall(self, position_diff: float) -> bool:
@@ -1266,9 +1338,19 @@ class ScannerController:
         )
         self._cut_solenoid_critical("inspeccion detenida")
         self._set_lights(red=True)
-        self._transition(
-            ScannerState.ERROR,
-            f"Sin análisis durante {stalled_s:.1f} s; revise movimiento o imagen congelada",
+        reason = (
+            f"Sin análisis durante {stalled_s:.1f} s; revise movimiento o imagen congelada"
+        )
+        self._transition(ScannerState.ERROR, reason)
+        self._record_terminal_event(
+            "inspection_stall",
+            reason,
+            visual_cause=False,
+            metadata={
+                "stall_seconds": stalled_s,
+                "position_difference": position_diff,
+                "movement_threshold": self._cont_pos_thr,
+            },
         )
         return True
 
@@ -1446,14 +1528,17 @@ class ScannerController:
             self._set_lights(red=True)
             self._stop_event.set()
             self._fire_state_changed()
-            if self._recorder is not None:
-                try:
-                    self._recorder.flush_event(
-                        "low_quality_stop",
-                        f"{self._lq_streak} frames de calidad baja",
-                    )
-                except Exception as _exc:
-                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+            _quality_reason = self._state_reason or (
+                f"{self._lq_streak} frames de calidad baja"
+            )
+            self._record_terminal_event(
+                "low_quality_stop",
+                _quality_reason,
+                result=result,
+                visual_cause=True,
+                metadata={"low_quality_streak": self._lq_streak},
+            )
+            self._record_timeline_result(result, terminal=True)
             if self.on_result:
                 try:
                     self.on_result(result, streak)
@@ -1486,11 +1571,14 @@ class ScannerController:
             if _state_changed:
                 self._fire_state_changed()
 
-            if self._recorder is not None:
-                try:
-                    self._recorder.flush_event("machine_stop", _ms_reason)
-                except Exception as _exc:
-                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+            self._record_terminal_event(
+                "machine_stop",
+                _ms_reason,
+                result=result,
+                visual_cause=True,
+                metadata={"nok_streak": streak},
+            )
+            self._record_timeline_result(result, terminal=True)
 
             # Notificar UI con el frame que causó la parada (overlay + diálogo pantalla completa)
             if self.on_result:
@@ -1507,11 +1595,21 @@ class ScannerController:
             if streak_start_mono is not None:
                 elapsed_txt = f" ({time.monotonic() - streak_start_mono:.2f}s reales)"
             logger.warning(f"[{self._id}] FAULT — {streak} NOK consecutivos{elapsed_txt}")
-            if self._recorder is not None:
-                try:
-                    self._recorder.flush_event("fault", f"racha NOK {streak}")
-                except Exception as _exc:
-                    logger.error(f"[{self._id}] EventRecorder flush error: {_exc}")
+            _fault_reason = f"racha NOK {streak}"
+            self._record_terminal_event(
+                "fault",
+                _fault_reason,
+                result=result,
+                visual_cause=True,
+                metadata={
+                    "nok_streak": streak,
+                    "streak_elapsed_seconds": (
+                        None
+                        if streak_start_mono is None
+                        else max(0.0, time.monotonic() - streak_start_mono)
+                    ),
+                },
+            )
             self._cut_solenoid_critical("fault por racha NOK")
             # backlight permanece encendido siempre
             self._set_lights(red=True)   # poll_loop toma el blink a partir de aquí
@@ -1566,39 +1664,185 @@ class ScannerController:
 
                 self._enqueue_disk_task("ok_buffer", _write, allow_drop=True)
 
-        # Buffer cronológico — guarda todos los frames inspeccionados en orden
-        if self._tl_enabled and result.overlay is not None:
-            _tl_status = getattr(result, "frame_quality", "GOOD")
-            if _tl_status == "LOW_QUALITY":
-                _tl_tag = "LQ"
-            elif getattr(result, "machine_stop", False):
-                _tl_tag = "STOP"
-            elif result.status == "NOK":
-                _tl_tag = "NOK"
+        self._record_timeline_result(result)
+
+    def _record_terminal_event(
+        self,
+        event_type: str,
+        reason: str,
+        *,
+        result: Optional[InspectionResult] = None,
+        trigger_frame: Optional[np.ndarray] = None,
+        visual_cause: bool,
+        metadata: Optional[dict] = None,
+    ) -> None:
+        """Persiste la evidencia exacta de una decision terminal.
+
+        Para fallas geometricas/calidad, ``result`` es el frame que tomo la
+        decision. Para fallas de infraestructura se conserva el ultimo frame
+        conocido como contexto y se rotula en rojo para que nunca parezca una
+        imagen OK causante del error.
+        """
+        if self._recorder is None:
+            return
+        try:
+            with self._lock:
+                last_frame = (
+                    None
+                    if self._last_evidence_frame is None
+                    else self._last_evidence_frame.copy()
+                )
+                last_frame_mono = self._last_evidence_frame_mono
+                state = self._state.value
+                streak = self._nok_streak
+                position_diff = self._last_position_diff
+
+            raw = trigger_frame
+            if raw is None and result is not None:
+                raw = getattr(result, "image", None)
+            if raw is None:
+                raw = last_frame
+            if raw is not None:
+                raw = raw.copy()
+
+            if visual_cause and result is not None and result.overlay is not None:
+                overlay = result.overlay.copy()
+                trigger_role = "visual_trigger"
             else:
-                _tl_tag = "OK"
-            _tl_slot = self._tl_write % self._tl_max
-            self._tl_write += 1
-            _tl_path = self._tl_dir / f"{_tl_slot:05d}_{_tl_tag}.jpg"
-            _tl_img  = result.overlay
-            _tl_q    = self._tl_quality
-            _tl_dir  = self._tl_dir
+                overlay = self._build_error_context_overlay(raw, reason)
+                trigger_role = (
+                    "last_known_context" if raw is not None else "diagnostic_only"
+                )
 
-            def _write_tl(img=_tl_img, p=_tl_path, q=_tl_q, d=_tl_dir) -> None:
-                try:
-                    d.mkdir(parents=True, exist_ok=True)
-                    # Borrar el slot anterior del mismo número si existe (puede tener distinto tag)
-                    for old in d.glob(f"{p.stem.split('_')[0]}_*.jpg"):
-                        if old != p:
-                            try:
-                                old.unlink()
-                            except Exception:
-                                pass
-                    cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, q])
-                except Exception:
-                    pass
+            try:
+                model = str(self._io.scanner_config(self._id).get("model", ""))
+            except Exception:
+                model = ""
 
-            self._enqueue_disk_task("timeline", _write_tl, allow_drop=True)
+            event_metadata: dict = {
+                "state": state,
+                "model": model,
+                "visual_cause": bool(visual_cause),
+                "nok_streak": int(streak),
+                "position_difference": float(position_diff),
+                "last_frame_age_seconds": (
+                    None
+                    if last_frame_mono <= 0.0
+                    else max(0.0, time.monotonic() - last_frame_mono)
+                ),
+            }
+            if result is not None:
+                report = getattr(result, "report", None)
+                event_metadata.update({
+                    "frame_id": getattr(getattr(result, "image_path", None), "name", ""),
+                    "status": str(getattr(result, "status", "")),
+                    "frame_quality": str(getattr(result, "frame_quality", "")),
+                    "missing": int(getattr(report, "missing", 0)),
+                    "extra": int(getattr(report, "extra", 0)),
+                    "expected": int(getattr(report, "expected", 0)),
+                    "detected": int(getattr(report, "detected", 0)),
+                    "detection_ratio": float(getattr(result, "detection_ratio", 0.0)),
+                    "blur_score": float(getattr(result, "blur_score", 0.0)),
+                    "alignment_ok": bool(getattr(result, "alignment_ok", True)),
+                    "pattern_alignment_warn": bool(
+                        getattr(result, "pattern_alignment_warn", False)
+                    ),
+                    "tilt_warn": bool(getattr(result, "tilt_warn", False)),
+                })
+            event_metadata.update(dict(metadata or {}))
+
+            self._recorder.flush_event(
+                event_type,
+                reason,
+                trigger_frame=raw,
+                trigger_overlay=overlay,
+                trigger_role=trigger_role,
+                metadata=event_metadata,
+            )
+        except Exception as exc:
+            # La grabacion nunca puede impedir el corte de seguridad ya decidido.
+            logger.error("[%s] no se pudo registrar evidencia terminal: %s", self._id, exc)
+
+    @staticmethod
+    def _build_error_context_overlay(
+        frame: Optional[np.ndarray], reason: str
+    ) -> np.ndarray:
+        """Rotula contexto no visual sin presentarlo como deteccion OK/NOK."""
+        if frame is None:
+            canvas = np.zeros((480, 640, 3), dtype=np.uint8)
+            headline = "SIN FRAME DISPONIBLE"
+        else:
+            canvas = frame.copy()
+            headline = "ULTIMO FRAME ANTES DEL ERROR"
+
+        h, w = canvas.shape[:2]
+        banner_h = min(max(96, h // 5), h)
+        cv2.rectangle(canvas, (0, 0), (w - 1, banner_h - 1), (0, 0, 170), -1)
+        cv2.rectangle(canvas, (2, 2), (w - 3, h - 3), (0, 0, 255), 4)
+        cv2.putText(
+            canvas,
+            headline,
+            (14, min(36, banner_h - 12)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.82,
+            (255, 255, 255),
+            2,
+            cv2.LINE_AA,
+        )
+        safe_reason = (
+            str(reason)
+            .encode("ascii", errors="replace")
+            .decode("ascii")
+            .replace("?", " ")
+        )
+        cv2.putText(
+            canvas,
+            safe_reason[:72],
+            (14, min(76, banner_h - 10)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (230, 240, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        return canvas
+
+    def _record_timeline_result(
+        self, result: InspectionResult, *, terminal: bool = False
+    ) -> None:
+        """Guarda un resultado en el flujo, incluidos los retornos terminales."""
+        if not self._tl_enabled or result.overlay is None:
+            return
+        _tl_status = getattr(result, "frame_quality", "GOOD")
+        if terminal or getattr(result, "machine_stop", False):
+            _tl_tag = "STOP"
+        elif _tl_status == "LOW_QUALITY":
+            _tl_tag = "LQ"
+        elif result.status == "NOK":
+            _tl_tag = "NOK"
+        else:
+            _tl_tag = "OK"
+        _tl_slot = self._tl_write % self._tl_max
+        self._tl_write += 1
+        _tl_path = self._tl_dir / f"{_tl_slot:05d}_{_tl_tag}.jpg"
+        _tl_img = result.overlay
+        _tl_q = self._tl_quality
+        _tl_dir = self._tl_dir
+
+        def _write_tl(img=_tl_img, p=_tl_path, q=_tl_q, d=_tl_dir) -> None:
+            try:
+                d.mkdir(parents=True, exist_ok=True)
+                for old in d.glob(f"{p.stem.split('_')[0]}_*.jpg"):
+                    if old != p:
+                        try:
+                            old.unlink()
+                        except Exception:
+                            pass
+                cv2.imwrite(str(p), img, [cv2.IMWRITE_JPEG_QUALITY, q])
+            except Exception:
+                pass
+
+        self._enqueue_disk_task("timeline", _write_tl, allow_drop=not terminal)
 
     # ------------------------------------------------------------------
     # Internos

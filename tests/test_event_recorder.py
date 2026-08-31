@@ -193,24 +193,87 @@ class TestManifest:
 
 
 class TestPostEventWindow:
-    def test_event_during_post_event_extends_window(self, tmp_path: Path) -> None:
+    def test_event_during_post_event_gets_its_own_folder(self, tmp_path: Path) -> None:
         events = tmp_path / "events"
         r = _make_recorder(events, post_seconds=5.0)
         frames = [(time.time(), _fake_jpeg(10_000))]
         r._flush_sync(frames, "machine_stop", "primer stop")
 
         assert r._post_dir is not None
-        first_until = r._post_until
+        first_dir = r._post_dir
 
         with r._lock:
             r._buf.clear()
             r._buf_bytes = 0
 
         time.sleep(0.02)
-        r.flush_event("fault", "segundo stop")
+        r.flush_event(
+            "fault",
+            "segundo stop",
+            trigger_overlay=_blank_frame(),
+            trigger_role="visual_trigger",
+        )
+        r._task_q.join()
 
         assert r._post_dir is not None
-        assert r._post_until >= first_until
+        assert r._post_dir != first_dir
+        assert len([d for d in events.iterdir() if d.is_dir()]) == 2
+        second_manifest = json.loads(
+            (r._post_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert second_manifest["reason"] == "segundo stop"
+        assert second_manifest["trigger_available"] is True
+        r.close()
+
+
+def test_flush_event_persists_exact_trigger_and_metadata(tmp_path: Path) -> None:
+    events = tmp_path / "events"
+    r = _make_recorder(events, post_seconds=0.0)
+    r._min_interval = 0.0
+    r.add_frame(np.full((80, 90, 3), 20, dtype=np.uint8))
+
+    trigger_raw = np.full((80, 90, 3), 90, dtype=np.uint8)
+    trigger_overlay = np.full((80, 90, 3), 210, dtype=np.uint8)
+    r.flush_event(
+        "machine_stop",
+        "4 faltantes persistentes",
+        trigger_frame=trigger_raw,
+        trigger_overlay=trigger_overlay,
+        trigger_role="visual_trigger",
+        metadata={"missing": 4, "nok_streak": 3},
+    )
+    r._task_q.join()
+
+    event_dir = next(d for d in events.iterdir() if d.is_dir())
+    manifest = json.loads((event_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert (event_dir / "trigger_raw.jpg").exists()
+    assert (event_dir / "trigger_overlay.jpg").exists()
+    assert manifest["schema_version"] == 2
+    assert manifest["trigger_role"] == "visual_trigger"
+    assert manifest["trigger_available"] is True
+    assert manifest["trigger_metadata"]["missing"] == 4
+    assert manifest["trigger_metadata"]["nok_streak"] == 3
+    assert len(manifest["pre_frame_timestamps"]) == 1
+    r.close()
+
+
+def test_error_without_camera_frame_still_creates_manifest(tmp_path: Path) -> None:
+    events = tmp_path / "events"
+    r = _make_recorder(events, post_seconds=0.0)
+    r.flush_event(
+        "camera_loss",
+        "camara sin señal",
+        trigger_role="unavailable",
+        metadata={"missing_seconds": 3.0},
+    )
+    r._task_q.join()
+
+    event_dir = next(d for d in events.iterdir() if d.is_dir())
+    manifest = json.loads((event_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["event_type"] == "camera_loss"
+    assert manifest["trigger_available"] is False
+    assert manifest["trigger_metadata"]["missing_seconds"] == 3.0
+    r.close()
 
 
 # ----------------------------------------------------------------------

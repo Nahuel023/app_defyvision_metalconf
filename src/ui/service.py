@@ -4272,6 +4272,8 @@ class EventBrowserTab(QWidget):
         self._px_cache: dict[int, QPixmap] = {}
         self._px_cache_max = 18
         self._show_overlay: bool = False
+        self._trigger_idx: int | None = None
+        self._trigger_overlay_path: Path | None = None
         self._ov_cache: dict[int, QPixmap] = {}
         self._overlay_worker: Optional[_EvOverlayWorker] = None
         # Workers retirados pero posiblemente aún corriendo: se retienen hasta
@@ -4346,7 +4348,21 @@ class EventBrowserTab(QWidget):
 
         self._scanner_filter = self._make_combo(["Todos"] + self._system.scanner_ids(), min_w=120)
         self._type_filter = self._make_combo(
-            ["Todos", "machine_stop", "fault", "sin manifest"], min_w=135
+            [
+                "Todos",
+                "machine_stop",
+                "fault",
+                "low_quality_stop",
+                "machine_jam",
+                "camera_loss",
+                "camera_start_error",
+                "inspection_stall",
+                "inspection_crash",
+                "startup_selftest_error",
+                "forced_fault",
+                "sin manifest",
+            ],
+            min_w=180,
         )
         self._search_edit = QLineEdit()
         self._search_edit.setPlaceholderText("Buscar por nombre, motivo o scanner...")
@@ -4599,6 +4615,7 @@ class EventBrowserTab(QWidget):
                 manifest_frames = (
                     self._safe_int(manifest.get("pre_frames_count"))
                     + self._safe_int(manifest.get("post_frames_count"))
+                    + int(bool(manifest.get("trigger_available")))
                 )
             if manifest_frames <= 0:
                 manifest_frames = len(frames)
@@ -4622,6 +4639,22 @@ class EventBrowserTab(QWidget):
         )
 
     def _discover_event_frames(self, folder: Path) -> list[Path]:
+        pre = sorted(folder.glob("frame_*.jpg"))
+        post = sorted(
+            path for path in folder.glob("post_*.jpg")
+            if not path.stem.endswith("_overlay")
+        )
+        trigger_raw = folder / "trigger_raw.jpg"
+        trigger_overlay = folder / "trigger_overlay.jpg"
+        trigger = (
+            trigger_raw if trigger_raw.exists()
+            else (trigger_overlay if trigger_overlay.exists() else None)
+        )
+        canonical = pre + ([trigger] if trigger is not None else []) + post
+        if canonical:
+            return canonical
+
+        # Compatibilidad con carpetas manuales/antiguas sin esquema de evento.
         patterns = ("*.jpg", "*.jpeg", "*.png", "*.bmp")
         frames: list[Path] = []
         for pattern in patterns:
@@ -4675,7 +4708,21 @@ class EventBrowserTab(QWidget):
     def _load_event(self, entry: _EventEntry) -> None:
         self._current_entry = entry
         self._frame_paths = self._discover_event_frames(entry.folder)
-        self._current_idx = 0
+        trigger_raw = entry.folder / "trigger_raw.jpg"
+        trigger_overlay = entry.folder / "trigger_overlay.jpg"
+        trigger_frame = (
+            trigger_raw if trigger_raw.exists()
+            else (trigger_overlay if trigger_overlay.exists() else None)
+        )
+        self._trigger_idx = (
+            self._frame_paths.index(trigger_frame)
+            if trigger_frame is not None and trigger_frame in self._frame_paths
+            else None
+        )
+        self._trigger_overlay_path = (
+            trigger_overlay if trigger_overlay.exists() else None
+        )
+        self._current_idx = self._trigger_idx or 0
         self._px_cache.clear()
         self._ov_cache.clear()
         if self._overlay_worker is not None and self._overlay_worker.isRunning():
@@ -4710,9 +4757,9 @@ class EventBrowserTab(QWidget):
             self._frame_slider.blockSignals(True)
             self._frame_slider.setEnabled(True)
             self._frame_slider.setRange(0, len(self._frame_paths) - 1)
-            self._frame_slider.setValue(0)
+            self._frame_slider.setValue(self._current_idx)
             self._frame_slider.blockSignals(False)
-            self._show_event_frame(0)
+            self._show_event_frame(self._current_idx)
         else:
             self._frame_slider.blockSignals(True)
             self._frame_slider.setEnabled(False)
@@ -4732,6 +4779,35 @@ class EventBrowserTab(QWidget):
 
         # ── Overlay mode ──────────────────────────────────────────────
         if self._show_overlay and self._current_entry is not None:
+            if (
+                self._trigger_idx is not None
+                and idx == self._trigger_idx
+                and self._trigger_overlay_path is not None
+            ):
+                bgr = cv2.imread(str(self._trigger_overlay_path))
+                if bgr is not None:
+                    rgb = np.ascontiguousarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+                    h, w = rgb.shape[:2]
+                    qimg = QImage(
+                        rgb.data, w, h, w * 3, QImage.Format.Format_RGB888
+                    ).copy()
+                    pxm = QPixmap.fromImage(qimg)
+                    prev = self._event_img_view.current_pixmap()
+                    self._event_img_view.set_pixmap(
+                        pxm, auto_fit=prev is None or prev.size() != pxm.size()
+                    )
+                    self._events_status_lbl.setText(
+                        "EVIDENCIA TERMINAL ORIGINAL · no es un reanalisis"
+                    )
+                    self._event_nav_lbl.setText(
+                        f"{idx + 1} / {len(self._frame_paths)}"
+                    )
+                    self._frame_file_lbl.setText(self._trigger_overlay_path.name)
+                    self._frame_slider.blockSignals(True)
+                    self._frame_slider.setValue(idx)
+                    self._frame_slider.blockSignals(False)
+                    self._update_event_nav_state()
+                    return
             ov_pxm = self._ov_cache.get(idx)
             sc_sel = self._overlay_scanner_combo.currentText()
             if ov_pxm is not None:
@@ -4749,7 +4825,7 @@ class EventBrowserTab(QWidget):
                     needs_fit = prev is None or prev.size() != raw_pxm.size()
                     self._event_img_view.set_pixmap(raw_pxm, auto_fit=needs_fit)
                 self._events_status_lbl.setText(
-                    f"Analizando con {sc_sel} · {self._scanner_model(sc_sel)}…"
+                    f"REANALISIS ACTUAL · {sc_sel} · {self._scanner_model(sc_sel)}…"
                 )
                 self._launch_overlay_worker(idx)
             self._event_nav_lbl.setText(f"{idx + 1} / {len(self._frame_paths)}")

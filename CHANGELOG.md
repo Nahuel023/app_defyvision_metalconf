@@ -79,6 +79,64 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-31 (evidencia terminal confiable) - Tadeo + Codex
+
+#### Cambio 305 - Cada parada conserva y abre el frame que tomo la decision
+
+**Pedido:** corregir el historial porque informaba `MACHINE FAULT` u otros
+errores, pero al revisar las imagenes parecian OK y no se veia el causante real.
+
+**Causa raiz:** `EventRecorder` guardaba solamente frames crudos muestreados a
+5 FPS antes del evento. El frame exacto podia quedar fuera por el rate limit;
+el overlay que tomo la decision nunca se copiaba al evento; el visor abria el
+frame mas antiguo de los 60 segundos previos y lo reanalizaba aisladamente con
+la configuracion actual, perdiendo la racha temporal original. Ademas,
+`machine_stop` y `low_quality_stop` retornaban antes de entrar al timeline, y
+una segunda parada durante la ventana post-evento quedaba absorbida dentro de
+la primera.
+
+**Cambios:**
+- `src/pipeline/event_recorder.py`: nuevo esquema de manifest v2. Cada evento
+  guarda `trigger_raw.jpg`, `trigger_overlay.jpg`, rol de la evidencia,
+  timestamps de pre-evento y metadatos de decision. El trigger tiene prioridad
+  sobre el buffer y nunca se trunca por presupuesto. Si el writer esta saturado,
+  el trigger se escribe sincronicamente en vez de descartarse. Eventos cercanos
+  reciben carpetas independientes y la asignacion de nombres queda protegida
+  entre ambos scanners.
+- `src/controller/scanner_controller.py`: todas las rutas terminales entregan
+  evidencia explicita: faltantes/desalineacion, racha NOK, calidad baja,
+  maquina trabada, perdida o fallo inicial de camara, inspeccion detenida,
+  autodiagnostico, crash interno y falla forzada de servicio. Las fallas
+  visuales usan el `InspectionResult` exacto; las no visuales usan el ultimo
+  frame conocido con una banda roja `ULTIMO FRAME ANTES DEL ERROR`, y cuando la
+  camara nunca entrego imagen se crea una placa `SIN FRAME DISPONIBLE`. El
+  manifest distingue `visual_trigger`, `last_known_context` y
+  `diagnostic_only`, evitando presentar un frame OK como causa visual.
+- Los resultados terminales de machine stop y calidad baja ahora entran al
+  timeline con tag `STOP` antes del retorno de seguridad.
+- `src/ui/frame_viewer.py`: el historial del operario separa previos, causante y
+  posteriores; marca el trigger en rojo, abre directamente ese frame y usa el
+  overlay original. Los frames antiguos siguen permitiendo analisis bajo
+  demanda, pero quedan rotulados como `REANALISIS ACTUAL (no original)`.
+- `src/ui/service.py`: misma seleccion automatica del trigger, overlay original,
+  lista canonica sin duplicar raw/overlay y filtros para todos los nuevos tipos
+  de error.
+- `tests/test_event_recorder.py`, `tests/test_event_viewer.py` y
+  `tests/test_scanner_controller.py`: regresiones de trigger raw/overlay,
+  metadata, error sin imagen, eventos consecutivos independientes, orden del
+  visor, compatibilidad historica y evidencia visual/no visual. Los tests del
+  controlador ya no escriben eventos sinteticos en `data/events` real.
+
+**Validacion:** `py_compile`, imports criticos de `src.main`, visor y servicio,
+`scripts/verify_config.py`, `git diff --check` y suite completa `109 passed`.
+Se verifico en disco un manifest v2 con `trigger_overlay.jpg`, tipo `fault`,
+`nok_streak=3`, `missing=30`, estado `fault` y rol `visual_trigger`. Las 22
+carpetas sinteticas creadas durante la prueba se movieron de forma recuperable
+a `%LOCALAPPDATA%\\Temp\\metalconf_test_events_2026-08-31`; las evidencias
+historicas reales de junio quedaron intactas. No se genero nuevo EXE/ZIP.
+
+---
+
 ### Sesion 2026-08-31 (instancia unica) - Tadeo + Codex
 
 #### Cambio 304 - Bloqueo riguroso de ejecuciones simultaneas

@@ -1,8 +1,10 @@
 """
 Buffer circular de evidencia pre-evento por scanner.
 
-Graba `pre_seconds` antes de la parada y `post_seconds` después.
-Frames originales JPEG en RAM (sin overlay). Nunca supera `max_disk_gb`.
+Graba `pre_seconds` antes de la parada, el frame terminal exacto con su overlay
+y `post_seconds` despues. El trigger tiene prioridad sobre el buffer historico
+y nunca se trunca por presupuesto. Nunca supera `max_disk_gb` salvo que una
+unica evidencia terminal individual ya sea mayor que ese limite.
 """
 
 import json
@@ -23,6 +25,8 @@ from src.utils.atomic_write import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
+_EVENT_DIR_LOCK = threading.Lock()
+
 
 def _dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
@@ -34,8 +38,8 @@ class EventRecorder:
 
     Flujo pre/post evento:
       1. `add_frame` acumula JPEG en un deque circular limitado por tiempo y RAM.
-      2. `flush_event` snapshot-ea el buffer, lo guarda en hilo background,
-         y activa el modo POST-EVENTO.
+      2. `flush_event` snapshot-ea el buffer y el trigger raw/overlay, los guarda
+         en hilo background y activa el modo POST-EVENTO.
       3. Durante post-evento, `add_frame` escribe directamente a disco
          durante `post_seconds` segundos.
       4. Al expirar el post-evento, el manifest se actualiza con los totales
@@ -73,9 +77,6 @@ class EventRecorder:
         self._lock = threading.Lock()
 
         self._last_add: float = 0.0
-        self._last_flush: float = 0.0
-        self._flush_cooldown: float = 5.0
-
         # Estado post-evento (protegido por _lock)
         self._post_dir: Optional[Path] = None
         self._post_until: float = 0.0
@@ -170,41 +171,65 @@ class EventRecorder:
                 return self._post_dir
             return None
 
-    def flush_event(self, event_type: str, reason: str = "") -> None:
+    def flush_event(
+        self,
+        event_type: str,
+        reason: str = "",
+        *,
+        trigger_frame: "Optional[np.ndarray]" = None,
+        trigger_overlay: "Optional[np.ndarray]" = None,
+        trigger_role: str = "unavailable",
+        metadata: "Optional[dict]" = None,
+    ) -> None:
         """
-        Vuelca el buffer pre-evento a disco en hilo background y activa
-        la grabación post-evento. Ignora llamadas dentro del cooldown.
+        Vuelca el buffer pre-evento y una evidencia terminal explicita.
+
+        ``trigger_frame`` y ``trigger_overlay`` pertenecen al resultado exacto
+        que decidio la parada. Para fallas no visuales pueden representar el
+        ultimo contexto disponible, identificado por ``trigger_role``. Incluso
+        sin imagen se crea un manifest: ningun error terminal queda silencioso.
         """
         now_m = time.monotonic()
+        event_ts = datetime.now().isoformat()
+        trigger_raw_data = self._encode_image(trigger_frame)
+        trigger_overlay_data = self._encode_image(trigger_overlay)
+        finalize_dir: Optional[Path] = None
+
         with self._lock:
-            # Si el evento vuelve a dispararse durante la ventana post-evento,
-            # no hay buffer pre disponible. En ese caso extendemos la cola de
-            # post-evento para no perder evidencia del segundo disparo.
+            # Un evento nuevo durante la ventana post merece su propia carpeta:
+            # antes se absorbia dentro del evento anterior y se perdia su causa.
             if self._post_dir is not None and now_m < self._post_until:
-                if self._post_seconds > 0:
-                    self._post_until = max(self._post_until, now_m + self._post_seconds)
-                logger.warning(
-                    f"[{self._id}] evento {event_type} durante post-evento activo: "
-                    "se extiende la ventana de grabación"
-                )
-                return
+                finalize_dir = self._post_dir
+                self._post_dir = None
+                self._post_idx = 0
 
-            if now_m - self._last_flush < self._flush_cooldown:
-                return
-            self._last_flush = now_m
-
-            if not self._buf:
-                return
             frames = list(self._buf)
             self._buf.clear()
             self._buf_bytes = 0
 
-        if not self._enqueue_task("flush", frames, event_type, reason):
-            logger.error(
-                "[%s] no se pudo encolar flush_event; se descarta evidencia de %s",
+        if finalize_dir is not None:
+            self._enqueue_task("finalize", finalize_dir)
+
+        flush_args = (
+            frames,
+            event_type,
+            reason,
+            trigger_raw_data,
+            trigger_overlay_data,
+            str(trigger_role or "unavailable"),
+            dict(metadata or {}),
+            event_ts,
+        )
+        if not self._enqueue_task("flush", *flush_args):
+            # La evidencia terminal es prioritaria y no se descarta aunque el
+            # writer este saturado. El corte de maquina ya ocurrio; completar
+            # sincronicamente es preferible a perder el causante.
+            logger.critical(
+                "[%s] event writer saturado; guardando %s sincronicamente",
                 self._id,
                 event_type,
             )
+            self._flush_sync(*flush_args)
 
     def close(self) -> None:
         with self._lock:
@@ -231,19 +256,27 @@ class EventRecorder:
         frames: list[tuple[float, bytes]],
         event_type: str,
         reason: str,
+        trigger_raw_data: Optional[bytes] = None,
+        trigger_overlay_data: Optional[bytes] = None,
+        trigger_role: str = "unavailable",
+        metadata: Optional[dict] = None,
+        event_timestamp: Optional[str] = None,
     ) -> None:
-        """Escribe frames pre-evento + manifest. Luego activa post-evento."""
+        """Escribe pre-evento, evidencia terminal y manifest."""
         try:
             self._dir.mkdir(parents=True, exist_ok=True)
 
             new_size = sum(len(d) for _, d in frames)
+            trigger_size = len(trigger_raw_data or b"") + len(trigger_overlay_data or b"")
 
-            # Truncar si supera el presupuesto total (conservar frames recientes)
-            if new_size > self._max_disk_bytes > 0:
+            # El trigger nunca se descarta. Si falta espacio, truncar solamente
+            # el pre-evento conservando los frames mas cercanos a la parada.
+            pre_budget = max(0, self._max_disk_bytes - trigger_size)
+            if new_size > pre_budget and self._max_disk_bytes > 0:
                 kept: list[tuple[float, bytes]] = []
                 kept_size = 0
                 for ts, data in reversed(frames):
-                    if kept_size + len(data) > self._max_disk_bytes:
+                    if kept_size + len(data) > pre_budget:
                         break
                     kept.append((ts, data))
                     kept_size += len(data)
@@ -254,7 +287,7 @@ class EventRecorder:
                     f"({new_size // 1024} KB)"
                 )
 
-            self._prune_to_budget(needed=new_size)
+            self._prune_to_budget(needed=new_size + trigger_size)
             event_dir = self._next_event_dir()
 
             total_bytes = 0
@@ -262,19 +295,40 @@ class EventRecorder:
                 (event_dir / f"frame_{i:04d}.jpg").write_bytes(data)
                 total_bytes += len(data)
 
+            trigger_raw_file = ""
+            trigger_overlay_file = ""
+            if trigger_raw_data is not None:
+                trigger_raw_file = "trigger_raw.jpg"
+                (event_dir / trigger_raw_file).write_bytes(trigger_raw_data)
+                total_bytes += len(trigger_raw_data)
+            if trigger_overlay_data is not None:
+                trigger_overlay_file = "trigger_overlay.jpg"
+                (event_dir / trigger_overlay_file).write_bytes(trigger_overlay_data)
+                total_bytes += len(trigger_overlay_data)
+
             manifest = {
-                "timestamp": datetime.now().isoformat(),
+                "schema_version": 2,
+                "timestamp": event_timestamp or datetime.now().isoformat(),
                 "scanner_id": self._id,
                 "event_type": event_type,
                 "reason": reason,
                 "pre_frames_count": len(frames),
                 "post_frames_count": 0,
+                "trigger_role": trigger_role,
+                "trigger_raw_file": trigger_raw_file,
+                "trigger_overlay_file": trigger_overlay_file,
+                "trigger_available": bool(trigger_raw_file or trigger_overlay_file),
+                "trigger_metadata": dict(metadata or {}),
+                "pre_frame_timestamps": [
+                    datetime.fromtimestamp(ts).isoformat() for ts, _ in frames
+                ],
                 "total_bytes": total_bytes,
             }
             atomic_write_json(event_dir / "manifest.json", manifest, ensure_ascii=False)
             logger.info(
                 f"[{self._id}] pre-evento guardado: {event_dir.name} "
-                f"({len(frames)} frames, {total_bytes // 1024} KB)"
+                f"({len(frames)} previos, trigger={manifest['trigger_available']}, "
+                f"{total_bytes // 1024} KB)"
             )
 
             # Activar grabación post-evento
@@ -297,10 +351,14 @@ class EventRecorder:
             all_post_files = sorted(event_dir.glob("post_*.jpg"))
             raw_post_files = [f for f in all_post_files if not f.stem.endswith("_overlay")]
             post_bytes = sum(f.stat().st_size for f in all_post_files)
-            pre_bytes = sum(f.stat().st_size for f in event_dir.glob("frame_*.jpg"))
+            image_bytes = sum(
+                f.stat().st_size
+                for f in event_dir.iterdir()
+                if f.is_file() and f.name != "manifest.json"
+            )
             m["post_frames_count"] = len(raw_post_files)
             # Recalcular, no acumular: finalize puede repetirse durante un cierre.
-            m["total_bytes"] = pre_bytes + post_bytes
+            m["total_bytes"] = image_bytes
             atomic_write_json(manifest_path, m, ensure_ascii=False)
             logger.info(
                 f"[{self._id}] post-evento finalizado: {event_dir.name} "
@@ -344,14 +402,28 @@ class EventRecorder:
                 self._task_q.task_done()
 
     def _next_event_dir(self) -> Path:
-        today = datetime.now().strftime("%d-%m-%Y")
-        n = 1
-        while True:
-            d = self._dir / f"{today}_STOP_{n}"
-            if not d.exists():
-                d.mkdir(parents=True, exist_ok=True)
-                return d
-            n += 1
+        with _EVENT_DIR_LOCK:
+            today = datetime.now().strftime("%d-%m-%Y")
+            n = 1
+            while True:
+                d = self._dir / f"{today}_STOP_{n}"
+                try:
+                    d.mkdir(parents=True, exist_ok=False)
+                    return d
+                except FileExistsError:
+                    n += 1
+
+    def _encode_image(self, image: Optional[np.ndarray]) -> Optional[bytes]:
+        if image is None:
+            return None
+        try:
+            ok, buf = cv2.imencode(
+                ".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, max(85, self._jpeg_q)]
+            )
+            return bytes(buf) if ok else None
+        except Exception as exc:
+            logger.error("[%s] no se pudo codificar evidencia terminal: %s", self._id, exc)
+            return None
 
     def _prune_to_budget(self, needed: int) -> None:
         if not self._dir.exists():

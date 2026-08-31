@@ -89,6 +89,15 @@ def _event_summary(event_dir: Path) -> dict:
             pass
     pre  = sorted(event_dir.glob("frame_*.jpg"))
     post = sorted(f for f in event_dir.glob("post_*.jpg") if "_overlay" not in f.name)
+    trigger_raw_name = str(m.get("trigger_raw_file") or "trigger_raw.jpg")
+    trigger_overlay_name = str(m.get("trigger_overlay_file") or "trigger_overlay.jpg")
+    trigger_raw = event_dir / trigger_raw_name
+    trigger_overlay = event_dir / trigger_overlay_name
+    trigger_frame = (
+        trigger_raw if trigger_raw.exists()
+        else (trigger_overlay if trigger_overlay.exists() else None)
+    )
+    all_frames = pre + ([trigger_frame] if trigger_frame is not None else []) + post
     return {
         "dir": event_dir,
         "name": event_dir.name,
@@ -98,9 +107,15 @@ def _event_summary(event_dir: Path) -> dict:
         "reason": m.get("reason", ""),
         "pre_frames": pre,
         "post_frames": post,
-        "all_frames": pre + post,
+        "all_frames": all_frames,
         "pre_count": len(pre),
         "post_count": len(post),
+        "trigger_index": len(pre) if trigger_frame is not None else None,
+        "trigger_role": m.get("trigger_role", "legacy_event"),
+        "trigger_available": trigger_frame is not None,
+        "trigger_raw": trigger_raw if trigger_raw.exists() else None,
+        "trigger_overlay": trigger_overlay if trigger_overlay.exists() else None,
+        "trigger_metadata": m.get("trigger_metadata", {}),
         "total_bytes": m.get("total_bytes", 0),
     }
 
@@ -309,6 +324,8 @@ class _EventNavPanel(QWidget):
         self._is_event_mode: bool = False  # True = frames de evento (análisis on-demand)
         self._inspect_worker: Optional[_InspectWorker] = None
         self._current_dir: Optional[Path] = None
+        self._trigger_index: Optional[int] = None
+        self._trigger_overlay: Optional[Path] = None
         # Workers retirados pero posiblemente aún corriendo: se retienen hasta
         # que emiten finished. Perder la referencia de un QThread vivo hace
         # que Python lo destruya en ejecución y Qt aborte el proceso.
@@ -470,6 +487,8 @@ class _EventNavPanel(QWidget):
         self._is_event_mode = True
         self._current_dir = summary.get("dir")
         self._panel_kind = "event"
+        self._trigger_index = summary.get("trigger_index")
+        self._trigger_overlay = summary.get("trigger_overlay")
         self._all_frames = []
         self._load_more_btn.setEnabled(False)
         self._load_more_btn.setText("⏮  Cargar más antiguos")
@@ -484,9 +503,20 @@ class _EventNavPanel(QWidget):
         total   = len(self._frames)
         pre_c   = summary["pre_count"]
         post_c  = summary["post_count"]
+        trigger_c = 1 if summary.get("trigger_available") else 0
+        trigger_role = summary.get("trigger_role", "legacy_event")
+        if trigger_role == "visual_trigger":
+            trigger_txt = "CAUSANTE VISUAL GUARDADO"
+        elif trigger_role == "last_known_context":
+            trigger_txt = "ULTIMO FRAME ANTES DEL ERROR (CONTEXTO)"
+        elif trigger_role == "diagnostic_only":
+            trigger_txt = "SIN IMAGEN DE CAMARA - PLACA DIAGNOSTICA"
+        else:
+            trigger_txt = "EVENTO ANTIGUO SIN FRAME CAUSANTE IDENTIFICADO"
         self._info_lbl.setText(
             f"{ts}   ·   {scanner}   ·   {reason}   ·   "
-            f"{pre_c} frames previos  +  {post_c} frames posteriores  =  {total} total"
+            f"{pre_c} previos + {trigger_c} causante/contexto + {post_c} posteriores   ·   "
+            f"{trigger_txt}"
         )
 
         # Limpiar miniaturas anteriores
@@ -496,7 +526,10 @@ class _EventNavPanel(QWidget):
             lbl.setFixedSize(_THUMB_W, _THUMB_H)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             # Colorear borde: azul = pre-evento, naranja = post-evento
-            border_color = _ACCENT if i < n_pre else _WARN
+            if self._trigger_index is not None and i == self._trigger_index:
+                border_color = _NOK_CLR
+            else:
+                border_color = _ACCENT if i < n_pre else _WARN
             lbl.setStyleSheet(
                 f"background:#000;border:2px solid {border_color};border-radius:3px;"
             )
@@ -511,7 +544,8 @@ class _EventNavPanel(QWidget):
         self._loader.thumb_ready.connect(self._on_thumb_ready)
         self._loader.start()
 
-        self._show_frame(0)
+        initial_idx = self._trigger_index if self._trigger_index is not None else 0
+        self._show_frame(initial_idx)
 
     def load_ok_buffer(self, frames: list[Path], scanner_label: str,
                        folder_dir: Optional[Path] = None) -> None:
@@ -677,11 +711,35 @@ class _EventNavPanel(QWidget):
         path = self._frames[idx]
 
         if self._is_event_mode and self._show_overlay:
+            if (
+                self._trigger_index is not None
+                and idx == self._trigger_index
+                and self._trigger_overlay is not None
+                and self._trigger_overlay.exists()
+            ):
+                img = cv2.imread(str(self._trigger_overlay))
+                if img is not None:
+                    self._view.set_image(img)
+                    self._pos_lbl.setText(
+                        f"FRAME CAUSANTE / CONTEXTO TERMINAL  ·  {idx + 1} / {len(self._frames)}"
+                    )
+                    self._prev_btn.setEnabled(idx > 0)
+                    self._next_btn.setEnabled(idx < len(self._frames) - 1)
+                    for i, widget in enumerate(self._thumb_widgets):
+                        ss = widget.styleSheet()
+                        if i == idx:
+                            if "border:3px" not in ss:
+                                widget.setStyleSheet(ss.replace("border:2px", "border:3px"))
+                        elif "border:3px" in ss:
+                            widget.setStyleSheet(ss.replace("border:3px", "border:2px"))
+                    return
             # Análisis on-demand: mostrar frame crudo inmediatamente y lanzar worker
             img = cv2.imread(str(path))
             if img is not None:
                 self._view.set_image(img)
-            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {len(self._frames)}  ·  Analizando…")
+            self._pos_lbl.setText(
+                f"Frame {idx + 1} / {len(self._frames)}  ·  REANALISIS ACTUAL (no original)"
+            )
             self._launch_inspect(path)
         else:
             img = cv2.imread(str(self._resolve_frame_path(path)))
@@ -690,19 +748,27 @@ class _EventNavPanel(QWidget):
 
         n = len(self._frames)
         if not (self._is_event_mode and self._show_overlay):
-            _tag_suffix = ""
+            if self._is_event_mode and self._trigger_index == idx:
+                self._pos_lbl.setText(
+                    f"FRAME CAUSANTE / CONTEXTO CRUDO  ·  {idx + 1} / {n}"
+                )
+                _tag_suffix = None
+            else:
+                _tag_suffix = ""
             _stem = path.stem
-            if "_" in _stem and not _stem.startswith("ok_"):
+            if _tag_suffix is not None and "_" in _stem and not _stem.startswith("ok_"):
                 _tag = _stem.split("_", 1)[1]
                 if _tag in _TL_COLORS:
                     _tag_suffix = f"  ·  {_tag}"
             try:
                 _ts = datetime.fromtimestamp(path.stat().st_mtime).strftime("%H:%M:%S")
-                _tag_suffix += f"  ·  {_ts}"
+                if _tag_suffix is not None:
+                    _tag_suffix += f"  ·  {_ts}"
             except Exception:
                 pass
-            _newest = "  ★" if idx == n - 1 else ""
-            self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}{_newest}")
+            if _tag_suffix is not None:
+                _newest = "  ★" if idx == n - 1 else ""
+                self._pos_lbl.setText(f"Frame  {idx + 1}  /  {n}{_tag_suffix}{_newest}")
         self._prev_btn.setEnabled(idx > 0)
         self._next_btn.setEnabled(idx < n - 1)
 
@@ -733,7 +799,9 @@ class _EventNavPanel(QWidget):
         """Recibe el overlay analizado y lo muestra si el frame no cambió."""
         self._view.set_image(overlay)
         n = len(self._frames)
-        self._pos_lbl.setText(f"Frame  {self._current + 1}  /  {n}")
+        self._pos_lbl.setText(
+            f"Frame {self._current + 1} / {n}  ·  REANALISIS ACTUAL (no original)"
+        )
 
     def _toggle_overlay(self) -> None:
         self._show_overlay = self._overlay_btn.isChecked()
@@ -750,6 +818,17 @@ class _EventNavPanel(QWidget):
         """
         stem = path.stem
         parent = path.parent
+
+        if stem == "trigger_raw":
+            if self._show_overlay:
+                overlay = parent / "trigger_overlay.jpg"
+                return overlay if overlay.exists() else path
+            return path
+        if stem == "trigger_overlay":
+            if not self._show_overlay:
+                raw = parent / "trigger_raw.jpg"
+                return raw if raw.exists() else path
+            return path
 
         if self._show_overlay:
             # Queremos overlay: si el archivo YA es overlay devolver tal cual.
@@ -1116,8 +1195,10 @@ class OperatorFrameViewer(QMainWindow):
 
         total = len(s["all_frames"])
         size_kb = s["total_bytes"] // 1024 if s["total_bytes"] else 0
+        trigger_c = 1 if s.get("trigger_available") else 0
         count_lbl = QLabel(
-            f"{s['pre_count']} pre  +  {s['post_count']} post  ·  {size_kb} KB"
+            f"{s['pre_count']} pre + {trigger_c} causante + "
+            f"{s['post_count']} post  ·  {size_kb} KB"
         )
         count_lbl.setStyleSheet(
             f"color:{_MUTED};font-size:9px;background:transparent;"
