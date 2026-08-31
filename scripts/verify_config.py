@@ -16,9 +16,9 @@ print(f"modelo_B  tol_xy_px                     = {tB.get('tol_xy_px')}")
 
 expected_stops = {
     ("scanner_1", "modelo_A"): (3, 3, 3),
-    ("scanner_1", "modelo_B"): (5, 5, 5),
+    ("scanner_1", "modelo_B"): (3, 3, 3),
     ("scanner_2", "modelo_A"): (3, 3, 3),
-    ("scanner_2", "modelo_B"): (3, 4, 4),
+    ("scanner_2", "modelo_B"): (3, 3, 3),
 }
 for (scanner_id, model), (nok_frames, machine_frames, align_frames) in expected_stops.items():
     cfg = load_tolerances(model, scanner_id=scanner_id)

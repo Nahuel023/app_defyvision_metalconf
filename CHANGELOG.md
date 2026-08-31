@@ -79,6 +79,39 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-08-31 (configuracion real de fabrica) - Tadeo + Codex
+
+#### Cambio 303 - Configuracion de produccion adoptada como fuente oficial
+
+**Pedido:** incorporar al codigo la calibracion extraida de la computadora de
+produccion desde
+`C:\Users\DefyC\Downloads\Configuracion_Metalconf`, porque contiene los valores
+reales usados en fabrica.
+
+**Hallazgo:** se compararon por SHA-256 todos los archivos de `config\` y
+`patterns\` contra `config\` y `data\patterns\` del proyecto. Los patrones
+`holes.json`, ROI, tolerancias generales y perfiles de camara ya eran identicos.
+La unica diferencia estaba en `config/io_map.yaml`.
+
+**Cambios:** se adoptaron exactamente los valores de produccion:
+- `scanner_1/modelo_B`: `pattern_align_stop_frames` de 5 a 3,
+  `tol_xy_px` de 14 a 12, `machine_stop_missing_frames` de 5 a 3 y
+  `consecutive_nok_frames` de 5 a 3.
+- `scanner_2/modelo_B`: `pattern_align_stop_frames` de 4 a 3 y
+  `machine_stop_missing_frames` de 4 a 3.
+- No fue necesario modificar `data/patterns`: todos los `holes.json` y
+  `roi.json` respaldados desde produccion coinciden byte por byte con el
+  proyecto.
+
+**Validacion:** `config/io_map.yaml` coincide byte por byte con el archivo
+extraido de produccion (SHA-256
+`A5CCFC9460730103DA5D35C990D2DF2DB669AA963ED3D535056F533C6BD19B16`);
+`scripts/verify_config.py` correcto y suite completa `99 passed`. Se actualizaron
+`scripts/verify_config.py` y `tests/test_config.py` para proteger los umbrales
+reales y `tol_xy_px=12` de scanner 1 Microperforado.
+
+---
+
 ### Sesion 2026-08-19 (reset NOK inmediato) - Tadeo + Codex
 
 #### Cambio 302 - Un frame OK limpia inmediatamente los NOK activos

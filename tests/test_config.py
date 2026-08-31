@@ -168,13 +168,13 @@ def test_both_microperforado_scanners_require_three_alignment_frames() -> None:
 
 
 def test_every_production_pattern_uses_tuned_stop_thresholds() -> None:
-    # Ajustes oficiales copiados de produccion el 14-08-2026.
+    # Ajustes oficiales extraidos de produccion el 31-08-2026.
     # Tupla: (pattern_align, machine_stop_missing, consecutive_nok).
     expected = {
         ("scanner_1", "modelo_A"): (3, 3, 3),
-        ("scanner_1", "modelo_B"): (5, 5, 5),
+        ("scanner_1", "modelo_B"): (3, 3, 3),
         ("scanner_2", "modelo_A"): (3, 3, 3),
-        ("scanner_2", "modelo_B"): (4, 4, 3),
+        ("scanner_2", "modelo_B"): (3, 3, 3),
     }
     for (scanner_id, model), thresholds in expected.items():
         cfg = load_tolerances(model=model, scanner_id=scanner_id)
@@ -182,6 +182,9 @@ def test_every_production_pattern_uses_tuned_stop_thresholds() -> None:
         assert cfg["machine_stop_missing_frames"] == thresholds[1]
         assert cfg["consecutive_nok_frames"] == thresholds[2]
         assert cfg["stop_min_frames"] == 3
+
+    scanner_1_micro = load_tolerances(model="modelo_B", scanner_id="scanner_1")
+    assert scanner_1_micro["tol_xy_px"] == 12.0
 
 
 def test_tolerance_window_cannot_reenable_single_frame_alignment_stop() -> None:
