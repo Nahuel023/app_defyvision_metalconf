@@ -78,6 +78,13 @@ a = Analysis(
     noarchive=False,
 )
 
+# Qt 6.11 uses the Windows ICU API (unsuffixed exports). Dependency discovery
+# can pick a third-party icuuc.dll from PATH with version-suffixed exports,
+# shadowing System32 and preventing QtWidgets from importing at startup.
+# Resolve these Windows system libraries on the target OS instead.
+a.binaries = [entry for entry in a.binaries
+              if Path(entry[0]).name.lower() not in {'icuuc.dll', 'icuin.dll', 'icu.dll'}]
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(

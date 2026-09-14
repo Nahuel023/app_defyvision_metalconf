@@ -79,6 +79,21 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-09-14 (build V39) - Tadeo + Codex
+
+#### Cambio 309 - Evitar ICU ajeno a Windows en el ejecutable
+
+**Pedido:** generar el EXE con paradas de 25s al iniciar y 15s durante analisis.
+**Hallazgo:** el primer build compilo, pero su smoke test fallo al importar
+QtWidgets. PyInstaller recogio `icuuc.dll` ICU 78.3 con exports versionados,
+mientras Qt 6.11 requiere la API ICU de Windows sin sufijos. Esa DLL ocultaba
+la de System32. Retirarla del paquete permitio `BUILD_SMOKE_OK` con exit code 0.
+**Cambio:** `metalconf.spec` excluye los nombres de las bibliotecas ICU del
+sistema Windows del conjunto empaquetado para que se resuelvan en el OS destino.
+Se regenera el build oficial con esta correccion; Cython sigue obligatorio.
+
+---
+
 ### Sesion 2026-09-14 (plazo inicial de RUN) - Tadeo + Codex
 
 #### Cambio 308 - Atasco inicial a los 25 segundos desde INICIAR
