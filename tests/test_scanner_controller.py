@@ -166,6 +166,7 @@ def test_live_loop_rearms_on_result_then_stops_without_frame_progress(
         reads[0] += 1
         assert reads[0] <= 4, "El loop debe detenerse a los 15 segundos"
         clock[0] = [100.0, 114.0, 128.9, 129.0][reads[0] - 1]
+        session.last_position_diff = controller._cont_pos_thr + 1 if reads[0] <= 2 else 0.0
         seq = min(reads[0], 2) if repeated_capture else reads[0]
         return np.zeros((10, 10, 3), dtype=np.uint8), seq
 
@@ -200,6 +201,46 @@ def test_poller_stops_stalled_inspector_independently(monkeypatch):
         controller._poll_loop()
         assert controller.state == ScannerState.ERROR
         assert ("scanner_1.solenoid", False) in controller._io.writes
+    finally:
+        controller.shutdown()
+
+
+def test_startup_deadline_is_measured_from_run_request(monkeypatch):
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    clock = [100.0]
+    monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: clock[0])
+    controller._mode = OperationMode.AUTO
+    monkeypatch.setattr(controller, "_update_mode_from_plc", lambda: None)
+    monkeypatch.setattr(controller, "_start_all_threads", lambda: None)
+    try:
+        assert controller.start()
+        assert controller._jam_run_start_mono == 100.0
+        clock[0] = 124.999
+        assert not controller._check_machine_jam(0.0)
+        clock[0] = 125.0
+        controller._poll_loop()
+        assert controller.state == ScannerState.ERROR
+        assert "25.0 s" in controller.get_status()["state_reason"]
+    finally:
+        controller.shutdown()
+
+
+def test_start_cannot_energize_after_startup_watchdog_stops(monkeypatch):
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    clock = [100.0]
+    monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: clock[0])
+    controller._mode = OperationMode.AUTO
+    monkeypatch.setattr(controller, "_update_mode_from_plc", lambda: None)
+
+    def delayed_start():
+        clock[0] = 125.0
+        controller._poll_loop()
+
+    monkeypatch.setattr(controller, "_start_all_threads", delayed_start)
+    try:
+        assert not controller.start()
+        assert controller.state == ScannerState.ERROR
+        assert ("scanner_1.solenoid", True) not in controller._io.writes
     finally:
         controller.shutdown()
 

@@ -147,10 +147,10 @@ class ScannerController:
         # scanner conserva sus propios relojes y corta solo su solenoide.
         self._jam_enabled: bool = bool(tols.get("machine_jam_enabled", True))
         self._jam_arm_s: float = max(
-            0.0, float(tols.get("machine_jam_arm_s", 60.0))
+            0.0, float(tols.get("machine_jam_arm_s", 0.0))
         )
         self._jam_timeout_s: float = max(
-            0.0, float(tols.get("machine_jam_timeout_s", 22.0))
+            0.0, float(tols.get("machine_jam_timeout_s", 25.0))
         )
         self._jam_run_start_mono: Optional[float] = None
         self._last_movement_mono: Optional[float] = None
@@ -243,6 +243,7 @@ class ScannerController:
                 logger.warning(f"[{self._id}] start() ignorado, estado={self._state.value}")
                 return False
             mode = self._mode
+            run_requested_mono = time.monotonic()
             # Reclamar el slot de inicio dentro del MISMO lock que chequea IDLE:
             # un start() concurrente (doble click, dos rutas de arranque) ve el
             # estado ya cambiado y aborta arriba, en vez de pasar el guard
@@ -290,8 +291,8 @@ class ScannerController:
             self._last_inspection_mono    = None
             self._run_frame_last_mono = None
             self._stall_warned            = False
-            self._jam_run_start_mono      = None
-            self._last_movement_mono      = None
+            self._jam_run_start_mono      = run_requested_mono if mode == OperationMode.AUTO else None
+            self._last_movement_mono      = self._jam_run_start_mono
             self._last_evidence_frame     = None
             self._last_evidence_frame_mono = 0.0
             self._stop_event.clear()
@@ -306,8 +307,11 @@ class ScannerController:
         # El estado ya quedo en RUNNING desde el lock de arriba; solo falta
         # avisar a los listeners (UI) ahora que camara/hilos estan en marcha.
         self._fire_state_changed()
-        self._io.write(f"{self._id}.solenoid", True)  # bloqueado por IOMap si safe_mode=ON
-        self._set_lights(green=True)
+        with self._lock:
+            if self._state != ScannerState.RUNNING or self._stop_event.is_set():
+                return False
+            self._io.write(f"{self._id}.solenoid", True)  # bloqueado por IOMap si safe_mode=ON
+            self._set_lights(green=True)
         logger.info(f"[{self._id}] iniciado ({mode.value})")
         return True
 
@@ -696,10 +700,10 @@ class ScannerController:
         )
         self._jam_enabled = bool(tols.get("machine_jam_enabled", True))
         self._jam_arm_s = max(
-            0.0, float(tols.get("machine_jam_arm_s", 60.0))
+            0.0, float(tols.get("machine_jam_arm_s", 0.0))
         )
         self._jam_timeout_s = max(
-            0.0, float(tols.get("machine_jam_timeout_s", 22.0))
+            0.0, float(tols.get("machine_jam_timeout_s", 25.0))
         )
 
     # ------------------------------------------------------------------
@@ -822,6 +826,8 @@ class ScannerController:
         while not self._stop_event.is_set():
             # Tambien vigilar desde otro hilo si el analisis queda bloqueado.
             if self._check_run_frame_stall():
+                return
+            if self._check_machine_jam(self._last_position_diff):
                 return
             self._update_mode_from_plc()
 
@@ -1115,8 +1121,11 @@ class ScannerController:
             self._run_frame_last_mono = None
             self._last_inspection_mono = _watchdog_start
             self._stall_warned = False
-            self._jam_run_start_mono = _watchdog_start
-            self._last_movement_mono = _watchdog_start
+            # No reiniciar el plazo inicial tras selftest/precalibracion:
+            # los 25s se cuentan desde INICIAR, no desde el primer frame.
+            if self._jam_run_start_mono is None:
+                self._jam_run_start_mono = _watchdog_start
+                self._last_movement_mono = _watchdog_start
         if self._startup_grace_remaining > 0 or self._startup_grace_seconds > 0.0:
             logger.info(
                 "[%s] startup grace: %d frames y/o %.1fs sin machine_stop ni fault",
@@ -1297,7 +1306,7 @@ class ScannerController:
                 self._last_movement_mono = time.monotonic()
 
     def _check_machine_jam(self, position_diff: float) -> bool:
-        """Corta este scanner tras el armado y 22s continuos sin avance real."""
+        """Corta este scanner tras 25s sin avance real (sin espera de armado)."""
         if not self._jam_enabled or self._jam_timeout_s <= 0.0:
             return False
 

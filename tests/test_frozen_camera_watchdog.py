@@ -142,29 +142,29 @@ def test_inspection_stall_does_not_fire_while_inspecting() -> None:
 
 def _arm_jam(controller: ScannerController, start: float = 100.0) -> None:
     controller._jam_enabled = True
-    controller._jam_arm_s = 60.0
-    controller._jam_timeout_s = 22.0
+    controller._jam_arm_s = 0.0
+    controller._jam_timeout_s = 25.0
     controller._jam_run_start_mono = start
     controller._last_movement_mono = start
     controller._recorder = None
     controller._transition(ScannerState.RUNNING)
 
 
-def test_machine_jam_waits_first_minute_then_full_22_seconds(monkeypatch) -> None:
+def test_machine_jam_stops_at_25_seconds(monkeypatch) -> None:
     clock = {"now": 100.0}
     monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: clock["now"])
     controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
     try:
         _arm_jam(controller)
 
-        clock["now"] = 159.9
+        clock["now"] = 124.9
         assert controller._check_machine_jam(0.0) is False
         assert controller.state == ScannerState.RUNNING
 
-        clock["now"] = 181.9  # 21.9s desde que se armo en t=160
+        clock["now"] = 124.999  # todavia no completa 25s
         assert controller._check_machine_jam(0.0) is False
 
-        clock["now"] = 182.0  # 22.0s completos sin avance
+        clock["now"] = 125.0  # 25s completos sin avance
         assert controller._check_machine_jam(0.0) is True
         assert controller.state == ScannerState.ERROR
         assert controller.get_status()["state_reason"].startswith("Máquina trabada")
@@ -183,10 +183,10 @@ def test_real_movement_restarts_only_that_scanner_jam_timer(monkeypatch) -> None
         _arm_jam(scanner_1)
         _arm_jam(scanner_2)
 
-        clock["now"] = 170.0
+        clock["now"] = 115.0
         scanner_2._note_material_movement(scanner_2._cont_pos_thr + 1.0, forced=False)
 
-        clock["now"] = 182.0
+        clock["now"] = 125.0
         assert scanner_1._check_machine_jam(0.0) is True
         assert scanner_1.state == ScannerState.ERROR
         assert scanner_2._check_machine_jam(0.0) is False
@@ -194,7 +194,7 @@ def test_real_movement_restarts_only_that_scanner_jam_timer(monkeypatch) -> None
         assert ("scanner_1.solenoid", False) in scanner_1._io.writes
         assert ("scanner_2.solenoid", False) not in scanner_2._io.writes
 
-        clock["now"] = 192.0
+        clock["now"] = 140.0
         assert scanner_2._check_machine_jam(0.0) is True
         assert ("scanner_2.solenoid", False) in scanner_2._io.writes
     finally:
@@ -208,9 +208,9 @@ def test_forced_inspection_does_not_fake_material_advance(monkeypatch) -> None:
     controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
     try:
         _arm_jam(controller)
-        clock["now"] = 175.0
+        clock["now"] = 120.0
         controller._note_material_movement(999.0, forced=True)
-        clock["now"] = 182.0
+        clock["now"] = 125.0
         assert controller._check_machine_jam(0.0) is True
     finally:
         controller.shutdown()

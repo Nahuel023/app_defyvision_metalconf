@@ -79,6 +79,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-09-14 (plazo inicial de RUN) - Tadeo + Codex
+
+#### Cambio 308 - Atasco inicial a los 25 segundos desde INICIAR
+
+**Pedido:** reducir a 25 segundos la parada inicial al pulsar INICIAR/RUN.
+
+**Cambios:** `config/io_map.yaml`, `config/tolerancias.yaml`, defaults y fallback
+del controlador pasan de armado 60s + espera 22s a armado 0s + espera 25s para
+ambos scanners y patrones. `start()` ancla el reloj al aceptar RUN AUTO; el
+selftest y la precalibracion no lo reinician. El poller comprueba tambien este
+watchdog durante el inicio del inspector. Si ya se detuvo mientras arrancaban
+los hilos, `start()` no vuelve a energizar el solenoide ni a encender verde.
+La proteccion durante inspeccion del Cambio 307 sigue siendo de 15s.
+El modo MANUAL sin inspeccion no arma el watchdog de avance.
+
+**Validacion:** suite completa `122 passed`; tests de configuracion y script de verificacion actualizados a
+0+25s, limites 24.999/25s, independencia entre scanners, movimiento forzado y
+proteccion contra reactivacion durante arranque. Se ajusto el fixture de frames
+para representar movimiento real en sus dos analisis iniciales: antes simulaba
+resultados sin movimiento y el nuevo watchdog de 25s lo detenia correctamente.
+Arranque y apagado de `cmd_run` con Qt offscreen e I/O/camaras simulados:
+`RUN_UI_SMOKE_OK`. Sin nuevas constantes externas en imports. No se genero EXE;
+el corte fisico y sus tiempos de comunicacion PLC requieren validacion en planta.
+
+---
+
 ### Sesion 2026-09-14 (atasco durante RUN) - Tadeo + Codex
 
 #### Cambio 307 - Detencion a los 15 segundos sin nuevos frames analizados

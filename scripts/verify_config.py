@@ -27,8 +27,8 @@ for (scanner_id, model), (nok_frames, machine_frames, align_frames) in expected_
     assert int(cfg["pattern_align_stop_frames"]) == align_frames
     assert int(cfg["stop_min_frames"]) == 3
     assert cfg["machine_jam_enabled"] is True
-    assert float(cfg["machine_jam_arm_s"]) == 60.0
-    assert float(cfg["machine_jam_timeout_s"]) == 22.0
+    assert float(cfg["machine_jam_arm_s"]) == 0.0
+    assert float(cfg["machine_jam_timeout_s"]) == 25.0
     print(
         f"{scanner_id}/{model}  parada NOK = "
         f"{cfg['consecutive_nok_frames']} / machine {cfg['machine_stop_missing_frames']} "

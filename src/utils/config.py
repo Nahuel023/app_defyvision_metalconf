@@ -94,11 +94,11 @@ DEFAULT_TOLERANCES: dict[str, Any] = {
     # machine_jam_*; se conserva esta ruta como compatibilidad y queda apagada.
     "inspection_stall_warn_s": 0.0,
     "inspection_stall_timeout_s": 0.0,
-    # Atasco mecanico independiente por scanner. El primer minuto nunca decide;
-    # despues exige 22 segundos completos sin movimiento visual real.
+    # Atasco mecanico independiente por scanner, sin demora de armado.
+    # Corta tras 25 segundos sin movimiento visual real desde INICIAR.
     "machine_jam_enabled": True,
-    "machine_jam_arm_s": 60.0,
-    "machine_jam_timeout_s": 22.0,
+    "machine_jam_arm_s": 0.0,
+    "machine_jam_timeout_s": 25.0,
     # ──────────────────────────────────────────────────────────────────
     "pattern_desalign_enabled": False,
     "pattern_desalign_missing_ratio": 0.5,

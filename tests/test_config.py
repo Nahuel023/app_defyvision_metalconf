@@ -149,13 +149,13 @@ def test_scanner1_microperforado_uses_per_frame_hole_anchored_roi() -> None:
     assert cfg["roi_slow_ema_enabled"] is False
 
 
-def test_all_scanners_and_materials_use_independent_60s_22s_jam_watchdog() -> None:
+def test_all_scanners_and_materials_use_independent_25s_jam_watchdog() -> None:
     for scanner_id in ("scanner_1", "scanner_2"):
         for model in ("modelo_A", "modelo_B"):
             cfg = load_tolerances(model=model, scanner_id=scanner_id)
             assert cfg["machine_jam_enabled"] is True
-            assert cfg["machine_jam_arm_s"] == 60.0
-            assert cfg["machine_jam_timeout_s"] == 22.0
+            assert cfg["machine_jam_arm_s"] == 0.0
+            assert cfg["machine_jam_timeout_s"] == 25.0
             assert cfg["inspection_stall_warn_s"] == 0.0
             assert cfg["inspection_stall_timeout_s"] == 0.0
 
