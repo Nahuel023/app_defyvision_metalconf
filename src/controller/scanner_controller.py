@@ -140,6 +140,7 @@ class ScannerController:
             tols.get("inspection_stall_timeout_s", 120.0)
         )
         self._last_inspection_mono: Optional[float] = None
+        self._run_frame_last_mono: Optional[float] = None
         self._stall_warned: bool = False
 
         # Watchdog de MAQUINA TRABADA. Es estrictamente por instancia: cada
@@ -287,6 +288,7 @@ class ScannerController:
             self._camera_missing_total_s  = 0.0
             self._camera_missing_events   = 0
             self._last_inspection_mono    = None
+            self._run_frame_last_mono = None
             self._stall_warned            = False
             self._jam_run_start_mono      = None
             self._last_movement_mono      = None
@@ -403,6 +405,7 @@ class ScannerController:
             self._camera_missing_total_s    = 0.0
             self._camera_missing_events     = 0
             self._last_inspection_mono      = None
+            self._run_frame_last_mono = None
             self._stall_warned              = False
             self._jam_run_start_mono        = None
             self._last_movement_mono        = None
@@ -459,6 +462,7 @@ class ScannerController:
             self._camera_missing_total_s  = 0.0
             self._camera_missing_events   = 0
             self._last_inspection_mono    = None
+            self._run_frame_last_mono = None
             self._stall_warned            = False
             self._jam_run_start_mono      = None
             self._last_movement_mono      = None
@@ -816,6 +820,9 @@ class ScannerController:
         _tick = 0
         _prev_blink: Optional[bool] = None
         while not self._stop_event.is_set():
+            # Tambien vigilar desde otro hilo si el analisis queda bloqueado.
+            if self._check_run_frame_stall():
+                return
             self._update_mode_from_plc()
 
             with self._lock:
@@ -1105,6 +1112,7 @@ class ScannerController:
         # start()) para no contar el selftest ni la pre-calibracion como parada.
         with self._lock:
             _watchdog_start = time.monotonic()
+            self._run_frame_last_mono = None
             self._last_inspection_mono = _watchdog_start
             self._stall_warned = False
             self._jam_run_start_mono = _watchdog_start
@@ -1138,6 +1146,9 @@ class ScannerController:
                     "(modelo=%s revision=%d)",
                     self._id, model, session_cache_revision,
                 )
+
+            if self._check_run_frame_stall():
+                return
 
             get_fresh = getattr(self._camera, "get_fresh_frame", None)
             if callable(get_fresh):
@@ -1234,12 +1245,48 @@ class ScannerController:
                 continue
 
             with self._lock:
+                if self._state != ScannerState.RUNNING or self._stop_event.is_set():
+                    return
                 self._last_inspection_mono = time.monotonic()
+                self._run_frame_last_mono = self._last_inspection_mono
                 self._stall_warned = False
 
             self._note_material_movement(session.last_position_diff, forced=forced)
             self._handle_result(res, model, session=session)
             self._stop_event.wait(timeout=0.005)
+
+    def _check_run_frame_stall(self) -> bool:
+        """Tras el primer analisis, 15s sin otro resultado detienen este scanner.
+
+        Independiente del modelo y de los watchdogs configurables de arranque.
+        Las capturas repetidas o rechazadas por el gate no rearman el reloj.
+        """
+        with self._lock:
+            if (self._state != ScannerState.RUNNING
+                    or self._run_frame_last_mono is None):
+                return False
+            stalled_s = time.monotonic() - self._run_frame_last_mono
+            if stalled_s < 15.0:
+                return False
+            reason = (
+                "Máquina trabada: 15 segundos sin avanzar el contador de frames "
+                f"durante RUN ({stalled_s:.1f} s sin un nuevo análisis). "
+                "DETENCIÓN DE SEGURIDAD"
+            )
+            self._state = ScannerState.ERROR
+            self._state_reason = reason
+
+        logger.error("[%s] %s", self._id, reason)
+        self._cut_solenoid_critical("maquina trabada durante RUN: 15s sin frames")
+        self._set_lights(red=True)
+        self._stop_event.set()
+        self._fire_state_changed()
+        self._record_terminal_event(
+            "machine_jam", reason, visual_cause=False,
+            metadata={"stall_seconds": stalled_s, "timeout_seconds": 15.0,
+                      "watchdog": "run_frame_stall"},
+        )
+        return True
 
     def _note_material_movement(self, position_diff: float, *, forced: bool) -> None:
         """Registra avance visual real; una inspeccion forzada no rearma el reloj."""

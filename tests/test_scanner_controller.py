@@ -102,6 +102,108 @@ class _EvidenceRecorder:
         return None
 
 
+@pytest.mark.parametrize("scanner_id", ["scanner_1", "scanner_2"])
+@pytest.mark.parametrize("model", ["modelo_A", "modelo_B"])
+def test_run_frames_stop_at_15_seconds_for_every_profile(
+    monkeypatch, scanner_id, model
+):
+    from src.ui.operator import _is_machine_jam_reason
+
+    io = _FakeIO(scanner_id, model)
+    controller = ScannerController(scanner_id, io, _FakeCamera())
+    recorder = _EvidenceRecorder()
+    controller._recorder = recorder
+    try:
+        controller._state = ScannerState.RUNNING
+        monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: 100.0)
+        # El arranque sin primer analisis conserva su proteccion anterior.
+        assert not controller._check_run_frame_stall()
+        controller._run_frame_last_mono = 85.001
+        assert not controller._check_run_frame_stall()
+        controller._run_frame_last_mono = 85.0
+        assert controller._check_run_frame_stall()
+        assert controller.state == ScannerState.ERROR
+        assert (f"{scanner_id}.solenoid", False) in io.writes
+        assert (f"{scanner_id}.light_red", True) in io.batches[-1]
+        assert controller._stop_event.is_set()
+        reason = controller.get_status()["state_reason"]
+        assert "15 segundos" in reason
+        assert _is_machine_jam_reason(reason)
+        assert recorder.events[0][0] == "machine_jam"
+        assert recorder.events[0][2]["metadata"]["timeout_seconds"] == 15.0
+        assert not controller._check_run_frame_stall()
+        assert len(recorder.events) == 1
+    finally:
+        controller.shutdown()
+
+
+@pytest.mark.parametrize("state", [ScannerState.IDLE, ScannerState.STOPPED,
+                                  ScannerState.FAULT, ScannerState.ERROR])
+def test_run_frames_watchdog_ignores_non_running_states(monkeypatch, state):
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    try:
+        controller._state = state
+        controller._run_frame_last_mono = 1.0
+        monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: 100.0)
+        assert not controller._check_run_frame_stall()
+        assert controller.state == state
+    finally:
+        controller.shutdown()
+
+
+@pytest.mark.parametrize("repeated_capture", [False, True])
+def test_live_loop_rearms_on_result_then_stops_without_frame_progress(
+    monkeypatch, repeated_capture
+):
+    from types import SimpleNamespace
+
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    clock = [100.0]
+    reads = [0]
+    results = []
+
+    def capture():
+        reads[0] += 1
+        assert reads[0] <= 4, "El loop debe detenerse a los 15 segundos"
+        clock[0] = [100.0, 114.0, 128.9, 129.0][reads[0] - 1]
+        seq = min(reads[0], 2) if repeated_capture else reads[0]
+        return np.zeros((10, 10, 3), dtype=np.uint8), seq
+
+    session = SimpleNamespace(
+        _model="modelo_A", last_position_diff=0.0,
+        inspect_frame=lambda *a, **kw: object() if reads[0] <= 2 else None,
+    )
+    monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(scanner_controller_module, "InspectionSession", lambda *a, **kw: session)
+    monkeypatch.setattr(controller, "_run_startup_selftest", lambda model: True)
+    monkeypatch.setattr(controller, "_run_roi_precalibration", lambda *a: None)
+    monkeypatch.setattr(controller, "_handle_result", lambda res, *a, **kw: results.append(res))
+    controller._camera.get_fresh_frame = capture
+    try:
+        controller._state = ScannerState.RUNNING
+        controller._continuous_loop_impl()
+        assert len(results) == 2
+        assert reads[0] == 4
+        assert controller._run_frame_last_mono == 114.0
+        assert controller.state == ScannerState.ERROR
+        assert "15 segundos" in controller.get_status()["state_reason"]
+    finally:
+        controller.shutdown()
+
+
+def test_poller_stops_stalled_inspector_independently(monkeypatch):
+    controller = ScannerController("scanner_1", _FakeIO(), _FakeCamera())
+    try:
+        controller._state = ScannerState.RUNNING
+        controller._run_frame_last_mono = 100.0
+        monkeypatch.setattr(scanner_controller_module.time, "monotonic", lambda: 115.0)
+        controller._poll_loop()
+        assert controller.state == ScannerState.ERROR
+        assert ("scanner_1.solenoid", False) in controller._io.writes
+    finally:
+        controller.shutdown()
+
+
 def test_reload_cache_requests_live_session_refresh(monkeypatch) -> None:
     io = _FakeIO()
     camera = _FakeCamera()

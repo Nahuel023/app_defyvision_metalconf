@@ -79,6 +79,47 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-09-14 (atasco durante RUN) - Tadeo + Codex
+
+#### Cambio 307 - Detencion a los 15 segundos sin nuevos frames analizados
+
+**Pedido:** detener la maquina si durante RUN el contador de frames deja de
+avanzar durante 15 segundos, para todos los scanners y patrones, con aviso visible.
+
+**Hallazgo:** el watchdog generico de inspeccion esta deshabilitado en los
+perfiles de produccion; el watchdog mecanico existente exige armado de 60s y
+22s sin movimiento. No cubria el nuevo plazo durante inspeccion ya iniciada.
+
+**Cambios:** `src/controller/scanner_controller.py` agrega un reloj monotonic
+por scanner, armado tras el primer resultado y renovado con cada nuevo analisis.
+Capturas repetidas y frames rechazados por movimiento no lo renuevan. A los
+15s pasa a ERROR, ordena corte critico del solenoide con la ruta existente,
+enciende rojo, termina los loops y registra un evento `machine_jam` con el
+ultimo frame como contexto (no como defecto visual). El motivo comienza con
+`Maquina trabada` (con tilde en la UI), por lo que abre el aviso modal existente
+e informa explicitamente los 15 segundos sin avance del contador y DETENCION
+DE SEGURIDAD. Se comprueba desde el inspector y el poller para cubrir un
+analisis bloqueado. Un resultado que vuelve despues de detener no se aplica.
+INICIAR/RESET limpian el reloj; la espera inicial conserva su watchdog anterior.
+El umbral es fijo, independiente de modelo, patron y tolerancias antiguas.
+Como el machine jam previo, se detiene la estacion afectada.
+
+**Validacion:** suite completa `120 passed`, incluidos limites 14.999/15s para
+ambos scanners/modelos, estados inactivos, capturas repetidas, gate sin avance,
+renovacion del reloj, parada desde el poller, evidencia y reconocimiento de UI.
+`scripts/verify_config.py` correcto. Arranque/apagado real de `cmd_run` y ventana
+Qt offscreen correcto (`RUN_UI_SMOKE_OK`) con I/O y camaras simulados. Los
+primeros intentos de smoke quedaron esperando el dialogo de confirmacion al
+cerrar; se repitio aceptando el cierre en el harness, sin cambiar la UI.
+No se agregaron constantes externas en imports ni se modificaron patrones.
+
+**Limites de entrega:** no se genero EXE/ZIP; falta validacion fisica en planta
+del corte PLC. Los watchdogs de perdida de camara pueden detener antes de 15s.
+La respuesta depende de la ejecucion de los hilos y de la comunicacion PLC,
+como las protecciones de software existentes.
+
+---
+
 ### Sesion 2026-08-31 (entrega Cython V38) - Tadeo + Codex
 
 #### Cambio 306 - EXE de produccion con configuracion real y evidencia terminal
