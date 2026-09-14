@@ -92,6 +92,16 @@ la de System32. Retirarla del paquete permitio `BUILD_SMOKE_OK` con exit code 0.
 sistema Windows del conjunto empaquetado para que se resuelvan en el OS destino.
 Se regenera el build oficial con esta correccion; Cython sigue obligatorio.
 
+**Entrega V39:** `dist/DEFYVISION_METALCONF_V39_CYTHON_2026-09-14.zip`,
+fuente `0e13ed11e931b57a19fdf7e5e2094a2b466b0fc5`, 160565368 bytes, 615 entradas.
+SHA-256: `61BB63AA08285530EFA633F271E3C254B64E099D743C66E6459BF2423841A22B`.
+Build oficial correcto, EXE con `BUILD_SMOKE_OK` y salida 0 sin conectar
+hardware; Cython y `_lsap` presentes, sin `license.py` ni ICU incompatible.
+Configuracion y patrones del paquete identicos byte por byte a las fuentes;
+0+25s en ambos scanners verificado y constante 15s comprobada en el bytecode
+del watchdog dentro del PYZ del EXE. CRC completo del ZIP sin errores.
+La suite fuente previa paso `122` tests. Pendiente validacion fisica en planta.
+
 ---
 
 ### Sesion 2026-09-14 (plazo inicial de RUN) - Tadeo + Codex
