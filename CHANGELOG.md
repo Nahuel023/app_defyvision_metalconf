@@ -79,6 +79,32 @@ PLC (Modbus TCP) ←→ InspectionSystem
 
 ---
 
+### Sesion 2026-11-04 (estado en Google Sheets) - Tadeo + Claude
+
+#### Cambio 310 - Heartbeat de estado de la maquina a Google Sheets
+
+**Pedido:** poner una casilla de un Drive en verde/amarillo/rojo segun la
+maquina este en uso, en reposo o apagada.
+**Decision:** HTTP POST a un Web App de Apps Script en vez de MQTT (sin broker
+ni puente, sin dependencias nuevas en el build). "Apagada" no la puede mandar
+una PC sin luz: el script la deduce por falta de heartbeat (`STALE_MIN=3`).
+**Cambios:** nuevo `src/metrics/status_reporter.py` (solo stdlib/urllib): hilo
+que envia `EN_USO` si algun scanner esta RUNNING, si no `REPOSO` (incluye
+IDLE/STOPPED/FAULT/ERROR); envia al cambiar y cada `interval_s`. En cierre
+ordenado envia `APAGADA`. `InspectionSystem` lo arranca desde
+`config/app.yaml: status_report` (deshabilitado por defecto) y lo detiene al
+FINAL de `shutdown()`, despues del corte de solenoide y salidas. Cualquier
+error de config o red solo se loguea; nunca bloquea arranque ni apagado.
+Apps Script e instalacion en `scripts/apps_script/`. Agregado a
+`hiddenimports` de `metalconf.spec`.
+**Validacion:** `tests/test_status_reporter.py` (4 tests, servidor HTTP local);
+suite completa `126 passed`. Smoke con `InspectionSystem(disable_plc_outputs=True)`
+real: sin config no crea reporter; habilitado envia `REPOSO` y `APAGADA` al
+apagar. No se genero EXE ni se probo contra Google real; pendiente publicar
+el Apps Script y verificar salida a internet de la PC de planta.
+
+---
+
 ### Sesion 2026-09-14 (build V39) - Tadeo + Codex
 
 #### Cambio 309 - Evitar ICU ajeno a Windows en el ejecutable

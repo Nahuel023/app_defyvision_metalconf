@@ -8,3 +8,13 @@ service:
 
 camera:
   retry_interval_s: 3.0 # segundos de espera entre cada intento de reconexión
+
+# Estado de la maquina en Google Sheets (verde=EN_USO, amarillo=REPOSO, rojo=APAGADA).
+# Instalacion del Apps Script: scripts/apps_script/LEEME.md
+status_report:
+  enabled: false
+  url: ""             # URL del Web App terminada en /exec
+  token: ""           # debe coincidir con TOKEN del Apps Script (vacio = sin token)
+  machine: "Metalconf" # nombre de la fila en la planilla
+  interval_s: 30      # reenvio periodico (heartbeat) aunque el estado no cambie
+  timeout_s: 5

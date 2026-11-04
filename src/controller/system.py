@@ -16,6 +16,7 @@ from src.plc.client import PLCClient
 from src.plc.io_map import IOMap
 from src.controller.scanner_controller import ScannerController
 from src.metrics.recorder import MetricsRecorder
+from src.metrics.status_reporter import StatusReporter
 from src.utils.camera_config import load_camera_settings
 from src.vision.camera import Camera
 
@@ -70,6 +71,17 @@ class InspectionSystem:
 
         self._recorder = MetricsRecorder()
         self._recorder.start(self)
+
+        # Heartbeat a Google Sheets (config/app.yaml: status_report). Opcional:
+        # None si esta deshabilitado; nunca puede impedir el arranque.
+        self._status_reporter: StatusReporter | None = None
+        try:
+            self._status_reporter = StatusReporter.from_app_config(_APP_CONFIG_PATH)
+            if self._status_reporter is not None:
+                self._status_reporter.start(self)
+        except Exception as exc:
+            logger.error("No se pudo iniciar StatusReporter: %s", exc)
+            self._status_reporter = None
 
     # ------------------------------------------------------------------
     # Ciclo de vida
@@ -130,6 +142,14 @@ class InspectionSystem:
             self._client.disconnect()
         except Exception as exc:
             logger.error("Error desconectando PLC: %s", exc)
+        # Al final, despues de dejar el solenoide y las salidas en OFF: el aviso
+        # APAGADA es best effort y no puede demorar el corte de seguridad.
+        reporter = getattr(self, "_status_reporter", None)
+        if reporter is not None:
+            try:
+                reporter.stop(send_off=True)
+            except Exception as exc:
+                logger.error("Error deteniendo StatusReporter: %s", exc)
         logger.info("Sistema detenido")
 
     # ------------------------------------------------------------------

@@ -51,6 +51,7 @@ a = Analysis(
         'src.io.save_results',
         'src.io.load_images',
         'src.metrics.recorder',
+        'src.metrics.status_reporter',
         'scipy',
         'scipy.optimize',
         'scipy.optimize._lsap',
