@@ -103,6 +103,20 @@ real: sin config no crea reporter; habilitado envia `REPOSO` y `APAGADA` al
 apagar. No se genero EXE ni se probo contra Google real; pendiente publicar
 el Apps Script y verificar salida a internet de la PC de planta.
 
+#### Cambio 311 - Apps Script apunta a la planilla de postventa (EQ-014)
+
+**Pedido:** pintar la casilla "Semáforo" del equipo Metalconf / Visión
+Artificial Prensa en la hoja `Equipos` de `Cartera_PostVenta_Defymotion`.
+**Cambios:** `scripts/apps_script/estado_maquina.gs` abre la planilla por ID,
+ubica la fila por la columna `ID` (= `EQ-014`, mapeado desde
+`status_report.machine: Metalconf`) y la columna por el encabezado `Semáforo`
+(fila 4), para tolerar reordenamientos. Escribe `EN USO`/`REPOSO`/`APAGADA` con
+color y deja hora y detalle por scanner en la nota de la celda; el ultimo
+heartbeat se guarda en ScriptProperties y `checkStale` marca APAGADA a los 3
+min. La celda reemplaza la formula de postventa solo en esa fila. LEEME
+actualizado. La app Python no cambia. Pendiente: pegar y publicar el script en
+la planilla y probar con la PC de planta.
+
 ---
 
 ### Sesion 2026-09-14 (build V39) - Tadeo + Codex
